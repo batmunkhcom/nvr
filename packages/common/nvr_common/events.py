@@ -1,9 +1,9 @@
 """Camera discovery event schema constants."""
 
-from enum import Enum
+from enum import StrEnum
 
 
-class DiscoveryPhase(str, Enum):
+class DiscoveryPhase(StrEnum):
     ONVIF = "onvif"
     ARP = "arp"
     RTSP = "rtsp"
@@ -14,7 +14,7 @@ class DiscoveryPhase(str, Enum):
     COMPLETE = "complete"
 
 
-class DiscoveryEventType(str, Enum):
+class DiscoveryEventType(StrEnum):
     PHASE_START = "discovery.phase.start"
     PHASE_COMPLETE = "discovery.phase.complete"
     DEVICE_FOUND = "discovery.device.found"

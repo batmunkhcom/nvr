@@ -5,18 +5,17 @@ Shared dataclasses for the NVR system.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from uuid import UUID, uuid4
 
 
-class RecordingMode(str, Enum):
+class RecordingMode(StrEnum):
     CONTINUOUS = "continuous"
     MOTION = "motion"
     SCHEDULED = "scheduled"
 
 
-class EventType(str, Enum):
+class EventType(StrEnum):
     MOTION_DETECTED = "motion_detected"
     OBJECT_DETECTED = "object_detected"
     FACE_DETECTED = "face_detected"
@@ -30,7 +29,7 @@ class EventType(str, Enum):
     SYSTEM_ERROR = "system_error"
 
 
-class EventSeverity(str, Enum):
+class EventSeverity(StrEnum):
     INFO = "info"
     WARNING = "warning"
     CRITICAL = "critical"
