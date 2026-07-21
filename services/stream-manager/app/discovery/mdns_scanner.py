@@ -9,16 +9,18 @@ from __future__ import annotations
 
 from .engine import DiscoveryResult
 
+_SERVICE_TYPES = [
+    "_onvif._tcp.local.",
+    "_axis-video._tcp.local.",
+    "_rtsp._tcp.local.",
+    "_http._tcp.local.",
+]
+
 
 class MDNSScanner:
     """Discover cameras using mDNS/Bonjour/Avahi service queries."""
 
-    SERVICE_TYPES = [
-        "_onvif._tcp.local.",
-        "_axis-video._tcp.local.",
-        "_rtsp._tcp.local.",
-        "_http._tcp.local.",
-    ]
+    SERVICE_TYPES = _SERVICE_TYPES
 
     def __init__(self, timeout: int = 10):
         self.timeout = timeout

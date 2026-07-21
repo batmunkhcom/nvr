@@ -65,23 +65,19 @@ def _merge_group(
 
     best = max(group, key=lambda r: r.confidence)
 
-    device.mac_address = (
-        best.mac_address
-        or next((r.mac_address for r in group if r.mac_address), None)
+    device.mac_address = best.mac_address or next(
+        (r.mac_address for r in group if r.mac_address), None
     )
     device.vendor = best.vendor
-    device.manufacturer = (
-        best.manufacturer
-        or next((r.manufacturer for r in group if r.manufacturer), None)
+    device.manufacturer = best.manufacturer or next(
+        (r.manufacturer for r in group if r.manufacturer), None
     )
     device.model = best.model or next((r.model for r in group if r.model), None)
-    device.firmware_version = (
-        best.firmware_version
-        or next((r.firmware_version for r in group if r.firmware_version), None)
+    device.firmware_version = best.firmware_version or next(
+        (r.firmware_version for r in group if r.firmware_version), None
     )
-    device.serial_number = (
-        best.serial_number
-        or next((r.serial_number for r in group if r.serial_number), None)
+    device.serial_number = best.serial_number or next(
+        (r.serial_number for r in group if r.serial_number), None
     )
 
     # Merge streams
@@ -96,12 +92,8 @@ def _merge_group(
     )
 
     # Merge URLs
-    device.http_url = best.http_url or next(
-        (r.http_url for r in group if r.http_url), None
-    )
-    device.https_url = best.https_url or next(
-        (r.https_url for r in group if r.https_url), None
-    )
+    device.http_url = best.http_url or next((r.http_url for r in group if r.http_url), None)
+    device.https_url = best.https_url or next((r.https_url for r in group if r.https_url), None)
 
     # Merge ONVIF endpoints
     device.onvif_device_service_url = best.onvif_device_service_url or next(

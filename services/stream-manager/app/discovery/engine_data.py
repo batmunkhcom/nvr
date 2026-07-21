@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from ipaddress import IPv4Address
 from typing import Any
 from uuid import uuid4
 
 
-class DiscoveryMethod(str, Enum):
+class DiscoveryMethod(StrEnum):
     """Discovery method identifiers."""
 
     ONVIF = "onvif"
@@ -22,7 +22,7 @@ class DiscoveryMethod(str, Enum):
     MANUAL = "manual"
 
 
-class DeviceVendor(str, Enum):
+class DeviceVendor(StrEnum):
     """Known camera vendors."""
 
     HIKVISION = "hikvision"
@@ -184,7 +184,7 @@ class MergedDevice:
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
-            "primary_ip": str(list(self.ip_addresses)[0]) if self.ip_addresses else None,
+            "primary_ip": str(next(iter(self.ip_addresses))) if self.ip_addresses else None,
             "ip_addresses": [str(ip) for ip in self.ip_addresses],
             "mac_address": self.mac_address,
             "vendor": self.vendor.value,

@@ -60,7 +60,9 @@ class VendorFingerprinter:
 
             # HTTP server header patterns → vendor
             for header in patterns.get("http_server_headers", []):
-                self._header_to_vendor.append((re.compile(re.escape(header), re.IGNORECASE), vendor))
+                self._header_to_vendor.append(
+                    (re.compile(re.escape(header), re.IGNORECASE), vendor)
+                )
 
             # RTSP path patterns → vendor
             for rtsp_path in patterns.get("rtsp_paths", []):
@@ -73,9 +75,7 @@ class VendorFingerprinter:
 
             # HTTP title patterns → vendor
             for title in patterns.get("http_title_patterns", []):
-                self._title_to_vendor.append(
-                    (re.compile(re.escape(title), re.IGNORECASE), vendor)
-                )
+                self._title_to_vendor.append((re.compile(re.escape(title), re.IGNORECASE), vendor))
 
     def identify_from_mac(self, mac_address: str) -> DeviceVendor | None:
         """Identify vendor from MAC address OUI prefix.
@@ -229,7 +229,7 @@ class VendorFingerprinter:
 
         Different vendors use different ONVIF service paths.
         """
-        vendor_data = self._patterns.get(vendor.value, {})
+        self._patterns.get(vendor.value, {})
 
         # Common ONVIF paths
         vendor_paths = {

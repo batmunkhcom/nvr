@@ -79,9 +79,7 @@ class DiscoveryEngine:
         )
 
         # Phase 2: ARP table scan (no network traffic, instant)
-        await self._discovery_phase(
-            "arp_table", 2, all_results, self.arp_scanner.scan()
-        )
+        await self._discovery_phase("arp_table", 2, all_results, self.arp_scanner.scan())
 
         # Phase 3: RTSP port scanning on known subnets
         await self._discovery_phase_rtsp(3, all_results)
@@ -95,14 +93,10 @@ class DiscoveryEngine:
         )
 
         # Phase 5: Vendor-specific broadcast
-        await self._discovery_phase(
-            "vendor_broadcast", 5, all_results, self.vendor_scanner.scan()
-        )
+        await self._discovery_phase("vendor_broadcast", 5, all_results, self.vendor_scanner.scan())
 
         # Phase 6: mDNS/Avahi
-        await self._discovery_phase(
-            "mdns", 6, all_results, self.mdns_scanner.scan()
-        )
+        await self._discovery_phase("mdns", 6, all_results, self.mdns_scanner.scan())
 
         # Phase 7: Fingerprint all raw results
         for result in all_results:
@@ -143,13 +137,9 @@ class DiscoveryEngine:
                 found=len(phase_results),
             )
         except Exception as e:
-            logger.error(
-                f"{method}_failed", error=str(e), exc_info=True
-            )
+            logger.error(f"{method}_failed", error=str(e), exc_info=True)
 
-    async def _discovery_phase_rtsp(
-        self, phase: int, results: list[DiscoveryResult]
-    ):
+    async def _discovery_phase_rtsp(self, phase: int, results: list[DiscoveryResult]):
         """RTSP port scanning phase — scans all hosts in configured subnets."""
         logger.info("discovery_phase", phase=phase, method="rtsp_scan")
         try:
@@ -185,9 +175,7 @@ class DiscoveryEngine:
                         results.append(http_result)
         return results
 
-    async def _run_concurrent(
-        self, tasks: list, tag: str = ""
-    ) -> list[DiscoveryResult]:
+    async def _run_concurrent(self, tasks: list, tag: str = "") -> list[DiscoveryResult]:
         semaphore = asyncio.Semaphore(self.max_concurrent_scans)
         results: list[DiscoveryResult] = []
 
@@ -230,18 +218,14 @@ class DiscoveryEngine:
                 self._apply_vendor_defaults(result, vendor)
 
         if result.manufacturer:
-            vendor = self.fingerprinter.identify_from_onvif_manufacturer(
-                result.manufacturer
-            )
+            vendor = self.fingerprinter.identify_from_onvif_manufacturer(result.manufacturer)
             if vendor:
                 result.vendor = vendor
                 self._apply_vendor_defaults(result, vendor)
 
         result.confidence = self._calculate_confidence(result)
 
-    def _apply_vendor_defaults(
-        self, result: DiscoveryResult, vendor: DeviceVendor
-    ) -> None:
+    def _apply_vendor_defaults(self, result: DiscoveryResult, vendor: DeviceVendor) -> None:
         defaults = self.fingerprinter.get_vendor_defaults(vendor)
         if not defaults:
             return
