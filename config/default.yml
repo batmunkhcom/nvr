@@ -1,0 +1,98 @@
+# NVR System — Default Configuration
+# ЗӨВХӨН АНХНЫ DB SEED-д ашиглана. Энэ файл runtime үед УНШИГДАХГҮЙ.
+# Бүх тохиргоо API-аар дамжин PostgreSQL-д хадгалагдана.
+# DO NOT hardcode values from this file in application code.
+
+system:
+  name: "NVR System"
+  version: "0.1.0"
+  timezone: "Asia/Ulaanbaatar"
+  log_level: "info"
+  log_format: "json"
+
+network:
+  discovery_subnets:
+    - "192.168.1.0/24"
+    - "192.168.2.0/24"
+  onvif_discovery_enabled: true
+  onvif_multicast_address: "239.255.255.250"
+  onvif_discovery_timeout_seconds: 30
+  rtsp_scan_enabled: true
+  rtsp_ports: [554, 8554, 10554]
+  http_scan_enabled: true
+  http_ports: [80, 443, 8080, 8443]
+  arp_scan_enabled: true
+  mdns_scan_enabled: true
+  scan_interval_minutes: 60
+
+recording:
+  default_mode: continuous           # continuous | motion | scheduled
+  default_pre_record_seconds: 5
+  default_post_record_seconds: 10
+  max_segment_duration_seconds: 900   # 15 minutes per segment
+  segment_format: mp4                 # mp4 | mkv | ts
+  default_video_codec: copy           # copy | h264 | h265
+  default_audio_codec: aac
+
+storage:
+  default_retention_days: 30
+  cleanup_interval_hours: 6
+  min_free_space_percent: 10
+  backends:
+    - name: local_primary
+      type: local
+      config:
+        path: /data/recordings
+      priority: 1
+      retention_days: 14
+
+tiers:
+  - name: hot
+    priority_level: 1
+    retention_days: 7
+  - name: warm
+    priority_level: 2
+    retention_days: 30
+  - name: cold
+    priority_level: 3
+    retention_days: 365
+
+ai:
+  object_detection:
+    enabled: false
+    model: yolov8n
+    confidence_threshold: 0.5
+    classes: [person, car, truck, bicycle, motorcycle, dog, cat]
+    processing_fps: 5
+  face_recognition:
+    enabled: false
+    min_face_size_pixels: 80
+  motion_detection:
+    enabled: true
+    algorithm: mog2                 # mog2 | knn | frame_diff
+    sensitivity: medium             # low | medium | high
+    min_area_pixels: 500
+    learning_rate: 0.01
+  audio_detection:
+    enabled: false
+
+notification:
+  email:
+    enabled: false
+    smtp_host: ""
+    smtp_port: 587
+  webhook:
+    enabled: false
+
+security:
+  jwt_expiry_minutes: 1440          # 24 hours
+  jwt_refresh_expiry_days: 7
+  bcrypt_rounds: 12
+  api_key_prefix: "nvr_"
+  cors_origins: ["*"]
+
+ui:
+  theme: dark
+  default_grid_layout: "2x2"
+  stream_quality: auto
+  timeline_zoom_default: 1h

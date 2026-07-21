@@ -1,0 +1,382 @@
+# Camera Vendor Fingerprint Database
+# Used by the auto-discovery engine to identify camera manufacturers.
+# This file is only used for initial DB seed. Runtime data lives in PostgreSQL.
+# To add a new vendor, add an entry here and create a DB migration.
+
+hikvision:
+  manufacturer: "Hikvision"
+  website: "https://www.hikvision.com"
+  mac_prefixes:
+    - "00:40:48"
+    - "C4:2F:90"
+    - "AC:CC:8E"
+    - "18:68:CB"
+    - "54:C4:15"
+    - "8C:E7:48"
+    - "BC:AD:28"
+  http_server_headers:
+    - "Hikvision-Webs"
+    - "App-webs/"
+    - "Hikvision"
+  http_title_patterns:
+    - "Hikvision"
+    - "iVMS"
+    - "HWI-"
+  rtsp_paths:
+    - "/Streaming/Channels/101"
+    - "/Streaming/Channels/102"
+    - "/Streaming/Channels/201"
+    - "/h264/ch1/main/av_stream"
+    - "/h264/ch1/sub/av_stream"
+    - "/h265/ch1/main/av_stream"
+    - "/mpeg4/ch1/main/av_stream"
+  onvif_manufacturer:
+    - "Hikvision"
+    - "HIKVISION"
+    - "hikvision"
+    - "Hikvision Digital Technology"
+  default_ports:
+    - 80    # HTTP
+    - 443   # HTTPS
+    - 554   # RTSP
+    - 8000  # Server port
+    - 8443  # HTTPS alt
+  default_credentials:
+    username: "admin"
+    password: "admin12345"
+  vendor_broadcast:
+    protocol: udp
+    port: 37020
+    payload_hex: "000000e8000000020000000100000000"
+  api_paths:
+    device_info: "/ISAPI/System/deviceInfo"
+    capabilities: "/ISAPI/System/capabilities"
+    ptz: "/ISAPI/PTZCtrl/channels"
+
+dahua:
+  manufacturer: "Dahua"
+  website: "https://www.dahuasecurity.com"
+  mac_prefixes:
+    - "3C:EF:8C"
+    - "90:02:A9"
+    - "4B:9C:4B"
+    - "38:AF:29"
+    - "14:A7:8B"
+    - "BC:32:5F"
+    - "E0:50:8B"
+  http_server_headers:
+    - "Dahua"
+    - "DSS"
+    - "web server"
+  http_title_patterns:
+    - "Dahua"
+    - "WEB SERVICE"
+    - "DSS"
+  rtsp_paths:
+    - "/cam/realmonitor?channel=1&subtype=0"
+    - "/cam/realmonitor?channel=1&subtype=1"
+    - "/cam/realmonitor?channel=2&subtype=0"
+  onvif_manufacturer:
+    - "Dahua"
+    - "DAHUA"
+    - "dahua"
+    - "Dahua Technology"
+  default_ports:
+    - 80
+    - 443
+    - 554
+    - 3800
+  default_credentials:
+    username: "admin"
+    password: "admin123"
+  vendor_broadcast:
+    protocol: udp
+    port: 37810
+    payload_hex: "2000000068696b766973696f6e000000000000000000000000000000000000"
+  api_paths:
+    device_info: "/cgi-bin/magicBox.cgi?action=getSystemInfo"
+    capabilities: "/cgi-bin/encode.cgi?action=getConfigCaps"
+    ptz: "/cgi-bin/ptz.cgi"
+
+axis:
+  manufacturer: "Axis Communications"
+  website: "https://www.axis.com"
+  mac_prefixes:
+    - "00:40:8C"
+    - "AC:CC:8E"
+    - "B8:A4:4F"
+    - "00:12:32"
+    - "E0:7A:5B"
+  http_server_headers:
+    - "Axis"
+    - "AXIS"
+    - "axis-http"
+  http_title_patterns:
+    - "AXIS"
+    - "Axis"
+    - "Live View"
+  rtsp_paths:
+    - "/axis-media/media.amp"
+    - "/axis-media/media.amp?videocodec=h264"
+    - "/axis-media/media.amp?videocodec=h265"
+    - "/mpeg4/media.amp"
+  onvif_manufacturer:
+    - "AXIS"
+    - "Axis Communications"
+    - "Axis Communications AB"
+  default_ports:
+    - 80
+    - 443
+    - 554
+  default_credentials:
+    username: "root"
+    password: "pass"
+  vendor_broadcast:
+    protocol: mdns
+    service_type: "_axis-video._tcp"
+  api_paths:
+    device_info: "/axis-cgi/basicdeviceinfo.cgi"
+    capabilities: "/axis-cgi/viewerparam.cgi"
+    ptz: "/axis-cgi/com/ptz.cgi"
+    mjpeg: "/axis-cgi/mjpg/video.cgi"
+
+reolink:
+  manufacturer: "Reolink"
+  website: "https://reolink.com"
+  mac_prefixes:
+    - "6C:5A:B4"
+    - "00:26:7E"
+  http_server_headers:
+    - "Reolink"
+    - "reolink"
+    - "lighttpd"
+  http_title_patterns:
+    - "Reolink"
+    - "Reolink IP Camera"
+  rtsp_paths:
+    - "/h264Preview_01_main"
+    - "/h264Preview_01_sub"
+    - "/h265Preview_01_main"
+    - "/h265Preview_01_sub"
+  onvif_manufacturer:
+    - "Reolink"
+    - "reolink"
+    - "Reolink Innovation"
+  default_ports:
+    - 80
+    - 443
+    - 554
+    - 8000
+  default_credentials:
+    username: "admin"
+    password: ""
+  api_paths:
+    device_info: "/cgi-bin/api.cgi?cmd=DevInfo"
+    capabilities: "/cgi-bin/api.cgi?cmd=GetEnc"
+
+tp_link:
+  manufacturer: "TP-Link"
+  sub_brands: ["Tapo", "Kasa"]
+  website: "https://www.tp-link.com"
+  mac_prefixes:
+    - "6C:5A:B5"
+    - "B0:BE:76"
+    - "10:27:F5"
+    - "E8:48:B8"
+  http_server_headers:
+    - "TP-LINK"
+    - "Tapo"
+    - "Kasa"
+  http_title_patterns:
+    - "TP-Link"
+    - "Tapo"
+    - "Kasa"
+  rtsp_paths:
+    - "/stream1"
+    - "/stream2"
+    - "/stream1"  # Tapo cameras
+    - "/stream2"  # Tapo substream
+  onvif_manufacturer:
+    - "TP-Link"
+    - "TP-LINK"
+    - "TP-Link Corporation"
+  default_ports:
+    - 80
+    - 443
+    - 554
+  default_credentials:
+    username: "admin"
+    password: "admin"
+  api_paths:
+    device_info: "/cgi-bin/getinfo"
+    ptz: "/cgi-bin/ptz"
+
+amcrest:
+  manufacturer: "Amcrest"
+  website: "https://amcrest.com"
+  mac_prefixes:
+    - "9C:8E:CD"
+    - "00:25:7D"
+  http_server_headers:
+    - "Amcrest"
+    - "amcrest"
+  http_title_patterns:
+    - "Amcrest"
+    - "IP Camera"
+  rtsp_paths:
+    - "/cam/realmonitor?channel=1&subtype=0"
+    - "/cam/realmonitor?channel=1&subtype=1"
+  onvif_manufacturer:
+    - "Amcrest"
+    - "AMCREST"
+    - "Amcrest Technologies"
+  default_ports:
+    - 80
+    - 443
+    - 554
+    - 37777
+  default_credentials:
+    username: "admin"
+    password: "admin"
+
+foscam:
+  manufacturer: "Foscam"
+  website: "https://www.foscam.com"
+  mac_prefixes:
+    - "00:65:2D"
+    - "E0:63:E5"
+    - "B8:31:B5"
+  http_server_headers:
+    - "Foscam"
+    - "foscam"
+    - "NetSurveillance"
+  http_title_patterns:
+    - "Foscam"
+    - "NetSurveillance"
+  rtsp_paths:
+    - "/videoMain"
+    - "/videoSub"
+    - "/video1"
+    - "/video2"
+  onvif_manufacturer:
+    - "Foscam"
+    - "FOSCAM"
+  default_ports:
+    - 80
+    - 443
+    - 554
+    - 88
+  default_credentials:
+    username: "admin"
+    password: ""
+
+uniview:
+  manufacturer: "Uniview"
+  website: "https://www.uniview.com"
+  mac_prefixes:
+    - "64:DB:81"
+    - "34:51:C9"
+    - "2C:28:2D"
+  http_server_headers:
+    - "Uniview"
+    - "UNV"
+  http_title_patterns:
+    - "Uniview"
+    - "UNV"
+  rtsp_paths:
+    - "/media/video1"
+    - "/media/video2"
+  onvif_manufacturer:
+    - "Uniview"
+    - "UNIVIEW"
+    - "Zhejiang Uniview Technologies"
+  default_ports:
+    - 80
+    - 443
+    - 554
+  default_credentials:
+    username: "admin"
+    password: "123456"
+
+bosch:
+  manufacturer: "Bosch Security"
+  website: "https://www.boschsecurity.com"
+  mac_prefixes:
+    - "00:07:5F"
+    - "00:0E:6C"
+    - "00:30:58"
+  http_server_headers:
+    - "Bosch"
+    - "BOSCH"
+  http_title_patterns:
+    - "Bosch"
+    - "DINION"
+    - "FLEXIDOME"
+    - "AUTODOME"
+  rtsp_paths:
+    - "/rtsp_tunnel"
+    - "/video"
+  onvif_manufacturer:
+    - "Bosch"
+    - "BOSCH"
+    - "Bosch Security Systems"
+  default_ports:
+    - 80
+    - 443
+    - 554
+  default_credentials:
+    username: "service"
+    password: "service"
+
+samsung_hanwha:
+  manufacturer: "Hanwha Vision (Samsung)"
+  website: "https://www.hanwhavision.com"
+  mac_prefixes:
+    - "00:16:6C"
+    - "00:68:9F"
+    - "00:F0:65"
+  http_server_headers:
+    - "Samsung"
+    - "Hanwha"
+    - "Wisenet"
+  http_title_patterns:
+    - "Samsung"
+    - "Hanwha"
+    - "Wisenet"
+    - "Web Viewer"
+  rtsp_paths:
+    - "/profile/media.smp"
+    - "/onvif/profile.1/media.smp"
+  onvif_manufacturer:
+    - "Samsung"
+    - "Hanwha"
+    - "Hanwha Techwin"
+    - "Samsung Techwin"
+  default_ports:
+    - 80
+    - 443
+    - 554
+  default_credentials:
+    username: "admin"
+    password: "4321"
+
+generic_onvif:
+  manufacturer: "Generic ONVIF"
+  rtsp_paths:
+    - "/onvif1"
+    - "/live"
+    - "/media/video1"
+    - "/media/video2"
+    - "/profile1"
+    - "/profile2"
+    - "/stream"
+    - "/stream/live"
+    - "/ch0"
+    - "/ch1"
+    - "/video"
+  default_ports:
+    - 80
+    - 554
+  default_credentials:
+    username: "admin"
+    password: "admin"

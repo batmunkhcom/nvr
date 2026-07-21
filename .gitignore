@@ -1,0 +1,67 @@
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Docker
+docker-compose.override.yml
+
+# Database
+*.db
+*.sqlite3
+postgres-data/
+
+# Recordings / Storage (local development)
+/data/recordings/
+/minio-data/
+
+# Logs
+*.log
+logs/
+
+# Node
+node_modules/
+services/web/dist/
+services/web/build/
+
+# Python
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# AI Models (large files)
+services/ai-engine/app/models/*.onnx
+services/ai-engine/app/models/*.pt
+*.onnx
+*.pth
+
+# Alembic
+alembic/versions/*.pyc
+
+# OS
+Thumbs.db
