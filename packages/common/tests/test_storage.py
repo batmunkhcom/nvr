@@ -80,10 +80,13 @@ class TestLocalStorageIO:
     @pytest.mark.anyio
     async def test_list_files(self, local_storage):
         for idx in range(3):
+
             def _make_source(n):
                 async def source():
                     yield f"data_{n}".encode()
+
                 return source
+
             await local_storage.write_stream(f"ls_{idx}.txt", _make_source(idx)())
 
         files = await local_storage.list_files("")
