@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from ipaddress import IPv4Address
 
-from .engine import DiscoveryResult, DiscoveryMethod
+from .engine import DiscoveryResult
 
 HTTP_PORTS = [80, 443, 8080, 8443, 8000]
 

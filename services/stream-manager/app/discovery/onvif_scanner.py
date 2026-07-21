@@ -6,10 +6,9 @@ Uses WS-Discovery multicast protocol to find ONVIF-compliant cameras on the netw
 
 from __future__ import annotations
 
-import asyncio
 from ipaddress import IPv4Address
 
-from .engine import DiscoveryMethod, DiscoveryResult, StreamProfile
+from .engine import DiscoveryResult
 
 ONVIF_MULTICAST = "239.255.255.250"
 ONVIF_PORT = 3702

@@ -6,7 +6,7 @@ deduplicating by MAC address, IP address, and ONVIF serial number.
 
 from __future__ import annotations
 
-from .engine_data import DeviceVendor, DiscoveryMethod, DiscoveryResult, MergedDevice
+from .engine_data import DeviceVendor, DiscoveryResult, MergedDevice
 
 
 def merge_results(

@@ -1,0 +1,67 @@
+# NVR System — Docker Compose (Production Override)
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  nvr-api:
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      API_RELOAD: "false"
+      API_LOG_LEVEL: warning
+      API_CORS_ORIGINS: ${API_CORS_ORIGINS}
+    volumes:
+      - ./config:/app/config:ro
+    # Runtime volumes removed — code is baked into image
+
+  nvr-stream-manager:
+    restart: always
+    volumes:
+      - ./config:/app/config:ro
+
+  nvr-recording-engine:
+    restart: always
+
+  nvr-ai-engine:
+    restart: always
+
+  nvr-mqtt-bridge:
+    restart: always
+
+  nvr-nginx:
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+
+  nvr-db:
+    restart: always
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - pg_backups:/backups
+
+  nvr-redis:
+    restart: always
+    command: redis-server --appendonly yes
+
+  nvr-minio:
+    restart: always
+
+  nvr-mosquitto:
+    restart: always
+
+  nvr-chrony:
+    restart: always
+
+  # Web is served by nginx in production (static build)
+  nvr-web:
+    profiles:
+      - disabled
+    # Not used in production — nginx serves built assets
+
+networks:
+  nvr-net:
+    driver: bridge
+
+volumes:
+  pg_backups:

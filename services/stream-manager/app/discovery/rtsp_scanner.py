@@ -7,10 +7,9 @@ via OPTIONS/DESCRIBE requests.
 
 from __future__ import annotations
 
-import asyncio
 from ipaddress import IPv4Address
 
-from .engine import DiscoveryResult, DiscoveryMethod
+from .engine import DiscoveryResult
 from .fingerprint import VendorFingerprinter
 
 RTSP_PORTS = [554, 8554, 10554]

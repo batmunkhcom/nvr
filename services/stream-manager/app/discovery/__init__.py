@@ -11,11 +11,11 @@ from .engine_data import (
 from .fingerprint import VendorFingerprinter
 
 __all__ = [
+    "DeviceVendor",
     "DiscoveryEngine",
     "DiscoveryMethod",
     "DiscoveryResult",
     "MergedDevice",
     "StreamProfile",
-    "DeviceVendor",
     "VendorFingerprinter",
 ]

@@ -1,0 +1,94 @@
+"""Camera Pydantic schemas."""
+
+from pydantic import BaseModel, Field
+
+
+class CameraCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    ip_address: str
+    username: str = "admin"
+    password: str | None = None
+    auth_type: str = "basic"
+    stream_main_uri: str | None = None
+    stream_sub_uri: str | None = None
+    stream_audio_uri: str | None = None
+    recording_mode: str = "continuous"
+    stream_transport: str = "tcp"
+    tags: list[str] | None = None
+    location: str | None = None
+    notes: str | None = None
+
+
+class CameraUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    ip_address: str | None = None
+    username: str | None = None
+    password: str | None = None
+    auth_type: str | None = None
+    stream_main_uri: str | None = None
+    stream_sub_uri: str | None = None
+    stream_audio_uri: str | None = None
+    recording_mode: str | None = None
+    stream_transport: str | None = None
+    is_active: bool | None = None
+    tags: list[str] | None = None
+    location: str | None = None
+    notes: str | None = None
+    privacy_mode: str | None = None
+
+
+class CameraResponse(BaseModel):
+    id: str
+    name: str
+    ip_address: str
+    mac_address: str | None = None
+    manufacturer: str | None = None
+    model: str | None = None
+    firmware_version: str | None = None
+    serial_number: str | None = None
+    stream_main_uri: str | None = None
+    stream_sub_uri: str | None = None
+    stream_audio_uri: str | None = None
+    auth_type: str
+    username: str
+    has_audio: bool
+    has_talkback: bool
+    has_ptz: bool
+    has_onvif: bool
+    has_motion_detection: bool
+    has_io_ports: bool
+    motion_source: str | None = None
+    max_resolution: str | None = None
+    recording_mode: str
+    stream_transport: str
+    ptz_presets: list | None = None
+    status: str
+    last_seen_at: str | None = None
+    tags: list[str] | None = None
+    location: str | None = None
+    notes: str | None = None
+    privacy_mode: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class DiscoveryRequest(BaseModel):
+    subnets: list[str] = ["192.168.1.0/24"]
+    methods: list[str] | None = None
+    timeout: int = Field(default=120, ge=10, le=600)
+
+
+class DiscoveryStatusResponse(BaseModel):
+    scan_id: str
+    status: str
+    phases: dict
+    found_count: int
+    progress_pct: int
+
+
+class CameraTestResponse(BaseModel):
+    reachable: bool
+    rtsp_ok: bool
+    latency_ms: int | None = None
+    stream_resolution: str | None = None
+    stream_codec: str | None = None

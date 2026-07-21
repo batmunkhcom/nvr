@@ -1,0 +1,319 @@
+# NVR System — Docker Compose (Development)
+# All 13 services for the full NVR pipeline
+
+name: nvr
+
+services:
+  # ============================================================================
+  # Infrastructure
+  # ============================================================================
+
+  nvr-db:
+    image: timescale/timescaledb:2.16-pg16
+    container_name: nvr-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nvr-net
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: "2G"
+        reservations:
+          cpus: "0.5"
+          memory: "512M"
+
+  nvr-redis:
+    image: redis:7-alpine
+    container_name: nvr-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nvr-net
+
+  nvr-minio:
+    image: minio/minio:latest
+    container_name: nvr-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BROWSER: "on"
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nvr-net
+
+  nvr-mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: nvr-mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto_data:/mosquitto/data
+    networks:
+      - nvr-net
+
+  nvr-chrony:
+    image: cturra/ntp:latest
+    container_name: nvr-chrony
+    ports:
+      - "123:123/udp"
+    environment:
+      NTP_SERVERS: "pool.ntp.org"
+      NTP_LOGLEVEL: "1"
+    cap_add:
+      - SYS_TIME
+    networks:
+      - nvr-net
+
+  # ============================================================================
+  # Application Services
+  # ============================================================================
+
+  nvr-api:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    container_name: nvr-api
+    ports:
+      - "8000:8000"
+    environment:
+      POSTGRES_HOST: nvr-db
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_HOST: nvr-redis
+      REDIS_PORT: ${REDIS_PORT}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      JWT_EXPIRY_MINUTES: ${JWT_EXPIRY_MINUTES}
+      API_HOST: ${API_HOST}
+      API_PORT: ${API_PORT}
+      API_LOG_LEVEL: ${API_LOG_LEVEL}
+      API_CORS_ORIGINS: ${API_CORS_ORIGINS}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_SECURE: ${S3_SECURE}
+      DISCOVERY_SUBNETS: ${DISCOVERY_SUBNETS}
+    volumes:
+      - ./services/api:/app/services/api
+      - ./packages:/app/packages
+      - ./config:/app/config
+    depends_on:
+      nvr-db:
+        condition: service_healthy
+      nvr-redis:
+        condition: service_healthy
+    networks:
+      - nvr-net
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: "1G"
+        reservations:
+          cpus: "0.5"
+          memory: "512M"
+
+  nvr-stream-manager:
+    build:
+      context: .
+      dockerfile: docker/stream-manager/Dockerfile
+    container_name: nvr-stream-manager
+    network_mode: host
+    environment:
+      DB_HOST: localhost
+      DB_PORT: ${POSTGRES_PORT}
+      DB_NAME: ${POSTGRES_DB}
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_HOST: localhost
+      REDIS_PORT: ${REDIS_PORT}
+      API_URL: http://localhost:8000
+      VENDOR_PATTERNS_PATH: /app/config/vendor_patterns.yml
+      DISCOVERY_SUBNETS: ${DISCOVERY_SUBNETS}
+      FFMPEG_PATH: ${FFMPEG_PATH}
+    volumes:
+      - ./services/stream-manager:/app/services/stream-manager
+      - ./packages:/app/packages
+      - ./config:/app/config
+    depends_on:
+      nvr-db:
+        condition: service_healthy
+      nvr-redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: "4G"
+        reservations:
+          cpus: "1"
+          memory: "1G"
+
+  nvr-mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: nvr-mediamtx
+    network_mode: host
+    volumes:
+      - ./config/mediamtx.yml:/mediamtx.yml:ro
+      - mediamtx_hls:/tmp/hls
+
+  nvr-recording-engine:
+    build:
+      context: .
+      dockerfile: docker/recording-engine/Dockerfile
+    container_name: nvr-recording-engine
+    environment:
+      DB_HOST: nvr-db
+      DB_PORT: ${POSTGRES_PORT}
+      DB_NAME: ${POSTGRES_DB}
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_HOST: nvr-redis
+      REDIS_PORT: ${REDIS_PORT}
+      STORAGE_LOCAL_PATH: ${STORAGE_LOCAL_PATH}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_SECURE: ${S3_SECURE}
+      FFMPEG_PATH: ${FFMPEG_PATH}
+    volumes:
+      - recordings:/data/recordings
+      - ./services/recording-engine:/app/services/recording-engine
+      - ./packages:/app/packages
+    depends_on:
+      nvr-db:
+        condition: service_healthy
+      nvr-redis:
+        condition: service_healthy
+    networks:
+      - nvr-net
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: "2G"
+
+  nvr-ai-engine:
+    build:
+      context: .
+      dockerfile: docker/ai-engine/Dockerfile
+    container_name: nvr-ai-engine
+    environment:
+      REDIS_HOST: nvr-redis
+      REDIS_PORT: ${REDIS_PORT}
+      AI_MODEL_PATH: ${AI_MODEL_PATH}
+      AI_YOLO_MODEL: ${AI_YOLO_MODEL}
+      AI_CONFIDENCE_THRESHOLD: ${AI_CONFIDENCE_THRESHOLD}
+      AI_DEVICE: ${AI_DEVICE}
+    volumes:
+      - ai_models:/app/models
+      - ./services/ai-engine:/app/services/ai-engine
+      - ./packages:/app/packages
+    depends_on:
+      nvr-redis:
+        condition: service_healthy
+    networks:
+      - nvr-net
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: "4G"
+
+  nvr-mqtt-bridge:
+    build:
+      context: .
+      dockerfile: docker/mqtt-bridge/Dockerfile
+    container_name: nvr-mqtt-bridge
+    environment:
+      REDIS_HOST: nvr-redis
+      REDIS_PORT: ${REDIS_PORT}
+      MQTT_HOST: nvr-mosquitto
+      MQTT_PORT: "1883"
+    depends_on:
+      nvr-redis:
+        condition: service_healthy
+      nvr-mosquitto:
+        condition: service_started
+    networks:
+      - nvr-net
+
+  nvr-nginx:
+    build:
+      context: .
+      dockerfile: docker/nginx/Dockerfile
+    container_name: nvr-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - nvr-api
+    networks:
+      - nvr-net
+
+  nvr-web:
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+    container_name: nvr-web
+    ports:
+      - "3000:3000"
+    environment:
+      VITE_API_URL: http://localhost:8000
+      VITE_WS_URL: ws://localhost:8000
+    volumes:
+      - ./services/web/src:/app/src
+      - ./services/web/public:/app/public
+      - ./services/web/index.html:/app/index.html
+      - ./services/web/vite.config.ts:/app/vite.config.ts
+      - ./services/web/tsconfig.json:/app/tsconfig.json
+    networks:
+      - nvr-net
+
+networks:
+  nvr-net:
+    driver: bridge
+
+volumes:
+  pg_data:
+  redis_data:
+  minio_data:
+  mosquitto_data:
+  recordings:
+  ai_models:
+  mediamtx_hls:

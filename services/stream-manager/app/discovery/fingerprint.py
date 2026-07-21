@@ -12,7 +12,6 @@ Identifies camera vendors based on:
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Any
 
 import yaml
@@ -39,7 +38,7 @@ class VendorFingerprinter:
 
     def load_patterns(self, path: str) -> None:
         """Load vendor patterns from YAML file."""
-        with open(path, "r") as f:
+        with open(path) as f:
             data = yaml.safe_load(f)
 
         self._patterns = data

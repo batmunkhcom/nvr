@@ -10,7 +10,7 @@ from __future__ import annotations
 from ipaddress import IPv4Address
 from pathlib import Path
 
-from .engine import DiscoveryResult, DiscoveryMethod, DeviceVendor
+from .engine import DeviceVendor, DiscoveryMethod, DiscoveryResult
 from .fingerprint import VendorFingerprinter
 
 
