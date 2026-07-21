@@ -124,7 +124,7 @@ def _event_to_dict(e: Event) -> dict:
         "severity": e.severity,
         "start_time": e.start_time.isoformat() if e.start_time else None,
         "end_time": e.end_time.isoformat() if e.end_time else None,
-        "metadata": e.metadata,
+        "metadata": e.event_metadata,
         "snapshot_path": e.snapshot_path,
         "is_acknowledged": e.is_acknowledged,
         "created_at": e.created_at.isoformat() if e.created_at else None,

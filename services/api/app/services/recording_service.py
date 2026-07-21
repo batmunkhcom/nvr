@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from fastapi import HTTPException, status
@@ -170,7 +170,7 @@ async def get_storage_usage(db: AsyncSession) -> dict:
 
 async def get_recording_stats(db: AsyncSession) -> dict:
     """Get recording statistics for the last 24 hours."""
-    since = datetime.utcnow() - timedelta(hours=24)
+    since = datetime.now(UTC) - timedelta(hours=24)
     result = await db.execute(
         select(func.count()).select_from(
             select(Recording).where(Recording.start_time >= since).subquery()

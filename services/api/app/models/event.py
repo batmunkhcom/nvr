@@ -28,8 +28,8 @@ class Event(Base):
     )
     start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    metadata: Mapped[dict] = mapped_column(
-        JSON, nullable=False, default=dict, server_default="'{}'"
+    event_metadata: Mapped[dict] = mapped_column(
+        "metadata", JSON, nullable=False, default=dict, server_default="'{}'"
     )
     snapshot_path: Mapped[str | None] = mapped_column(String(2048))
     is_acknowledged: Mapped[bool] = mapped_column(
