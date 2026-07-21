@@ -107,6 +107,7 @@ services:
     ports:
       - "8000:8000"
     environment:
+      PYTHONPATH: /app/services/api:/app/packages/common
       POSTGRES_HOST: nvr-db
       POSTGRES_PORT: ${POSTGRES_PORT}
       POSTGRES_DB: ${POSTGRES_DB}

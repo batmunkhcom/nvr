@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir "fastapi>=0.115" "uvicorn[standard]>=0.34" \
     "python-jose[cryptography]>=3.3" "passlib[bcrypt]>=1.7" \
     "httpx>=0.28" "python-multipart>=0.0.18" "websockets>=14.1" \
     "structlog>=24.4" "pyyaml>=6.0" "aiohttp>=3.11" \
-    "tenacity>=9.0" "python-dateutil>=2.9"
+    "tenacity>=9.0" "python-dateutil>=2.9" "prometheus-client>=0.21" "bcrypt>=4.0,<5.0"
 
 COPY services/api/ ./services/api/
 COPY packages/ ./packages/
