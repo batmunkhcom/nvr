@@ -12,6 +12,7 @@ from .core.database import engine
 from .core.redis import close_redis, get_redis
 from .middleware.cors import setup_cors
 from .middleware.logging import RequestLoggingMiddleware
+from .middleware.rate_limit import rate_limit_middleware
 
 logger = structlog.get_logger()
 
@@ -37,6 +38,7 @@ app = FastAPI(
 
 setup_cors(app)
 app.add_middleware(RequestLoggingMiddleware)
+app.middleware("http")(rate_limit_middleware)
 
 
 @app.exception_handler(Exception)

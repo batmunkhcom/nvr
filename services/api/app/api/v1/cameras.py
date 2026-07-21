@@ -19,6 +19,8 @@ from ...services.camera_service import (
     test_camera_connection,
     update_camera,
 )
+from ...services.camera_service_audio import start_talk_session, stop_talk_session
+from ...services.camera_service_ptz import ptz_action
 from ...services.discovery_service import (
     get_discovery_results,
     get_discovery_status,
@@ -136,3 +138,37 @@ async def discover_results(
 ):
     result = await get_discovery_results(scan_id)
     return {"data": result}
+
+
+@router.post("/{camera_id}/ptz")
+async def camera_ptz(
+    camera_id: uuid.UUID,
+    current_user: Annotated[dict, Depends(require_operator)],
+    action: str = "move",
+    direction: str | None = None,
+    speed: float = 0.5,
+    preset_id: int | None = None,
+    zoom: str | None = None,
+):
+    result = await ptz_action(
+        camera_id, action=action, direction=direction, speed=speed, preset_id=preset_id, zoom=zoom
+    )
+    return {"data": result}
+
+
+@router.post("/{camera_id}/talk/start")
+async def start_talk(
+    camera_id: uuid.UUID,
+    current_user: Annotated[dict, Depends(require_operator)],
+):
+    result = await start_talk_session(camera_id)
+    return {"data": result}
+
+
+@router.post("/{camera_id}/talk/stop", status_code=status.HTTP_204_NO_CONTENT)
+async def stop_talk(
+    camera_id: uuid.UUID,
+    session_id: uuid.UUID,
+    current_user: Annotated[dict, Depends(require_operator)],
+):
+    await stop_talk_session(session_id)
