@@ -9,7 +9,7 @@ services:
   # ============================================================================
 
   nvr-db:
-    image: timescale/timescaledb:2.16-pg16
+    image: timescale/timescaledb:latest-pg16
     container_name: nvr-db
     ports:
       - "5432:5432"

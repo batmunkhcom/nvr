@@ -51,7 +51,10 @@ def upgrade() -> None:
     op.execute(sa.text("CREATE EXTENSION IF NOT EXISTS timescaledb"))
 
     # ── enums ───────────────────────────────────────────────────────────
-    _create_enums(op)
+    # Pre-create all enum types via DO block (PG16 doesn't support IF NOT EXISTS for CREATE TYPE).
+    for name, values in _enums.items():
+        vals = ", ".join(f"'{v}'" for v in values)
+        op.execute(sa.text(f"DO $$ BEGIN CREATE TYPE {name} AS ENUM ({vals}); EXCEPTION WHEN duplicate_object THEN NULL; END $$"))
 
     # ── system_config ───────────────────────────────────────────────────
     op.create_table(
@@ -76,7 +79,7 @@ def upgrade() -> None:
         sa.Column("hashed_password", sa.String(255), nullable=False),
         sa.Column(
             "role",
-            sa.Enum("admin", "operator", "viewer", name="user_role"),
+            sa.Enum(name="user_role", create_type=False),
             nullable=False,
             server_default="viewer",
         ),
@@ -131,7 +134,7 @@ def upgrade() -> None:
         sa.Column("stream_audio_uri", sa.String(1024)),
         sa.Column(
             "auth_type",
-            sa.Enum("basic", "digest", "onvif_token", name="auth_type"),
+            sa.Enum(name="auth_type", create_type=False),
             nullable=False,
             server_default="basic",
         ),
@@ -156,13 +159,13 @@ def upgrade() -> None:
         sa.Column("onvif_events_service_url", sa.String(1024)),
         sa.Column(
             "recording_mode",
-            sa.Enum("continuous", "motion", "scheduled", name="recording_mode"),
+            sa.Enum(name="recording_mode", create_type=False),
             nullable=False,
             server_default="continuous",
         ),
         sa.Column(
             "stream_transport",
-            sa.Enum("tcp", "udp", "http", "multicast", name="stream_transport"),
+            sa.Enum(name="stream_transport", create_type=False),
             nullable=False,
             server_default="tcp",
         ),
@@ -176,7 +179,7 @@ def upgrade() -> None:
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column(
             "status",
-            sa.Enum("online", "offline", "degraded", "unknown", name="camera_status"),
+            sa.Enum(name="camera_status", create_type=False),
             nullable=False,
             server_default="unknown",
         ),
@@ -239,7 +242,7 @@ def upgrade() -> None:
         sa.Column("schedule_name", sa.String(100), nullable=False),
         sa.Column(
             "schedule_type",
-            sa.Enum("continuous", "motion", "scheduled", name="recording_mode"),
+            sa.Enum(name="recording_mode", create_type=False),
             nullable=False,
         ),
         sa.Column(
@@ -274,7 +277,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), primary_key=True, server_default=sa.text("uuid_generate_v4()")),
         sa.Column(
             "status",
-            sa.Enum("running", "completed", "failed", "cancelled", name="scan_status"),
+            sa.Enum(name="scan_status", create_type=False),
             nullable=False,
             server_default="running",
         ),
@@ -324,7 +327,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(100), nullable=False, unique=True),
         sa.Column(
             "backend_type",
-            sa.Enum("local", "nfs", "smb", "s3", name="storage_backend_type"),
+            sa.Enum(name="storage_backend_type", create_type=False),
             nullable=False,
         ),
         sa.Column("config", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
@@ -355,7 +358,7 @@ def upgrade() -> None:
         sa.Column("retention_days", sa.Integer(), nullable=False),
         sa.Column(
             "applies_to_types",
-            sa.ARRAY(sa.Enum("continuous", "motion", "manual", "event", name="recording_type")),
+            sa.ARRAY(sa.Enum(name="recording_type", create_type=False)),
             nullable=False,
             server_default=sa.text("'{continuous}'"),
         ),
@@ -381,7 +384,7 @@ def upgrade() -> None:
         sa.Column("end_time", sa.DateTime(timezone=True), nullable=False),
         sa.Column(
             "recording_type",
-            sa.Enum("continuous", "motion", "manual", "event", name="recording_type"),
+            sa.Enum(name="recording_type", create_type=False),
             nullable=False,
             server_default="continuous",
         ),
@@ -453,7 +456,7 @@ def upgrade() -> None:
         sa.Column("event_type", sa.String(50), nullable=False),
         sa.Column(
             "severity",
-            sa.Enum("info", "warning", "critical", name="event_severity"),
+            sa.Enum(name="event_severity", create_type=False),
             nullable=False,
             server_default="info",
         ),
