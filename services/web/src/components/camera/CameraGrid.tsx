@@ -1,5 +1,5 @@
-import { useCameras } from "../hooks/useCameras";
-import { Camera } from "../types/camera";
+import { useCameras } from "../../hooks/useCameras";
+import { Camera } from "../../types/camera";
 
 const statusColors: Record<string, string> = {
   online: "bg-green-500",

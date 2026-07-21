@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import apiClient from "../../api/client";
-import { Camera } from "../../types/camera";
+import apiClient from "../api/client";
+import { Camera } from "../types/camera";
 
 export function useCameras() {
   return useQuery({

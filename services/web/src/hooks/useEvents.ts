@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import apiClient from "../../api/client";
-import { NvrEvent } from "../../types/event";
+import apiClient from "../api/client";
+import { NvrEvent } from "../types/event";
 
 export function useEvents(filters?: Record<string, string>) {
   return useQuery({
