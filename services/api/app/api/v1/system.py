@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...core.database import get_db
 from ...middleware.auth import require_admin
 from ...models.system_config import SystemConfig
+from ...services.recording_service import get_recording_stats
 from ...services.self_test import run_self_test
 
 router = APIRouter(prefix="/api/v1/system", tags=["system"])
@@ -77,8 +78,11 @@ async def get_system_logs(
 
 
 @router.get("/metrics")
-async def get_metrics():
-    return {"data": {"camera_count": 0, "recording_count": 0, "event_count_24h": 0}}
+async def get_metrics(
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    stats = await get_recording_stats(db)
+    return {"data": stats}
 
 
 @router.post("/self-test")

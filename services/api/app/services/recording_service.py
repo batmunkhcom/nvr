@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta
 
 import structlog
 from fastapi import HTTPException, status
@@ -110,4 +111,83 @@ def _backend_to_dict(b: StorageBackend) -> dict:
         "is_active": b.is_active,
         "health_status": b.health_status,
         "last_health_check": b.last_health_check.isoformat() if b.last_health_check else None,
+    }
+
+
+async def get_timeline_segments(
+    camera_id: uuid.UUID,
+    date_str: str,
+    db: AsyncSession,
+) -> list[dict]:
+    """Get recording segments for a camera on a specific date.
+
+    Returns a list of timeline segments with start/end times.
+    """
+    day_start = datetime.fromisoformat(date_str)
+    day_end = day_start + timedelta(days=1)
+
+    result = await db.execute(
+        select(Recording)
+        .where(
+            Recording.camera_id == camera_id,
+            Recording.start_time >= day_start,
+            Recording.start_time < day_end,
+        )
+        .order_by(Recording.start_time.asc())
+    )
+    recordings = result.scalars().all()
+
+    segments = []
+    for r in recordings:
+        segments.append(
+            {
+                "camera_id": str(r.camera_id),
+                "start_time": r.start_time.isoformat(),
+                "end_time": r.end_time.isoformat() if r.end_time else None,
+                "recording_type": r.recording_type,
+                "has_motion": r.recording_type in ("motion", "event"),
+            }
+        )
+    return segments
+
+
+async def get_storage_usage(db: AsyncSession) -> dict:
+    """Aggregate storage usage across all backends."""
+    result = await db.execute(select(StorageBackend).where(StorageBackend.is_active.is_(True)))
+    backends = result.scalars().all()
+
+    total = sum(b.total_bytes for b in backends)
+    available = sum(b.available_bytes for b in backends)
+    used = total - available
+
+    return {
+        "total_bytes": total,
+        "used_bytes": max(used, 0),
+        "free_bytes": max(available, 0),
+        "backends": [_backend_to_dict(b) for b in backends],
+    }
+
+
+async def get_recording_stats(db: AsyncSession) -> dict:
+    """Get recording statistics for the last 24 hours."""
+    since = datetime.utcnow() - timedelta(hours=24)
+    result = await db.execute(
+        select(func.count()).select_from(
+            select(Recording).where(Recording.start_time >= since).subquery()
+        )
+    )
+    total_24h = result.scalar() or 0
+
+    result = await db.execute(
+        select(
+            func.coalesce(func.sum(Recording.file_size_bytes), 0),
+            func.coalesce(func.sum(Recording.duration_seconds), 0),
+        ).where(Recording.start_time >= since)
+    )
+    total_bytes, total_duration = result.one()
+
+    return {
+        "recordings_24h": total_24h,
+        "storage_bytes_24h": total_bytes,
+        "recording_seconds_24h": int(total_duration),
     }

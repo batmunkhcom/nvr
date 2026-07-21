@@ -55,9 +55,12 @@ async def run_self_test(db: AsyncSession) -> dict:
         import aiohttp
 
         s3_start = time.monotonic()
-        async with aiohttp.ClientSession() as session, session.get(
-            "http://nvr-minio:9000/minio/health/live", timeout=aiohttp.ClientTimeout(total=5)
-        ) as resp:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.get(
+                "http://nvr-minio:9000/minio/health/live", timeout=aiohttp.ClientTimeout(total=5)
+            ) as resp,
+        ):
             if resp.status == 200:
                 results["minio"] = {
                     "status": "ok",

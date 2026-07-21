@@ -4,11 +4,12 @@ from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from .api.v1 import router as v1_router
 from .core.config import settings
 from .core.database import engine
+from .core.metrics import get_metrics_text
 from .core.redis import close_redis, get_redis
 from .middleware.cors import setup_cors
 from .middleware.logging import RequestLoggingMiddleware
@@ -61,6 +62,11 @@ async def global_exception_handler(request: Request, exc: Exception):
 @app.get("/")
 async def root():
     return {"status": "ok", "service": "nvr-api", "version": "0.1.0"}
+
+
+@app.get("/metrics")
+async def prometheus_metrics():
+    return PlainTextResponse(get_metrics_text(), media_type="text/plain; version=0.0.4")
 
 
 app.include_router(v1_router)

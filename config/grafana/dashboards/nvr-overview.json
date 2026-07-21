@@ -1,0 +1,101 @@
+{
+  "title": "NVR System Overview",
+  "uid": "nvr-overview",
+  "panels": [
+    {
+      "title": "Cameras Online",
+      "type": "stat",
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+      "targets": [{"expr": "sum(nvr_camera_online)"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"color": "red", "value": 0}, {"color": "green", "value": 1}]}}}
+    },
+    {
+      "title": "Active Recordings",
+      "type": "stat",
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+      "targets": [{"expr": "nvr_active_recordings"}]
+    },
+    {
+      "title": "Storage Used %",
+      "type": "gauge",
+      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
+      "targets": [{"expr": "avg(nvr_storage_used_percent)"}],
+      "fieldConfig": {"defaults": {"thresholds": {"steps": [{"color": "green", "value": 0}, {"color": "yellow", "value": 70}, {"color": "red", "value": 90}]}}}
+    },
+    {
+      "title": "FFmpeg Processes",
+      "type": "stat",
+      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 4},
+      "targets": [{"expr": "nvr_ffmpeg_process_count"}]
+    },
+    {
+      "title": "API Request Rate",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 4, "w": 12, "h": 8},
+      "targets": [{"expr": "rate(nvr_api_requests_total[1m])", "legendFormat": "{{method}} {{endpoint}}"}],
+      "fieldConfig": {"defaults": {"custom": {"fillOpacity": 10, "showPoints": "never"}}}
+    },
+    {
+      "title": "API Latency (p50/p95)",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 4, "w": 12, "h": 8},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, rate(nvr_api_request_duration_seconds_bucket[1m]))", "legendFormat": "p50"},
+        {"expr": "histogram_quantile(0.95, rate(nvr_api_request_duration_seconds_bucket[1m]))", "legendFormat": "p95"}
+      ]
+    },
+    {
+      "title": "Recording Bytes Written",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 12, "w": 12, "h": 8},
+      "targets": [{"expr": "rate(nvr_recording_bytes_written_total[5m])", "legendFormat": "{{storage_backend}}"}]
+    },
+    {
+      "title": "Recording Errors",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 12, "w": 12, "h": 8},
+      "targets": [{"expr": "rate(nvr_recording_errors_total[5m])", "legendFormat": "{{error_type}}"}]
+    },
+    {
+      "title": "AI Detections / sec",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 20, "w": 12, "h": 8},
+      "targets": [{"expr": "rate(nvr_ai_detection_count_total[1m])", "legendFormat": "{{camera_id}} {{object_class}}"}]
+    },
+    {
+      "title": "AI Inference Latency",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 20, "w": 12, "h": 8},
+      "targets": [{"expr": "histogram_quantile(0.95, rate(nvr_ai_inference_duration_seconds_bucket[1m]))", "legendFormat": "p95 {{model}}"}]
+    },
+    {
+      "title": "Events per Minute",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 28, "w": 12, "h": 8},
+      "targets": [{"expr": "rate(nvr_event_count_total[1m])", "legendFormat": "{{event_type}}"}]
+    },
+    {
+      "title": "Circuit Breaker Trips",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 28, "w": 12, "h": 8},
+      "targets": [{"expr": "rate(nvr_circuit_breaker_trips_total[5m])", "legendFormat": "{{component}} {{breaker_name}}"}]
+    },
+    {
+      "title": "DB Connection Pool",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 36, "w": 12, "h": 6},
+      "targets": [{"expr": "nvr_db_connection_pool_size", "legendFormat": "{{state}}"}]
+    },
+    {
+      "title": "Storage Free Space",
+      "type": "timeseries",
+      "gridPos": {"x": 12, "y": 36, "w": 12, "h": 6},
+      "targets": [{"expr": "nvr_storage_free_bytes", "legendFormat": "{{backend}}"}]
+    }
+  ],
+  "templating": {
+    "list": [
+      {"name": "camera", "type": "query", "query": "label_values(nvr_camera_online, camera_name)", "label": "Camera"}
+    ]
+  }
+}

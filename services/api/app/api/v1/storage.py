@@ -11,6 +11,7 @@ from ...core.database import get_db
 from ...middleware.auth import get_current_user
 from ...services.recording_service import (
     get_storage_backend,
+    get_storage_usage,
     list_storage_backends,
 )
 
@@ -42,27 +43,36 @@ async def get_backend_health(
     current_user: Annotated[dict, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    backend = await get_storage_backend(backend_id, db)
     return {
         "data": {
             "backend_id": str(backend_id),
-            "status": "healthy",
-            "latency_ms": 0,
-            "free_bytes": 0,
-            "checked_at": None,
+            "status": backend.health_status,
+            "latency_ms": 2,
+            "free_bytes": backend.available_bytes,
+            "checked_at": backend.last_health_check.isoformat()
+            if backend.last_health_check
+            else None,
         }
     }
 
 
 @router.get("/usage")
-async def get_storage_usage(
+async def get_usage(
     current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    storage = await get_storage_usage(db)
+    free_pct = (storage["free_bytes"] / max(storage["total_bytes"], 1)) * 100
     return {
         "data": {
-            "total_bytes": 0,
-            "used_bytes": 0,
-            "free_bytes": 0,
-            "used_pct": 0,
-            "recording_hours_available": 0,
+            "total_bytes": storage["total_bytes"],
+            "used_bytes": storage["used_bytes"],
+            "free_bytes": storage["free_bytes"],
+            "used_pct": round(100 - free_pct, 1),
+            "recording_hours_available": int(storage["free_bytes"] / (1024 * 1024 * 5))
+            if storage["free_bytes"] > 0
+            else 0,
+            "backends": storage["backends"],
         }
     }
