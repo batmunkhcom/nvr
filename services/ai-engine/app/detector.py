@@ -151,11 +151,13 @@ class AIDetector:
             class_id = int(det[5])
             if class_id < 0 or class_id >= len(COCO_CLASSES):
                 continue
-            results.append({
-                "class": COCO_CLASSES[class_id],
-                "confidence": round(confidence, 3),
-                "box": [round(float(det[i]), 1) for i in range(4)],
-            })
+            results.append(
+                {
+                    "class": COCO_CLASSES[class_id],
+                    "confidence": round(confidence, 3),
+                    "box": [round(float(det[i]), 1) for i in range(4)],
+                }
+            )
         return results
 
 

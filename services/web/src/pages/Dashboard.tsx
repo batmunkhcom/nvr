@@ -1,14 +1,22 @@
+import CameraGrid from "../components/camera/CameraGrid";
+import { useCameras } from "../hooks/useCameras";
+
 export default function Dashboard() {
+  const { data: cameras } = useCameras();
+  const online = cameras?.filter((c) => c.status === "online").length ?? 0;
+  const total = cameras?.length ?? 0;
+
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-4">Dashboard</h1>
-      <div className="grid grid-cols-2 gap-4">
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="aspect-video bg-gray-800 rounded border border-gray-700 flex items-center justify-center text-gray-500">
-            Camera {i} — No stream
-          </div>
-        ))}
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <div className="flex gap-4 text-sm text-gray-400">
+          <span>
+            <span className="text-green-400 font-medium">{online}</span>/{total} online
+          </span>
+        </div>
       </div>
+      <CameraGrid />
     </div>
   );
 }
