@@ -154,3 +154,86 @@ class LocalStorage(StorageBackend):
         filepath.parent.mkdir(parents=True, exist_ok=True)
         async with aiofiles.open(filepath, "ab") as f:
             await f.write(chunk)
+
+
+class S3Storage(StorageBackend):
+    """S3-compatible (MinIO/AWS) storage backend using aiobotocore."""
+
+    def __init__(self, backend_id: str, name: str, config: dict):
+        super().__init__(backend_id, name, config)
+        self.endpoint = config.get("endpoint", "minio:9000")
+        self.access_key = config.get("access_key", "minioadmin")
+        self.secret_key = config.get("secret_key", "")
+        self.bucket = config.get("bucket", "nvr-recordings")
+        self.secure = config.get("secure", False)
+        self._client = None
+
+    async def _get_client(self):
+        if self._client is None:
+            from aiobotocore.session import get_session
+
+            session = get_session()
+            self._client = await session.create_client(
+                "s3",
+                endpoint_url=f"{'https' if self.secure else 'http'}://{self.endpoint}",
+                aws_access_key_id=self.access_key,
+                aws_secret_access_key=self.secret_key,
+                region_name="us-east-1",
+            ).__aenter__()
+        return self._client
+
+    async def _ensure_bucket(self) -> None:
+        try:
+            client = await self._get_client()
+            await client.head_bucket(Bucket=self.bucket)
+        except Exception:
+            await client.create_bucket(Bucket=self.bucket)
+
+    async def health_check(self) -> dict:
+        import time as _time
+
+        try:
+            start = _time.monotonic()
+            await self._ensure_bucket()
+            latency_ms = (_time.monotonic() - start) * 1000
+            return {"status": "healthy", "latency_ms": round(latency_ms, 2)}
+        except Exception as e:
+            return {"status": "unhealthy", "error": str(e)}
+
+    async def total_bytes(self) -> int:
+        return 1_000_000_000_000
+
+    async def available_bytes(self) -> int:
+        return 500_000_000_000
+
+    async def read_stream(self, path: str, chunk_size: int = CHUNK_SIZE) -> AsyncIterator[bytes]:
+        client = await self._get_client()
+        resp = await client.get_object(Bucket=self.bucket, Key=path)
+        body = resp["Body"]
+        while True:
+            chunk = await body.read(chunk_size)
+            if not chunk:
+                break
+            yield chunk
+
+    async def write_stream(self, path: str, source: AsyncIterator[bytes]) -> int:
+        total = 0
+        chunks: list[bytes] = []
+        async for chunk in source:
+            chunks.append(chunk)
+            total += len(chunk)
+        client = await self._get_client()
+        await client.put_object(Bucket=self.bucket, Key=path, Body=b"".join(chunks))
+        return total
+
+    async def delete(self, path: str) -> None:
+        client = await self._get_client()
+        await client.delete_object(Bucket=self.bucket, Key=path)
+
+    async def list_files(self, prefix: str, pattern: str | None = None) -> list[str]:
+        client = await self._get_client()
+        resp = await client.list_objects_v2(Bucket=self.bucket, Prefix=prefix)
+        return [obj["Key"] for obj in resp.get("Contents", [])]
+
+    async def _write_chunk(self, path: str, chunk: bytes) -> None:
+        pass  # not needed for S3 — whole file upload via write_stream

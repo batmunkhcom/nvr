@@ -27,9 +27,13 @@ async def get_recordings(
     to_time: str | None = None,
 ):
     return await list_recordings(
-        db, page=page, per_page=per_page,
-        camera_id=camera_id, recording_type=recording_type,
-        from_time=from_time, to_time=to_time,
+        db,
+        page=page,
+        per_page=per_page,
+        camera_id=camera_id,
+        recording_type=recording_type,
+        from_time=from_time,
+        to_time=to_time,
     )
 
 
