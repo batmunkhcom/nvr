@@ -7,6 +7,8 @@ import Recordings from "../../pages/Recordings";
 import Events from "../../pages/Events";
 import Storage from "../../pages/Storage";
 import Settings from "../../pages/Settings";
+import WizardPage from "../../pages/wizard/Wizard";
+import LiveView from "../../pages/LiveViewPage";
 
 export default function AppShell() {
   return (
@@ -19,6 +21,8 @@ export default function AppShell() {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/cameras" element={<Cameras />} />
+            <Route path="/wizard" element={<WizardPage />} />
+            <Route path="/live/:cameraId" element={<LiveView />} />
             <Route path="/recordings" element={<Recordings />} />
             <Route path="/events" element={<Events />} />
             <Route path="/storage" element={<Storage />} />

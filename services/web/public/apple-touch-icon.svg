@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" width="180" height="180">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="180" y2="180">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#16213e"/>
+    </linearGradient>
+  </defs>
+  <rect width="180" height="180" rx="24" fill="url(#bg)"/>
+  <g transform="translate(90,65)" stroke="#4fc3f7" stroke-width="9" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="-40" y="-30" width="80" height="50" rx="6" stroke-opacity="0.9"/>
+    <circle cx="0" cy="0" r="12" stroke-opacity="0.9"/>
+  </g>
+  <text x="90" y="130" text-anchor="middle" fill="#4fc3f7" font-size="22" font-weight="bold" font-family="sans-serif" opacity="0.9">NVR</text>
+</svg>
