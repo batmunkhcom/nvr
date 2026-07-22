@@ -16,6 +16,7 @@ class CameraCreate(BaseModel):
     stream_transport: str = "tcp"
     tags: list[str] | None = None
     location: str | None = None
+    location_id: str | None = None
     notes: str | None = None
 
 
@@ -33,6 +34,7 @@ class CameraUpdate(BaseModel):
     is_active: bool | None = None
     tags: list[str] | None = None
     location: str | None = None
+    location_id: str | None = None
     notes: str | None = None
     privacy_mode: str | None = None
 
@@ -63,9 +65,12 @@ class CameraResponse(BaseModel):
     stream_transport: str
     ptz_presets: list | None = None
     status: str
+    connection_error: str | None = None
     last_seen_at: str | None = None
     tags: list[str] | None = None
     location: str | None = None
+    location_id: str | None = None
+    location_name: str | None = None
     notes: str | None = None
     privacy_mode: str | None = None
     created_at: str
@@ -128,6 +133,11 @@ class DiscoveredDevice(BaseModel):
 class CameraTestResponse(BaseModel):
     reachable: bool
     rtsp_ok: bool
+    auth_ok: bool = False
+    error_code: str | None = None
+    error_message: str | None = None
     latency_ms: int | None = None
     stream_resolution: str | None = None
     stream_codec: str | None = None
+    manufacturer: str | None = None
+    open_ports: list[int] = []

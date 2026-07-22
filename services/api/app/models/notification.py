@@ -1,7 +1,7 @@
 """Notification channel model — email/webhook/push notification configs."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, String, func
 from sqlalchemy.dialects.postgresql import JSON, UUID
@@ -26,8 +26,8 @@ class Notification(Base):
         Boolean, nullable=False, default=True, server_default=func.true()
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=func.now, server_default=func.now()
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=func.now()
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=func.now, server_default=func.now()
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=func.now()
     )

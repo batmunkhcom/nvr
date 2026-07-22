@@ -119,6 +119,8 @@ async def _run_scan(scan_id: uuid.UUID):
                 return
             scan["scanned_ips"] += 1
             if info.get("reachable"):
+                if any(d["ip_address"] == ip for d in scan["devices"]):
+                    return
                 scan["found_count"] += 1
                 scan["devices"].append({
                     "ip_address": ip,
@@ -126,6 +128,7 @@ async def _run_scan(scan_id: uuid.UUID):
                     "model": info.get("model"),
                     "http_title": info.get("http_title"),
                     "stream_main_uri": info.get("stream_main_uri"),
+                    "stream_sub_uri": info.get("stream_sub_uri"),
                     "open_ports": info.get("open_ports"),
                     "has_rtsp": info.get("has_rtsp"),
                     "has_http": info.get("has_http"),
@@ -156,9 +159,43 @@ async def _run_scan(scan_id: uuid.UUID):
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
+def _expand_range(spec: str) -> list[str]:
+    """Expand '192.168.1.100-192.168.1.150' or '192.168.1.100-150' into IPs."""
+    spec = spec.strip()
+    if "-" not in spec:
+        return []
+    start_s, end_s = spec.split("-", 1)
+    try:
+        start = ipaddress.ip_address(start_s.strip())
+    except ValueError:
+        return []
+    end_s = end_s.strip()
+    if "." not in end_s:
+        # short form: '192.168.1.100-150' — last octet only
+        parts = start_s.strip().split(".")
+        if len(parts) != 4 or not end_s.isdigit():
+            return []
+        end_s = ".".join(parts[:3] + [end_s])
+    try:
+        end = ipaddress.ip_address(end_s)
+    except ValueError:
+        return []
+    if end < start:
+        start, end = end, start
+    ips: list[str] = []
+    cur = int(start)
+    while cur <= int(end) and len(ips) < 1024:
+        ips.append(str(ipaddress.ip_address(cur)))
+        cur += 1
+    return ips
+
+
 def _count_ips(subnets: list[str]) -> int:
     total = 0
     for s in subnets:
+        if "-" in s:
+            total += len(_expand_range(s))
+            continue
         try:
             net = ipaddress.ip_network(s, strict=False)
             total += min(net.num_addresses, 256)
@@ -170,11 +207,16 @@ def _count_ips(subnets: list[str]) -> int:
 def _expand_subnets(subnets: list[str]) -> list[str]:
     ips: list[str] = []
     for s in subnets:
+        if "-" in s:
+            ips.extend(_expand_range(s))
+            if len(ips) >= 1024:
+                break
+            continue
         try:
             net = ipaddress.ip_network(s, strict=False)
             for addr in net.hosts():
                 ips.append(str(addr))
-                if len(ips) >= 256:
+                if len(ips) >= 1024:
                     break
         except ValueError:
             continue

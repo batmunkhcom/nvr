@@ -65,3 +65,5 @@ alembic/versions/*.pyc
 
 # OS
 Thumbs.db
+backups/
+todo.md

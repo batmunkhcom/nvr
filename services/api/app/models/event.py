@@ -1,7 +1,7 @@
 """Event model — TimescaleDB hypertable for motion/detection/system events."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import JSON, UUID
@@ -39,5 +39,5 @@ class Event(Base):
         UUID(as_uuid=True), ForeignKey("users.id")
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=func.now, server_default=func.now(), primary_key=True
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=func.now(), primary_key=True
     )

@@ -1,7 +1,7 @@
 """Discovery log model — log entries per scan."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, ForeignKey, SmallInteger, String, func
 from sqlalchemy.dialects.postgresql import INET, JSON, MACADDR, UUID
@@ -30,5 +30,5 @@ class DiscoveryLog(Base):
     raw_response: Mapped[dict | None] = mapped_column(JSON)
     confidence: Mapped[int | None] = mapped_column(SmallInteger, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=func.now, server_default=func.now()
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=func.now()
     )

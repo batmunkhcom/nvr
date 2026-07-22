@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, SmallInteger, String, func
@@ -41,7 +41,7 @@ class StreamProfile(Base):
         Boolean, nullable=False, default=True, server_default=func.true()
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=func.now, server_default=func.now()
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=func.now()
     )
 
     camera: Mapped[Camera] = relationship("Camera", back_populates="stream_profiles")

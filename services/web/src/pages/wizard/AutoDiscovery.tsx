@@ -1,23 +1,36 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useWizardStore } from "../../store/wizardStore";
 import { useStartDiscovery, useDiscoveryStatus, useDiscoveryResults } from "../../hooks/useDiscovery";
-import { Loader2, Wifi, CheckCircle, XCircle } from "lucide-react";
+import { useCameras } from "../../hooks/useCameras";
+import { Loader2, Wifi, CheckCircle, XCircle, Search } from "lucide-react";
+
+function isValidTarget(s: string): boolean {
+  const v = s.trim();
+  if (!v) return false;
+  // CIDR: 192.168.1.0/24
+  if (/^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(v)) return true;
+  // Range: 192.168.1.100-192.168.1.150 or 192.168.1.100-150
+  if (/^\d{1,3}(\.\d{1,3}){3}-(\d{1,3}(\.\d{1,3}){3}|\d{1,3})$/.test(v)) return true;
+  return false;
+}
 
 export default function WizardDiscovery() {
   const { scanId, setScanId, setDiscoveredCameras, goNext } = useWizardStore();
   const start = useStartDiscovery();
   const status = useDiscoveryStatus(scanId);
   const results = useDiscoveryResults(scanId || "");
-  const [started, setStarted] = useState(false);
+  const { data: cameras } = useCameras();
+
+  // Pre-fill with /24 subnet derived from an existing camera, if any
+  const guess = cameras?.length
+    ? `${cameras[0].ip_address.split(".").slice(0, 3).join(".")}.0/24`
+    : "";
+  const [target, setTarget] = useState(guess);
+  const [inputError, setInputError] = useState("");
 
   useEffect(() => {
-    if (!started && !scanId) {
-      setStarted(true);
-      start.mutate({}, {
-        onSuccess: (data) => setScanId(data.scan_id),
-      });
-    }
-  }, [started, scanId]);
+    if (!target && guess) setTarget(guess);
+  }, [guess]);
 
   useEffect(() => {
     if (status.data?.status === "completed" && scanId) {
@@ -28,6 +41,19 @@ export default function WizardDiscovery() {
       });
     }
   }, [status.data?.status]);
+
+  const handleStart = (e: FormEvent) => {
+    e.preventDefault();
+    const parts = target.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!parts.length || !parts.every(isValidTarget)) {
+      setInputError("Enter a CIDR (192.168.1.0/24) or range (192.168.1.100-150)");
+      return;
+    }
+    setInputError("");
+    start.mutate({ subnets: parts }, {
+      onSuccess: (data) => setScanId(data.scan_id),
+    });
+  };
 
   const s = status.data;
   const isComplete = s?.status === "completed";
@@ -40,11 +66,64 @@ export default function WizardDiscovery() {
     return phases.length > 0 ? phases[0][0] : "Complete";
   };
 
+  if (!scanId) {
+    return (
+      <div className="max-w-xl mx-auto mt-12">
+        <h2 className="text-2xl font-bold mb-2">Network Scan</h2>
+        <p className="text-gray-400 mb-6">
+          Choose which part of your network to scan for cameras.
+        </p>
+
+        <form onSubmit={handleStart} className="bg-gray-900 rounded-lg border border-gray-800 p-6">
+          <label className="block text-sm text-gray-400 mb-2">
+            Subnet or IP range
+          </label>
+          <input
+            type="text"
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            placeholder="192.168.1.0/24 or 192.168.1.100-192.168.1.150"
+            className="w-full px-3 py-2.5 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none mb-2"
+            autoFocus
+          />
+          <p className="text-xs text-gray-600 mb-4">
+            Examples: <code className="text-gray-400">192.168.1.0/24</code>,{" "}
+            <code className="text-gray-400">192.168.1.100-150</code>,{" "}
+            <code className="text-gray-400">192.168.1.100-192.168.1.150</code>.
+            Separate multiple with commas.
+          </p>
+          {inputError && (
+            <p className="text-sm text-red-400 mb-3">{inputError}</p>
+          )}
+          <button
+            type="submit"
+            disabled={start.isPending}
+            className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg font-medium text-white flex items-center justify-center gap-2"
+          >
+            {start.isPending ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Search size={16} />
+            )}
+            Start Scan
+          </button>
+        </form>
+
+        <button
+          onClick={goNext}
+          className="mt-4 w-full px-4 py-2 text-sm text-gray-500 hover:text-gray-300"
+        >
+          Skip — add cameras manually
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-xl mx-auto mt-12">
       <h2 className="text-2xl font-bold mb-2">Network Scan</h2>
       <p className="text-gray-400 mb-6">
-        Scanning your local network for ONVIF, RTSP, and IP cameras...
+        Scanning <span className="text-gray-200 font-medium">{target}</span> for cameras...
       </p>
 
       <div className="bg-gray-900 rounded-lg border border-gray-800 p-6">
@@ -89,10 +168,10 @@ export default function WizardDiscovery() {
 
       {isFailed && (
         <button
-          onClick={goNext}
+          onClick={() => setScanId("")}
           className="mt-6 w-full px-4 py-2.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-300"
         >
-          Skip — Add Manually &rarr;
+          &larr; Change Range &amp; Retry
         </button>
       )}
     </div>

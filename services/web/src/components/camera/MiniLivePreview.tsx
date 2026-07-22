@@ -6,21 +6,23 @@ interface Props {
   cameraId: string;
 }
 
+/** Mini live preview for dashboard tiles — uses the low-bandwidth sub stream. */
 export default function MiniLivePreview({ cameraId }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [ready, setReady] = useState(false);
+  const hlsPath = `/hls/${cameraId}_sub/index.m3u8`;
 
   useEffect(() => {
     let cancelled = false;
 
     async function start() {
       try {
-        await apiClient.post(`/cameras/${cameraId}/live/start`);
+        await apiClient.post(`/cameras/${cameraId}/live/start?stream=sub`);
       } catch {}
       for (let i = 0; i < 15; i++) {
         if (cancelled) return;
         try {
-          const resp = await fetch(`/hls/${cameraId}/index.m3u8`);
+          const resp = await fetch(hlsPath);
           if (resp.ok || resp.status === 302) {
             if (!cancelled) setReady(true);
             return;
@@ -31,15 +33,15 @@ export default function MiniLivePreview({ cameraId }: Props) {
     }
     start();
     return () => { cancelled = true; };
-  }, [cameraId]);
+  }, [cameraId, hlsPath]);
 
   useEffect(() => {
     if (!ready || !videoRef.current || !Hls.isSupported()) return;
     const hls = new Hls({ enableWorker: false });
-    hls.loadSource(`/hls/${cameraId}/index.m3u8`);
+    hls.loadSource(hlsPath);
     hls.attachMedia(videoRef.current);
     return () => { hls.destroy(); };
-  }, [ready, cameraId]);
+  }, [ready, hlsPath]);
 
   return (
     <video ref={videoRef} muted autoPlay playsInline

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, SmallInteger, String, Text, func
+if TYPE_CHECKING:
+    from .location import Location
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, SmallInteger, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, INET, JSON, MACADDR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -99,6 +102,7 @@ class Camera(Base):
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="unknown", server_default="unknown"
     )
+    connection_error: Mapped[str | None] = mapped_column(String(500))
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_discovery_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     time_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -108,13 +112,23 @@ class Camera(Base):
     )
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     location: Mapped[str | None] = mapped_column(String(255))
+    location_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("locations.id", ondelete="SET NULL"),
+    )
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=func.now, server_default=func.now()
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=func.now, server_default=func.now()
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
     )
+
+    location_ref: Mapped[Location | None] = relationship("Location", lazy="selectin")
 
     stream_profiles: Mapped[list[StreamProfile]] = relationship(
         "StreamProfile", back_populates="camera", lazy="selectin"

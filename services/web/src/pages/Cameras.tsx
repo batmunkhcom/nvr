@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Wifi } from "lucide-react";
+import { AlertTriangle, Wifi } from "lucide-react";
 import { useCameras, useCameraMutations } from "../hooks/useCameras";
-import type { Camera } from "../types/camera";
+import type { Camera, TestResult } from "../types/camera";
 import CameraAddDialog from "../components/camera/CameraAddDialog";
 import CameraEditDialog from "../components/camera/CameraEditDialog";
 import DiscoveryModal from "../components/camera/DiscoveryModal";
@@ -24,6 +24,11 @@ function statusLabel(s: string): string {
   return map[s] || s;
 }
 
+function errorLabel(errorCode: string | null | undefined, fallback: string): string {
+  if (errorCode === "auth_failed") return `Authentication failed — ${fallback}`;
+  return fallback;
+}
+
 export default function Cameras() {
   const { data: cameras, isLoading } = useCameras();
   const { deleteCamera, testCamera } = useCameraMutations();
@@ -31,9 +36,8 @@ export default function Cameras() {
   const [showAdd, setShowAdd] = useState(false);
   const [editCam, setEditCam] = useState<Camera | null>(null);
   const [showDiscovery, setShowDiscovery] = useState(false);
-  const [testResult, setTestResult] = useState<
-    Record<string, { reachable: boolean; open_ports: number[] }>
-  >({});
+  const [testingAll, setTestingAll] = useState(false);
+  const [testResult, setTestResult] = useState<Record<string, TestResult>>({});
 
   const handleTest = async (id: string) => {
     try {
@@ -41,6 +45,23 @@ export default function Cameras() {
       setTestResult((prev) => ({ ...prev, [id]: result }));
     } catch {
       // ignored
+    }
+  };
+
+  const handleTestAll = async () => {
+    if (!cameras?.length) return;
+    setTestingAll(true);
+    try {
+      for (const cam of cameras) {
+        try {
+          const result = await testCamera.mutateAsync(cam.id);
+          setTestResult((prev) => ({ ...prev, [cam.id]: result }));
+        } catch {
+          // continue with next camera
+        }
+      }
+    } finally {
+      setTestingAll(false);
     }
   };
 
@@ -66,6 +87,13 @@ export default function Cameras() {
           )}
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={handleTestAll}
+            disabled={testingAll || !cameras?.length}
+            className="flex items-center gap-1.5 px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded text-sm text-white"
+          >
+            {testingAll ? "Testing..." : "Test All"}
+          </button>
           <button
             onClick={() => setShowDiscovery(true)}
             className="flex items-center gap-1.5 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-white"
@@ -128,6 +156,11 @@ export default function Cameras() {
                   {cam.model && (
                     <span className="text-xs text-gray-600">{cam.model}</span>
                   )}
+                  {(cam.location_name || cam.location) && (
+                    <span className="text-xs bg-blue-900/40 text-blue-400 px-1.5 py-0.5 rounded border border-blue-800/50">
+                      {cam.location_name || cam.location}
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5">
                   <span>{cam.ip_address}</span>
@@ -137,26 +170,41 @@ export default function Cameras() {
                     </span>
                   )}
                 </div>
-                {testResult[cam.id] && (
-                  <div className="flex items-center gap-2 text-xs mt-1">
-                    <span
-                      className={
-                        testResult[cam.id].reachable
-                          ? "text-green-400"
-                          : "text-red-400"
-                      }
-                    >
-                      {testResult[cam.id].reachable
-                        ? "Reachable"
-                        : "Not reachable"}
-                    </span>
-                    {testResult[cam.id].open_ports.length > 0 && (
-                      <span className="text-gray-600">
-                        Ports: {testResult[cam.id].open_ports.join(", ")}
-                      </span>
-                    )}
-                  </div>
-                )}
+                {(() => {
+                  const fresh = testResult[cam.id];
+                  if (fresh?.error_message) {
+                    return (
+                      <div className="flex items-center gap-1.5 text-xs mt-1 text-red-400">
+                        <AlertTriangle size={12} className="flex-shrink-0" />
+                        <span>{errorLabel(fresh.error_code, fresh.error_message)}</span>
+                      </div>
+                    );
+                  }
+                  if (fresh) {
+                    return (
+                      <div className="flex items-center gap-2 text-xs mt-1">
+                        <span className="text-green-400">
+                          OK — stream authenticated
+                          {fresh.latency_ms != null && ` (${fresh.latency_ms} ms)`}
+                        </span>
+                        {fresh.open_ports.length > 0 && (
+                          <span className="text-gray-600">
+                            Ports: {fresh.open_ports.join(", ")}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  }
+                  if (cam.connection_error) {
+                    return (
+                      <div className="flex items-center gap-1.5 text-xs mt-1 text-red-400">
+                        <AlertTriangle size={12} className="flex-shrink-0" />
+                        <span>{cam.connection_error}</span>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
                 {cam.has_ptz && (

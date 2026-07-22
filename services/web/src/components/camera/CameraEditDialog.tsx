@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useCameraMutations } from "../../hooks/useCameras";
 import type { Camera } from "../../types/camera";
+import LocationSelect from "./LocationSelect";
 
 interface Props {
   open: boolean;
@@ -18,7 +19,7 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
   const [streamSub, setStreamSub] = useState("");
   const [recordingMode, setRecordingMode] = useState("continuous");
   const [isActive, setIsActive] = useState(true);
-  const [location, setLocation] = useState("");
+  const [locationId, setLocationId] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -33,7 +34,7 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
       setStreamSub(camera.stream_sub_uri || "");
       setRecordingMode(camera.recording_mode || "continuous");
       setIsActive(camera.status !== "offline");
-      setLocation(camera.location || "");
+      setLocationId(camera.location_id || "");
       setNotes(camera.notes || "");
     }
   }, [camera]);
@@ -56,7 +57,7 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
         stream_sub_uri: streamSub || undefined,
         recording_mode: recordingMode,
         is_active: isActive,
-        location: location || undefined,
+        location_id: locationId || null,
         notes: notes || undefined,
       });
       onClose();
@@ -171,16 +172,7 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
               </label>
             </div>
           </div>
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">Location</label>
-            <input
-              type="text"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              placeholder="e.g. Front Gate"
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-gray-100 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
-            />
-          </div>
+          <LocationSelect value={locationId} onChange={setLocationId} />
           <div className="flex gap-2 pt-2">
             <button
               type="submit"

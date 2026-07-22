@@ -50,6 +50,9 @@ export function useCameraMutations() {
   const testCamera = useMutation({
     mutationFn: (id: string) =>
       apiClient.post(`/cameras/${id}/test`).then((r) => r.data?.data as TestResult),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["cameras"] });
+    },
   });
 
   return { createCamera, updateCamera, deleteCamera, testCamera };

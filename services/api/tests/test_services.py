@@ -229,3 +229,112 @@ class TestRecordingStats:
         stats = await get_recording_stats(mock_db)
         assert stats["recordings_24h"] == 0
         assert stats["storage_bytes_24h"] == 0
+
+
+class TestCameraConnectionTest:
+    """Connection test must surface auth failures, not just reachability."""
+
+    def _camera(self):
+        cam = MagicMock()
+        cam.id = uuid.uuid4()
+        cam.name = "Cam"
+        cam.ip_address = "10.0.0.1"
+        cam.username = "admin"
+        cam.encrypted_password = "enc"
+        cam.stream_main_uri = "rtsp://10.0.0.1:554/stream1"
+        cam.status = "unknown"
+        cam.connection_error = None
+        return cam
+
+    @pytest.mark.anyio
+    async def test_auth_failed_sets_degraded(self, mock_db, monkeypatch):
+        from app.services import camera_service
+        from app.services.camera_rtsp_check import RtspCheckResult
+
+        cam = self._camera()
+        mock_db.execute.return_value = _result_with_scalar_one(cam)
+
+        async def fake_probe(ip, timeout=5.0):
+            return {"reachable": True, "manufacturer": "hikvision", "open_ports": [554]}
+
+        async def fake_check(url, username=None, password=None, timeout=6.0):
+            return RtspCheckResult(
+                ok=False,
+                error_code="auth_failed",
+                error_message="Wrong username or password (RTSP 401 Unauthorized)",
+            )
+
+        monkeypatch.setattr("app.services.camera_probe.probe_ip", fake_probe)
+        monkeypatch.setattr("app.services.camera_rtsp_check.check_rtsp_stream", fake_check)
+        monkeypatch.setattr(camera_service, "decrypt_password_aes", lambda c: "pw")
+
+        result = await camera_service.test_camera_connection(cam.id, mock_db)
+
+        assert result["error_code"] == "auth_failed"
+        assert "password" in result["error_message"].lower()
+        assert result["auth_ok"] is False
+        assert cam.status == "degraded"
+        assert cam.connection_error == result["error_message"]
+
+    @pytest.mark.anyio
+    async def test_unreachable_sets_offline(self, mock_db, monkeypatch):
+        from app.services import camera_service
+
+        cam = self._camera()
+        mock_db.execute.return_value = _result_with_scalar_one(cam)
+
+        async def fake_probe(ip, timeout=5.0):
+            return {"reachable": False, "manufacturer": None, "open_ports": []}
+
+        monkeypatch.setattr("app.services.camera_probe.probe_ip", fake_probe)
+
+        result = await camera_service.test_camera_connection(cam.id, mock_db)
+
+        assert result["error_code"] == "unreachable"
+        assert cam.status == "offline"
+        assert cam.connection_error
+
+    @pytest.mark.anyio
+    async def test_success_clears_error(self, mock_db, monkeypatch):
+        from app.services import camera_service
+        from app.services.camera_rtsp_check import RtspCheckResult
+
+        cam = self._camera()
+        cam.connection_error = "old error"
+        mock_db.execute.return_value = _result_with_scalar_one(cam)
+
+        async def fake_probe(ip, timeout=5.0):
+            return {"reachable": True, "manufacturer": "dahua", "open_ports": [554]}
+
+        async def fake_check(url, username=None, password=None, timeout=6.0):
+            return RtspCheckResult(ok=True, latency_ms=12)
+
+        monkeypatch.setattr("app.services.camera_probe.probe_ip", fake_probe)
+        monkeypatch.setattr("app.services.camera_rtsp_check.check_rtsp_stream", fake_check)
+        monkeypatch.setattr(camera_service, "decrypt_password_aes", lambda c: "pw")
+
+        result = await camera_service.test_camera_connection(cam.id, mock_db)
+
+        assert result["error_code"] is None
+        assert result["auth_ok"] is True
+        assert result["latency_ms"] == 12
+        assert cam.status == "online"
+        assert cam.connection_error is None
+
+    @pytest.mark.anyio
+    async def test_no_stream_uri(self, mock_db, monkeypatch):
+        from app.services import camera_service
+
+        cam = self._camera()
+        cam.stream_main_uri = None
+        mock_db.execute.return_value = _result_with_scalar_one(cam)
+
+        async def fake_probe(ip, timeout=5.0):
+            return {"reachable": True, "manufacturer": None, "open_ports": [80]}
+
+        monkeypatch.setattr("app.services.camera_probe.probe_ip", fake_probe)
+
+        result = await camera_service.test_camera_connection(cam.id, mock_db)
+
+        assert result["error_code"] == "no_stream_uri"
+        assert cam.status == "offline"

@@ -1,7 +1,8 @@
 import { useNavigate } from "react-router-dom";
 import { useCameras } from "../../hooks/useCameras";
+import { useUiPreference } from "../../hooks/useUiPreference";
 import { Camera } from "../../types/camera";
-import { Play } from "lucide-react";
+import { LayoutGrid, Play } from "lucide-react";
 import MiniLivePreview from "./MiniLivePreview";
 
 const statusColors: Record<string, string> = {
@@ -9,6 +10,15 @@ const statusColors: Record<string, string> = {
   offline: "bg-red-500",
   degraded: "bg-yellow-500",
   unknown: "bg-gray-500",
+};
+
+const COLUMN_OPTIONS = [1, 2, 3, 4] as const;
+
+const gridColsClass: Record<number, string> = {
+  1: "grid-cols-1",
+  2: "grid-cols-2",
+  3: "grid-cols-3",
+  4: "grid-cols-4",
 };
 
 function CameraTile({ camera }: { camera: Camera }) {
@@ -53,10 +63,12 @@ function CameraTile({ camera }: { camera: Camera }) {
 
 export default function CameraGrid() {
   const { data: cameras, isLoading } = useCameras();
+  const [columns, setColumns] = useUiPreference<number>("dashboard_columns", 2);
+  const cols = gridColsClass[columns] ? columns : 2;
 
   if (isLoading) {
     return (
-      <div className="grid grid-cols-2 gap-4">
+      <div className={`grid ${gridColsClass[cols]} gap-4`}>
         {[1, 2, 3, 4].map((i) => (
           <div key={i} className="aspect-video bg-gray-800 rounded border border-gray-700 animate-pulse" />
         ))}
@@ -73,10 +85,29 @@ export default function CameraGrid() {
   }
 
   return (
-    <div className="grid grid-cols-2 gap-4">
-      {cameras.map((camera) => (
-        <CameraTile key={camera.id} camera={camera} />
-      ))}
+    <div>
+      <div className="flex items-center justify-end gap-1 mb-3">
+        <LayoutGrid size={14} className="text-gray-500 mr-1" />
+        {COLUMN_OPTIONS.map((n) => (
+          <button
+            key={n}
+            onClick={() => setColumns(n)}
+            title={`${n} column${n > 1 ? "s" : ""}`}
+            className={`w-7 h-7 rounded text-xs font-medium transition-colors ${
+              cols === n
+                ? "bg-blue-600 text-white"
+                : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+            }`}
+          >
+            {n}
+          </button>
+        ))}
+      </div>
+      <div className={`grid ${gridColsClass[cols]} gap-4`}>
+        {cameras.map((camera) => (
+          <CameraTile key={camera.id} camera={camera} />
+        ))}
+      </div>
     </div>
   );
 }

@@ -1,18 +1,27 @@
 """System endpoints — health, metrics, config, logs."""
 
-from typing import Annotated
+from datetime import UTC, datetime
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.database import get_db
-from ...middleware.auth import require_admin
+from ...middleware.auth import get_current_user, require_admin
 from ...models.system_config import SystemConfig
 from ...services.recording_service import get_recording_stats
 from ...services.self_test import run_self_test
 
 router = APIRouter(prefix="/api/v1/system", tags=["system"])
+
+UI_CONFIG_PREFIX = "ui."
+
+
+class UiConfigUpdate(BaseModel):
+    key: str
+    value: Any
 
 
 @router.get("/health")
@@ -61,6 +70,42 @@ async def update_system_config(
         db.add(config)
     await db.flush()
     return {"data": {"key": key, "value": value}}
+
+
+@router.get("/ui-config")
+async def get_ui_config(
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Return ui.* preferences — readable by any authenticated user."""
+    result = await db.execute(
+        select(SystemConfig).where(SystemConfig.key.startswith(UI_CONFIG_PREFIX))
+    )
+    return {"data": {c.key: c.value for c in result.scalars().all()}}
+
+
+@router.patch("/ui-config")
+async def update_ui_config(
+    body: UiConfigUpdate,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Upsert a ui.* preference — any authenticated user, ui.* keys only."""
+    if not body.key.startswith(UI_CONFIG_PREFIX):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Only '{UI_CONFIG_PREFIX}*' keys are allowed here",
+        )
+    result = await db.execute(select(SystemConfig).where(SystemConfig.key == body.key))
+    config = result.scalar_one_or_none()
+    if config:
+        config.value = body.value
+        config.updated_at = datetime.now(UTC)
+    else:
+        config = SystemConfig(key=body.key, value=body.value)
+        db.add(config)
+    await db.flush()
+    return {"data": {"key": body.key, "value": body.value}}
 
 
 @router.get("/logs")

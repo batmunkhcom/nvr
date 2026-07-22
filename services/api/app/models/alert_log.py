@@ -1,7 +1,7 @@
 """Alert log model — notification delivery tracking."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, ForeignKey, SmallInteger, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
@@ -26,7 +26,7 @@ class AlertLog(Base):
         UUID(as_uuid=True), ForeignKey("notifications.id"), nullable=False
     )
     sent_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=func.now, server_default=func.now()
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=func.now()
     )
     delivery_status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="sent", server_default="sent"

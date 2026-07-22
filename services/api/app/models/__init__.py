@@ -11,6 +11,7 @@ from .discovery_log import DiscoveryLog
 from .discovery_scan import DiscoveryScan
 from .event import Event
 from .event_rule import EventRule
+from .location import Location
 from .notification import Notification
 from .notification_template import NotificationTemplate
 from .recording import Recording
@@ -35,6 +36,7 @@ __all__ = [
     "DiscoveryScan",
     "Event",
     "EventRule",
+    "Location",
     "Notification",
     "NotificationTemplate",
     "Recording",

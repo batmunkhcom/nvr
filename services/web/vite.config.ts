@@ -54,7 +54,7 @@ export default defineConfig({
         ws: true,
       },
       "/hls": {
-        target: "http://10.10.0.229:8888",
+        target: process.env.MEDIAMTX_HLS_URL || "http://127.0.0.1:8888",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/hls/, ""),
         configure: (proxy) => {

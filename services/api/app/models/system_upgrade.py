@@ -1,7 +1,7 @@
 """System upgrade model — track upgrade and rollback operations."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, DateTime, String, Text, func
 from sqlalchemy.dialects.postgresql import JSON, UUID
@@ -34,9 +34,9 @@ class SystemUpgrade(Base):
     error_message: Mapped[str | None] = mapped_column(Text)
     logs: Mapped[dict | None] = mapped_column(JSON, default=dict, server_default="'{}'")
     started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=func.now, server_default=func.now()
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=func.now()
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=func.now, server_default=func.now()
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=func.now()
     )

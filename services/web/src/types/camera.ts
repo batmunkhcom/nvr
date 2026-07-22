@@ -24,13 +24,24 @@ export interface Camera {
   stream_transport: string;
   ptz_presets: string[] | null;
   status: string;
+  connection_error: string | null;
   last_seen_at: string | null;
   tags: string[] | null;
   location: string | null;
+  location_id: string | null;
+  location_name: string | null;
   notes: string | null;
   privacy_mode: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface Location {
+  id: string;
+  name: string;
+  description: string | null;
+  camera_count: number;
+  created_at: string;
 }
 
 export interface CameraCreatePayload {
@@ -46,6 +57,7 @@ export interface CameraCreatePayload {
   stream_transport: string;
   tags?: string[];
   location?: string;
+  location_id?: string | null;
   notes?: string;
 }
 
@@ -63,6 +75,7 @@ export interface CameraUpdatePayload {
   is_active?: boolean;
   tags?: string[];
   location?: string;
+  location_id?: string | null;
   notes?: string;
   privacy_mode?: string;
 }
@@ -113,6 +126,9 @@ export interface DiscoveryStatus {
 export interface TestResult {
   reachable: boolean;
   rtsp_ok: boolean;
+  auth_ok: boolean;
+  error_code: string | null;
+  error_message: string | null;
   latency_ms: number | null;
   stream_resolution: string | null;
   stream_codec: string | null;

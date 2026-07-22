@@ -129,6 +129,7 @@ services:
       S3_SECURE: ${S3_SECURE}
       DISCOVERY_SUBNETS: ${DISCOVERY_SUBNETS}
       NVR_ENCRYPTION_KEY: ${NVR_ENCRYPTION_KEY}
+      MEDIAMTX_RTSP: ${MEDIAMTX_RTSP:-rtsp://127.0.0.1:8554}
     volumes:
       - ./services/api:/app/services/api
       - ./packages:/app/packages
@@ -298,6 +299,7 @@ services:
     environment:
       VITE_API_URL: http://localhost:8000
       VITE_WS_URL: ws://localhost:8000
+      MEDIAMTX_HLS_URL: ${MEDIAMTX_HLS_URL:-http://127.0.0.1:8888}
     volumes:
       - ./services/web/src:/app/src
       - ./services/web/public:/app/public

@@ -1,7 +1,7 @@
 """Camera IP history model — track IP address changes over time."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import INET, UUID
@@ -25,7 +25,7 @@ class CameraIpHistory(Base):
     old_ip_address: Mapped[str | None] = mapped_column(INET)
     new_ip_address: Mapped[str] = mapped_column(INET, nullable=False)
     changed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=func.now, server_default=func.now()
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=func.now()
     )
     change_source: Mapped[str | None] = mapped_column(
         String(50), default="auto", server_default="auto"

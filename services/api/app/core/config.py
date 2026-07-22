@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     postgres_port: int = 5432
     postgres_db: str = "nvr"
     postgres_user: str = "nvr_user"
-    postgres_password: str = "nvr_dev_password_change_me"
+    postgres_password: str = ""  # REQUIRED via POSTGRES_PASSWORD env var
     postgres_pool_size: int = 20
     postgres_max_overflow: int = 10
 

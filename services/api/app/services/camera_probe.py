@@ -33,6 +33,19 @@ VENDOR_PATHS: dict[str, str] = {
     "samsung_hanwha": "/onvif/device_service",
 }
 
+VENDOR_SUB_PATHS: dict[str, str] = {
+    "hikvision": "/Streaming/Channels/102",
+    "dahua": "/cam/realmonitor?channel=1&subtype=1",
+    "axis": "/axis-media/media.amp?resolution=640x480",
+    "reolink": "/h264Preview_01_sub",
+    "foscam": "/videoSub",
+    "amcrest": "/cam/realmonitor?channel=1&subtype=1",
+    "uniview": "/media/video2",
+    "tp-link": "/stream2",
+    "bosch": "/video?inst=2",
+    "samsung_hanwha": "/onvif/device_service",
+}
+
 # Server header → vendor name mapping (lowercase keys)
 SERVER_TO_VENDOR: dict[str, str] = {
     "hikvision": "hikvision",
@@ -98,6 +111,7 @@ async def probe_ip(ip: str, timeout: float = 5.0) -> dict[str, Any]:
         "server_header": rtsp_info.get("server_header") or http_info.get("server_header"),
         "http_title": http_info.get("title"),
         "stream_main_uri": stream_uri,
+        "stream_sub_uri": _build_stream_uri(ip, manufacturer, sub=True),
         "has_rtsp": rtsp_info.get("reachable", False),
         "has_http": http_info.get("reachable", False),
         "has_audio": manufacturer in {"hikvision", "dahua", "axis", "reolink", "amcrest", "uniview"},
@@ -282,8 +296,11 @@ def _match_vendor(value: str, mapping: dict[str, str]) -> str | None:
     return None
 
 
-def _build_stream_uri(ip: str, manufacturer: str | None) -> str:
-    path = VENDOR_PATHS.get(manufacturer or "", "/Streaming/Channels/101")
+def _build_stream_uri(ip: str, manufacturer: str | None, sub: bool = False) -> str:
+    if sub:
+        path = VENDOR_SUB_PATHS.get(manufacturer or "", "/Streaming/Channels/102")
+    else:
+        path = VENDOR_PATHS.get(manufacturer or "", "/Streaming/Channels/101")
     return f"rtsp://{ip}:554{path}"
 
 
@@ -291,7 +308,7 @@ def _empty_result(ip: str) -> dict[str, Any]:
     return {
         "reachable": False, "ip": ip, "open_ports": [],
         "manufacturer": None, "model": None, "server_header": None,
-        "http_title": None, "stream_main_uri": None,
+        "http_title": None, "stream_main_uri": None, "stream_sub_uri": None,
         "has_rtsp": False, "has_http": False,
         "has_audio": False, "has_ptz": False, "has_onvif": False,
         "has_motion_detection": False,

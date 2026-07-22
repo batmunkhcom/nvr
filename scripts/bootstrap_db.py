@@ -12,7 +12,8 @@ from passlib.context import CryptContext
 os.environ.setdefault("POSTGRES_HOST", "localhost")
 os.environ.setdefault("POSTGRES_PORT", "5432")
 os.environ.setdefault("POSTGRES_USER", "nvr_user")
-os.environ.setdefault("POSTGRES_PASSWORD", "nvr_dev_password_change_me")
+if not os.environ.get("POSTGRES_PASSWORD"):
+    raise SystemExit("POSTGRES_PASSWORD env var is required (set it in .env)")
 os.environ.setdefault("POSTGRES_DB", "nvr")
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine

@@ -24,6 +24,7 @@ export default function WizardSummary() {
           ip_address: ip,
           username: entry.username || "admin",
           password: entry.password || undefined,
+          auth_type: "digest",
           stream_main_uri: entry.camera.stream_main_uri || undefined,
           recording_mode: entry.recordContinuous ? "continuous" : "never",
           stream_transport: "tcp",

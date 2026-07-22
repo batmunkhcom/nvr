@@ -166,18 +166,48 @@ async def camera_ptz(
     return {"data": result}
 
 
+def _authed_rtsp_uri(camera, rtsp_uri: str) -> str:
+    """Embed decrypted credentials into an RTSP URI for FFmpeg."""
+    from urllib.parse import urlparse, urlunparse
+
+    from ...core.security import decrypt_password_aes
+
+    if not (camera.username and camera.encrypted_password):
+        return rtsp_uri
+    try:
+        password = decrypt_password_aes(camera.encrypted_password)
+        parsed = urlparse(rtsp_uri)
+        authed = parsed._replace(
+            netloc=f"{camera.username}:{password}@{parsed.hostname}"
+            + (f":{parsed.port}" if parsed.port else "")
+        )
+        return urlunparse(authed)
+    except Exception:
+        return rtsp_uri
+
+
 @router.post("/{camera_id}/live/start")
 async def live_start(
     camera_id: uuid.UUID,
     current_user: Annotated[dict, Depends(require_operator)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    stream: str = "main",
 ):
     from ...services.camera_service import get_camera
     from ...services.live_relay import start_relay
+
     camera = await get_camera(camera_id, db)
-    if not camera.stream_main_uri:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Camera has no stream URI")
-    result = await start_relay(camera_id, camera.stream_main_uri, camera.stream_transport)
+    use_sub = stream == "sub" and camera.stream_sub_uri
+    source_uri = camera.stream_sub_uri if use_sub else camera.stream_main_uri
+    if not source_uri:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Camera has no stream URI",
+        )
+
+    relay_key = f"{camera_id}_sub" if use_sub else str(camera_id)
+    rtsp_uri = _authed_rtsp_uri(camera, source_uri)
+    result = await start_relay(relay_key, rtsp_uri, camera.stream_transport)
     return {"data": result}
 
 

@@ -647,4 +647,15 @@ git tag -a "v1.00.00-$(git rev-parse --short HEAD)" -m "Production release"
 
 ---
 
+🛡️ Security & GitHub Deployment Rules
+
+1. **NEVER Execute Raw Push to GitHub:**
+   - You are STRICTLY FORBIDDEN from running direct commands like `git push github main` or `git push origin` if it targets GitHub.
+   - NEVER write hardcoded IP addresses, API keys, JWT secrets, absolute paths (`/root/`, `/home/`), or `.env` contents into code files.
+
+2. **Mandatory GitHub Synchronization Skill:**
+   - Whenever the user asks to "push to github", "sync repo", "mirror code", "backup to github", or perform any GitHub deployment, YOU MUST EXCLUSIVELY USE THE `ai-deep-sanitize` SKILL.
+   - The `ai-deep-sanitize` skill ensures Git credential security, masks all sensitive data on the fly, and pushes cleanly to GitHub's `main` branch.
+
+
 *Хамгийн чухал дүрэм: Энэ төслийн кодод HARDCODE утга (URL, port, path, credential, API key) БАЙХГҮЙ. Бүгд мэдээллийн сангаас уншигдана.*
