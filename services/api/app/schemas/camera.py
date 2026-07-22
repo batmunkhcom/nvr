@@ -78,12 +78,51 @@ class DiscoveryRequest(BaseModel):
     timeout: int = Field(default=120, ge=10, le=600)
 
 
+class ProbeRequest(BaseModel):
+    ip_address: str
+
+
+class ProbeResponse(BaseModel):
+    reachable: bool
+    ip: str
+    open_ports: list[int]
+    manufacturer: str | None = None
+    model: str | None = None
+    server_header: str | None = None
+    http_title: str | None = None
+    stream_main_uri: str | None = None
+    has_rtsp: bool = False
+    has_http: bool = False
+    has_audio: bool = False
+    has_ptz: bool = False
+    has_onvif: bool = False
+    has_motion_detection: bool = False
+
+
 class DiscoveryStatusResponse(BaseModel):
     scan_id: str
     status: str
     phases: dict
     found_count: int
     progress_pct: int
+    scanned_ips: int = 0
+    total_ips: int = 0
+
+
+class DiscoveredDevice(BaseModel):
+    ip_address: str
+    manufacturer: str | None = None
+    model: str | None = None
+    http_title: str | None = None
+    stream_main_uri: str | None = None
+    open_ports: list[int] = []
+    has_rtsp: bool = False
+    has_http: bool = False
+    has_audio: bool = False
+    has_ptz: bool = False
+    has_onvif: bool = False
+    has_motion_detection: bool = False
+    confidence: int = 0
 
 
 class CameraTestResponse(BaseModel):

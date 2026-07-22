@@ -1,4 +1,4 @@
-"""Camera API endpoints — CRUD + discovery + live + test."""
+"""Camera API endpoints — CRUD + discovery + live + test + probe."""
 
 import uuid
 from typing import Annotated
@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.database import get_db
 from ...middleware.auth import get_current_user, require_operator
-from ...schemas.camera import CameraCreate, CameraUpdate, DiscoveryRequest
+from ...schemas.camera import CameraCreate, CameraUpdate, DiscoveryRequest, ProbeRequest
+from ...services.camera_probe import probe_ip
 from ...services.camera_service import (
     camera_to_dict,
     create_camera,
@@ -97,6 +98,15 @@ async def delete_camera_by_id(
     keep_recordings: bool = Query(False),
 ):
     await delete_camera(camera_id, keep_recordings, db)
+
+
+@router.post("/probe")
+async def probe_camera(
+    body: ProbeRequest,
+    current_user: Annotated[dict, Depends(require_operator)],
+):
+    result = await probe_ip(body.ip_address, timeout=6.0)
+    return {"data": result}
 
 
 @router.post("/{camera_id}/test")

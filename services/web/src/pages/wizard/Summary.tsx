@@ -8,7 +8,7 @@ export default function WizardSummary() {
   const { selectedCameras, goBack, reset } = useWizardStore();
   const addCamera = useAddCamera();
   const navigate = useNavigate();
-  const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
+  const [addedIps, setAddedIps] = useState<Set<string>>(new Set());
   const [failed, setFailed] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
   const [done, setDone] = useState(false);
@@ -17,17 +17,20 @@ export default function WizardSummary() {
     if (adding) return;
     setAdding(true);
     for (const entry of selectedCameras) {
+      const ip = entry.camera.ip_address;
       try {
         await addCamera.mutateAsync({
-          name: entry.camera.name || `Camera ${entry.camera.ip_address}`,
-          ip_address: entry.camera.ip_address,
-          username: entry.username || undefined,
+          name: entry.name || `${entry.camera.manufacturer || "Camera"} ${ip}`,
+          ip_address: ip,
+          username: entry.username || "admin",
           password: entry.password || undefined,
-          rtsp_uri: entry.camera.rtsp_uri || undefined,
+          stream_main_uri: entry.camera.stream_main_uri || undefined,
+          recording_mode: entry.recordContinuous ? "continuous" : "never",
+          stream_transport: "tcp",
         });
-        setAddedIds((s) => new Set(s).add(entry.camera.id));
+        setAddedIps((s) => new Set(s).add(ip));
       } catch {
-        setFailed((s) => new Set(s).add(entry.camera.id));
+        setFailed((s) => new Set(s).add(ip));
       }
     }
     setDone(true);
@@ -41,10 +44,10 @@ export default function WizardSummary() {
 
       <div className="space-y-2 mb-6">
         {selectedCameras.map((entry) => (
-          <div key={entry.camera.id} className="flex items-center gap-3 p-3 bg-gray-900 rounded-lg border border-gray-800">
-            {addedIds.has(entry.camera.id) ? (
+          <div key={entry.camera.ip_address} className="flex items-center gap-3 p-3 bg-gray-900 rounded-lg border border-gray-800">
+            {addedIps.has(entry.camera.ip_address) ? (
               <CheckCircle size={18} className="text-green-400" />
-            ) : failed.has(entry.camera.id) ? (
+            ) : failed.has(entry.camera.ip_address) ? (
               <XCircle size={18} className="text-red-400" />
             ) : adding ? (
               <Loader2 size={18} className="text-blue-400 animate-spin" />
@@ -52,9 +55,14 @@ export default function WizardSummary() {
               <Camera size={18} className="text-gray-500" />
             )}
             <div className="flex-1">
-              <p className="text-sm font-medium">{entry.camera.name || `Camera ${entry.camera.ip_address}`}</p>
+              <p className="text-sm font-medium">
+                {entry.name || `${entry.camera.manufacturer || "Camera"} ${entry.camera.ip_address}`}
+              </p>
               <p className="text-xs text-gray-500">
-                {entry.camera.ip_address} &middot; {entry.recordContinuous ? "Continuous" : ""}{entry.recordMotion ? " Motion" : ""}
+                {entry.camera.ip_address} &middot;
+                {entry.recordContinuous && " Continuous"}
+                {entry.recordContinuous && entry.recordMotion && " +"}
+                {entry.recordMotion && " Motion"}
                 {entry.username ? ` &middot; ${entry.username}` : ""}
               </p>
             </div>

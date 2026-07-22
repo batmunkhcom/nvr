@@ -7,7 +7,7 @@ export default function WizardDiscovery() {
   const { scanId, setScanId, setDiscoveredCameras, goNext } = useWizardStore();
   const start = useStartDiscovery();
   const status = useDiscoveryStatus(scanId);
-  const results = useDiscoveryResults(scanId);
+  const results = useDiscoveryResults(scanId || "");
   const [started, setStarted] = useState(false);
 
   useEffect(() => {
@@ -22,8 +22,8 @@ export default function WizardDiscovery() {
   useEffect(() => {
     if (status.data?.status === "completed" && scanId) {
       results.refetch().then((r) => {
-        if (r.data?.cameras) {
-          setDiscoveredCameras(r.data.cameras);
+        if (r.data) {
+          setDiscoveredCameras(r.data);
         }
       });
     }
@@ -33,6 +33,12 @@ export default function WizardDiscovery() {
   const isComplete = s?.status === "completed";
   const isRunning = s?.status === "running" || s?.status === "pending";
   const isFailed = s?.status === "failed";
+
+  const phaseLabel = () => {
+    if (!s?.phases) return "Preparing";
+    const phases = Object.entries(s.phases).filter(([,v]) => v === "running");
+    return phases.length > 0 ? phases[0][0] : "Complete";
+  };
 
   return (
     <div className="max-w-xl mx-auto mt-12">
@@ -57,7 +63,8 @@ export default function WizardDiscovery() {
               {isRunning ? "Scanning..." : isComplete ? "Scan Complete" : isFailed ? "Scan Failed" : "Initializing..."}
             </p>
             <p className="text-sm text-gray-500">
-              {s?.phase || "Preparing"} &middot; {s?.cameras_found || 0} cameras found
+              {phaseLabel()} &middot; {s?.found_count || 0} cameras found
+              {s ? ` (${s.scanned_ips}/${s.total_ips} IPs)` : ""}
             </p>
           </div>
         </div>

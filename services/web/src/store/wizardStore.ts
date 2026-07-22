@@ -1,8 +1,8 @@
 import { create } from "zustand";
-import { DiscoveredCamera } from "../hooks/useDiscovery";
+import type { DiscoveredDevice } from "../types/camera";
 
 export interface CameraSetupEntry {
-  camera: DiscoveredCamera;
+  camera: DiscoveredDevice;
   name: string;
   username: string;
   password: string;
@@ -13,15 +13,15 @@ export interface CameraSetupEntry {
 interface WizardState {
   step: number;
   scanId: string | null;
-  discoveredCameras: DiscoveredCamera[];
+  discoveredCameras: DiscoveredDevice[];
   selectedCameras: CameraSetupEntry[];
   goNext: () => void;
   goBack: () => void;
   setScanId: (id: string | null) => void;
-  setDiscoveredCameras: (cameras: DiscoveredCamera[]) => void;
-  toggleCameraSelection: (camera: DiscoveredCamera) => void;
-  updateCredential: (cameraId: string, field: "username" | "password", value: string) => void;
-  toggleRecordingType: (cameraId: string, type: "recordContinuous" | "recordMotion") => void;
+  setDiscoveredCameras: (cameras: DiscoveredDevice[]) => void;
+  toggleCameraSelection: (camera: DiscoveredDevice) => void;
+  updateCredential: (ip: string, field: "username" | "password", value: string) => void;
+  toggleRecordingType: (ip: string, type: "recordContinuous" | "recordMotion") => void;
   reset: () => void;
 }
 
@@ -38,17 +38,20 @@ export const useWizardStore = create<WizardState>((set, get) => ({
 
   toggleCameraSelection: (camera) => {
     const current = get().selectedCameras;
-    const exists = current.find((e) => e.camera.id === camera.id);
+    const exists = current.find((e) => e.camera.ip_address === camera.ip_address);
     if (exists) {
-      set({ selectedCameras: current.filter((e) => e.camera.id !== camera.id) });
+      set({ selectedCameras: current.filter((e) => e.camera.ip_address !== camera.ip_address) });
     } else {
+      const autoName = camera.manufacturer
+        ? `${camera.manufacturer} ${camera.ip_address}`
+        : `Camera ${camera.ip_address}`;
       set({
         selectedCameras: [
           ...current,
           {
             camera,
-            name: camera.name || `Camera ${camera.ip_address}`,
-            username: "",
+            name: autoName,
+            username: "admin",
             password: "",
             recordContinuous: true,
             recordMotion: false,
@@ -58,17 +61,17 @@ export const useWizardStore = create<WizardState>((set, get) => ({
     }
   },
 
-  updateCredential: (cameraId, field, value) =>
+  updateCredential: (ip, field, value) =>
     set((s) => ({
       selectedCameras: s.selectedCameras.map((e) =>
-        e.camera.id === cameraId ? { ...e, [field]: value } : e
+        e.camera.ip_address === ip ? { ...e, [field]: value } : e
       ),
     })),
 
-  toggleRecordingType: (cameraId, type) =>
+  toggleRecordingType: (ip, type) =>
     set((s) => ({
       selectedCameras: s.selectedCameras.map((e) =>
-        e.camera.id === cameraId ? { ...e, [type]: !e[type] } : e
+        e.camera.ip_address === ip ? { ...e, [type]: !e[type] } : e
       ),
     })),
 

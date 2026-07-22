@@ -11,17 +11,19 @@ export default function WizardRecordingSettings() {
 
       <div className="space-y-4">
         {selectedCameras.map((entry) => (
-          <div key={entry.camera.id} className="bg-gray-900 rounded-lg border border-gray-800 p-4">
+          <div key={entry.camera.ip_address} className="bg-gray-900 rounded-lg border border-gray-800 p-4">
             <div className="flex items-center gap-2 mb-3">
               <Camera size={16} className="text-gray-500" />
-              <p className="text-sm font-semibold">{entry.camera.name || entry.camera.ip_address}</p>
+              <p className="text-sm font-semibold">
+                {entry.camera.manufacturer || "Camera"} {entry.camera.ip_address}
+              </p>
             </div>
             <div className="flex gap-4">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={entry.recordContinuous}
-                  onChange={() => toggleRecordingType(entry.camera.id, "recordContinuous")}
+                  onChange={() => toggleRecordingType(entry.camera.ip_address, "recordContinuous")}
                   className="h-4 w-4"
                 />
                 <div>
@@ -33,7 +35,7 @@ export default function WizardRecordingSettings() {
                 <input
                   type="checkbox"
                   checked={entry.recordMotion}
-                  onChange={() => toggleRecordingType(entry.camera.id, "recordMotion")}
+                  onChange={() => toggleRecordingType(entry.camera.ip_address, "recordMotion")}
                   className="h-4 w-4"
                 />
                 <div>

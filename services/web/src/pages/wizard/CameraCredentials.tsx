@@ -6,8 +6,8 @@ export default function WizardCredentials() {
   const { selectedCameras, updateCredential, goNext, goBack } = useWizardStore();
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
 
-  const toggleShow = (id: string) =>
-    setShowPasswords((p) => ({ ...p, [id]: !p[id] }));
+  const toggleShow = (ip: string) =>
+    setShowPasswords((p) => ({ ...p, [ip]: !p[ip] }));
 
   if (!selectedCameras.length) {
     return (
@@ -25,11 +25,12 @@ export default function WizardCredentials() {
 
       <div className="space-y-4">
         {selectedCameras.map((entry) => (
-          <div key={entry.camera.id} className="bg-gray-900 rounded-lg border border-gray-800 p-4">
+          <div key={entry.camera.ip_address} className="bg-gray-900 rounded-lg border border-gray-800 p-4">
             <div className="flex items-center gap-2 mb-3">
               <Camera size={16} className="text-gray-500" />
-              <p className="text-sm font-semibold">{entry.camera.name || entry.camera.ip_address}</p>
-              <span className="text-xs text-gray-600">{entry.camera.ip_address}</span>
+              <p className="text-sm font-semibold">
+                {entry.camera.manufacturer || "Camera"} {entry.camera.ip_address}
+              </p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -37,7 +38,7 @@ export default function WizardCredentials() {
                 <input
                   type="text"
                   value={entry.username}
-                  onChange={(e) => updateCredential(entry.camera.id, "username", e.target.value)}
+                  onChange={(e) => updateCredential(entry.camera.ip_address, "username", e.target.value)}
                   placeholder="admin"
                   className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-sm text-gray-200 focus:outline-none focus:border-blue-500"
                 />
@@ -46,17 +47,17 @@ export default function WizardCredentials() {
                 <label className="block text-xs text-gray-500 mb-1">Password</label>
                 <div className="relative">
                   <input
-                    type={showPasswords[entry.camera.id] ? "text" : "password"}
+                    type={showPasswords[entry.camera.ip_address] ? "text" : "password"}
                     value={entry.password}
-                    onChange={(e) => updateCredential(entry.camera.id, "password", e.target.value)}
+                    onChange={(e) => updateCredential(entry.camera.ip_address, "password", e.target.value)}
                     placeholder="••••••••"
                     className="w-full px-3 py-2 pr-8 bg-gray-800 border border-gray-700 rounded text-sm text-gray-200 focus:outline-none focus:border-blue-500"
                   />
                   <button
-                    onClick={() => toggleShow(entry.camera.id)}
+                    onClick={() => toggleShow(entry.camera.ip_address)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
                   >
-                    {showPasswords[entry.camera.id] ? <EyeOff size={14} /> : <Eye size={14} />}
+                    {showPasswords[entry.camera.ip_address] ? <EyeOff size={14} /> : <Eye size={14} />}
                   </button>
                 </div>
               </div>

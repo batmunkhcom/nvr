@@ -18,7 +18,7 @@ export default function WizardReview() {
     );
   }
 
-  const selected = new Set(selectedCameras.map((s) => s.camera.id));
+  const selected = new Set(selectedCameras.map((s) => s.camera.ip_address));
 
   return (
     <div className="max-w-2xl mx-auto mt-8">
@@ -28,10 +28,10 @@ export default function WizardReview() {
 
       <div className="space-y-2">
         {discoveredCameras.map((cam) => {
-          const isSelected = selected.has(cam.id);
+          const isSelected = selected.has(cam.ip_address);
           return (
             <div
-              key={cam.id}
+              key={cam.ip_address}
               onClick={() => toggleCameraSelection(cam)}
               className={`flex items-center gap-4 p-3 rounded-lg border cursor-pointer transition-colors ${
                 isSelected
@@ -43,10 +43,10 @@ export default function WizardReview() {
               <Camera size={20} className="text-gray-500" />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate">
-                  {cam.name || cam.manufacturer || "Unknown Camera"}
+                  {cam.manufacturer || "Unknown"} {cam.model || ""}
                 </p>
                 <p className="text-xs text-gray-500">
-                  {cam.ip_address}:{cam.port} &middot; {cam.manufacturer} &middot; {Math.round(cam.confidence)}% confidence
+                  {cam.ip_address} &middot; Ports: {cam.open_ports.join(",")} &middot; {cam.confidence}% confidence
                 </p>
               </div>
             </div>

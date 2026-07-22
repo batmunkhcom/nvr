@@ -8,6 +8,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.security import encrypt_password_aes
 from ..models.camera import Camera
 from ..schemas.camera import CameraCreate, CameraUpdate
 
@@ -79,10 +80,16 @@ async def create_camera(body: CameraCreate, db: AsyncSession) -> Camera:
             status_code=status.HTTP_409_CONFLICT, detail="Camera with this IP already exists"
         )
 
+    encrypted_pw = None
+    if body.password:
+        encrypted_pw = encrypt_password_aes(body.password)
+
+    now = datetime.now(UTC)
     camera = Camera(
         name=body.name,
         ip_address=body.ip_address,
         username=body.username,
+        encrypted_password=encrypted_pw,
         auth_type=body.auth_type,
         stream_main_uri=body.stream_main_uri,
         stream_sub_uri=body.stream_sub_uri,
@@ -92,6 +99,8 @@ async def create_camera(body: CameraCreate, db: AsyncSession) -> Camera:
         tags=body.tags,
         location=body.location,
         notes=body.notes,
+        created_at=now,
+        updated_at=now,
     )
     db.add(camera)
     await db.flush()
@@ -118,13 +127,18 @@ async def delete_camera(camera_id: uuid.UUID, keep_recordings: bool, db: AsyncSe
 
 
 async def test_camera_connection(camera_id: uuid.UUID, db: AsyncSession) -> dict:
-    await get_camera(camera_id, db)
+    camera = await get_camera(camera_id, db)
+    from .camera_probe import probe_ip
+    ip_str = str(camera.ip_address)
+    result = await probe_ip(ip_str)
     return {
-        "reachable": True,
-        "rtsp_ok": True,
+        "reachable": result["reachable"],
+        "rtsp_ok": result.get("has_rtsp", False),
         "latency_ms": None,
         "stream_resolution": None,
         "stream_codec": None,
+        "manufacturer": result.get("manufacturer"),
+        "open_ports": result.get("open_ports", []),
     }
 
 
