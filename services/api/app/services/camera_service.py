@@ -105,6 +105,18 @@ async def create_camera(body: CameraCreate, db: AsyncSession) -> Camera:
     db.add(camera)
     await db.flush()
     logger.info("camera_created", camera_id=str(camera.id), name=camera.name)
+
+    try:
+        from .camera_probe import probe_ip
+        ip_str = str(camera.ip_address)
+        result = await probe_ip(ip_str)
+        camera.status = "online" if result["reachable"] else "offline"
+        camera.last_seen_at = datetime.now(UTC)
+        await db.flush()
+        logger.info("camera_auto_tested", camera_id=str(camera.id), status=camera.status)
+    except Exception:
+        logger.warning("camera_auto_test_failed", camera_id=str(camera.id), exc_info=True)
+
     return camera
 
 
