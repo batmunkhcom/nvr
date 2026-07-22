@@ -46,11 +46,11 @@ export default defineConfig({
     port: 3000,
     proxy: {
       "/api": {
-        target: "http://nvr-api:8000",
+        target: process.env.VITE_API_URL || "http://localhost:8000",
         changeOrigin: true,
       },
       "/ws": {
-        target: "ws://nvr-api:8000",
+        target: (process.env.VITE_API_URL || "http://localhost:8000").replace("http", "ws"),
         ws: true,
       },
       "/hls": {
