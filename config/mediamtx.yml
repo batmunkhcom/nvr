@@ -5,7 +5,8 @@ logLevel: info
 logDestinations: [stdout]
 logFile: /dev/null
 
-api: no
+api: yes
+apiAddress: :9997
 metrics: no
 pprof: no
 playback: no
@@ -19,9 +20,11 @@ rtmp: no
 
 hls:
   enabled: yes
+  address: :8888
   directory: /tmp/hls
 
 webrtc: yes
+webrtcAddress: :8889
 srt: no
 
 paths:

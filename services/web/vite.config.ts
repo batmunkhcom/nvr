@@ -53,6 +53,10 @@ export default defineConfig({
         target: "ws://nvr-api:8000",
         ws: true,
       },
+      "/hls": {
+        target: "http://10.10.0.229:8888",
+        changeOrigin: true,
+      },
     },
   },
   test: {

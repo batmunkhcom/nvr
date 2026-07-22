@@ -4,7 +4,7 @@ import uuid
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.database import get_db
@@ -27,6 +27,7 @@ from ...services.discovery_service import (
     get_discovery_status,
     start_discovery,
 )
+from ...services.live_relay import relay_status, start_relay, stop_relay
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/api/v1/cameras", tags=["cameras"])
@@ -163,6 +164,38 @@ async def camera_ptz(
     result = await ptz_action(
         camera_id, action=action, direction=direction, speed=speed, preset_id=preset_id, zoom=zoom
     )
+    return {"data": result}
+
+
+@router.post("/{camera_id}/live/start")
+async def live_start(
+    camera_id: uuid.UUID,
+    current_user: Annotated[dict, Depends(require_operator)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    from ...services.camera_service import get_camera
+    camera = await get_camera(camera_id, db)
+    if not camera.stream_main_uri:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Camera has no stream URI")
+    result = await start_relay(camera_id, camera.stream_main_uri, camera.stream_transport)
+    return {"data": result}
+
+
+@router.post("/{camera_id}/live/stop")
+async def live_stop(
+    camera_id: uuid.UUID,
+    current_user: Annotated[dict, Depends(require_operator)],
+):
+    result = await stop_relay(camera_id)
+    return {"data": result}
+
+
+@router.get("/{camera_id}/live/status")
+async def live_status(
+    camera_id: uuid.UUID,
+    current_user: Annotated[dict, Depends(get_current_user)],
+):
+    result = await relay_status(camera_id)
     return {"data": result}
 
 
