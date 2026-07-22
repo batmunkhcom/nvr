@@ -190,7 +190,7 @@ services:
     container_name: nvr-mediamtx
     network_mode: host
     volumes:
-      - ./config/mediamtx.yml:/mediamtx.yml:ro
+      - ./config/mediamtx.yml:/mediamtx.yml
       - mediamtx_hls:/tmp/hls
 
   nvr-recording-engine:

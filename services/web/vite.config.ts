@@ -57,6 +57,14 @@ export default defineConfig({
         target: "http://10.10.0.229:8888",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/hls/, ""),
+        configure: (proxy) => {
+          proxy.on("proxyRes", (proxyRes) => {
+            const loc = proxyRes.headers["location"];
+            if (loc?.startsWith("/")) {
+              proxyRes.headers["location"] = "/hls" + loc;
+            }
+          });
+        },
       },
     },
   },
