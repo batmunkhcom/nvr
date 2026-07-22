@@ -45,9 +45,12 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      "/api": "http://localhost:8000",
+      "/api": {
+        target: "http://nvr-api:8000",
+        changeOrigin: true,
+      },
       "/ws": {
-        target: "ws://localhost:8000",
+        target: "ws://nvr-api:8000",
         ws: true,
       },
     },
