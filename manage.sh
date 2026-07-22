@@ -479,6 +479,12 @@ start_cmd() {
   echo -e "${GREEN}══════ Starting NVR System ══════${NC}"
   echo ""
 
+  # Check prerequisites
+  if ! command -v ffmpeg &>/dev/null; then
+    warn "ffmpeg not found — live streaming will not work"
+    info "  Install: apt-get install ffmpeg"
+  fi
+
   # 1. Infrastructure
   info "[1/5] Starting infrastructure (DB, Redis, MinIO, MediaMTX)..."
   docker compose up -d nvr-db nvr-redis nvr-minio nvr-mediamtx 2>/dev/null
@@ -494,6 +500,8 @@ start_cmd() {
 
   # 3. API
   info "[3/5] Starting API (port 8000)..."
+  fuser -k 8000/tcp 2>/dev/null || true
+  sleep 0.5
   cd services/api
   PYTHONPATH="${PROJECT_DIR}/services/api:${PROJECT_DIR}/packages/common" \
     setsid python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 \
@@ -530,12 +538,16 @@ stop_cmd() {
     if kill -0 "$PID" 2>/dev/null; then
       info "Stopping API (PID: $PID)..."
       kill "$PID" 2>/dev/null
+      sleep 0.5
+      kill -9 "$PID" 2>/dev/null || true
       rm -f "${PID_DIR}/api.pid"
       ok "  API stopped"
     else
       rm -f "${PID_DIR}/api.pid"
     fi
   fi
+  # Force-free port 8000
+  fuser -k 8000/tcp 2>/dev/null || true
 
   # Kill Web UI
   if [[ -f "${PID_DIR}/web.pid" ]]; then
@@ -543,6 +555,8 @@ stop_cmd() {
     if kill -0 "$PID" 2>/dev/null; then
       info "Stopping Web UI (PID: $PID)..."
       kill "$PID" 2>/dev/null
+      sleep 0.5
+      kill -9 "$PID" 2>/dev/null || true
       rm -f "${PID_DIR}/web.pid"
       ok "  Web UI stopped"
     else
