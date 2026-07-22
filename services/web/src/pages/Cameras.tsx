@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Wifi } from "lucide-react";
 import { useCameras, useCameraMutations } from "../hooks/useCameras";
 import type { Camera } from "../types/camera";
 import CameraAddDialog from "../components/camera/CameraAddDialog";
 import CameraEditDialog from "../components/camera/CameraEditDialog";
+import DiscoveryModal from "../components/camera/DiscoveryModal";
 
 const statusColors: Record<string, string> = {
   online: "bg-green-500",
@@ -28,6 +30,7 @@ export default function Cameras() {
   const navigate = useNavigate();
   const [showAdd, setShowAdd] = useState(false);
   const [editCam, setEditCam] = useState<Camera | null>(null);
+  const [showDiscovery, setShowDiscovery] = useState(false);
   const [testResult, setTestResult] = useState<
     Record<string, { reachable: boolean; open_ports: number[] }>
   >({});
@@ -62,12 +65,20 @@ export default function Cameras() {
             </p>
           )}
         </div>
-        <button
-          onClick={() => setShowAdd(true)}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm text-white"
-        >
-          + Add Camera
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowDiscovery(true)}
+            className="flex items-center gap-1.5 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-white"
+          >
+            <Wifi size={14} /> Scan Network
+          </button>
+          <button
+            onClick={() => setShowAdd(true)}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm text-white"
+          >
+            + Add Camera
+          </button>
+        </div>
       </div>
 
       {isLoading && (
@@ -203,6 +214,7 @@ export default function Cameras() {
         onClose={() => setEditCam(null)}
         camera={editCam}
       />
+      <DiscoveryModal open={showDiscovery} onClose={() => setShowDiscovery(false)} />
     </div>
   );
 }

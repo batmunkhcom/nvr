@@ -6,6 +6,8 @@ import { useCameras } from "../hooks/useCameras";
 import apiClient from "../api/client";
 import type { Camera as CameraType } from "../types/camera";
 
+function wait(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
+
 export default function LiveView() {
   const params = useParams();
   const navigate = useNavigate();
@@ -16,6 +18,7 @@ export default function LiveView() {
   const [playing, setPlaying] = useState(false);
   const [hlsUrl, setHlsUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<string>("idle");
+  const cameraId = camera?.id;
 
   const toggleFullscreen = useCallback(() => setFullscreen((f) => !f), []);
 
@@ -25,13 +28,23 @@ export default function LiveView() {
     try {
       const res = await apiClient.post(`/cameras/${camera.id}/live/start`);
       const url = res.data?.data?.hls_url;
-      if (url) {
-        setHlsUrl(url);
-        setPlaying(true);
-        setStatus("playing");
-      } else {
-        setStatus("error");
+      if (!url) { setStatus("error"); return; }
+
+      for (let i = 0; i < 20; i++) {
+        await wait(1000);
+        try {
+          const st = await apiClient.get(`/cameras/${camera.id}/live/status`);
+          if (st.data?.data?.running) {
+            setHlsUrl(url);
+            setPlaying(true);
+            setStatus("playing");
+            return;
+          }
+        } catch { /* retry */ }
       }
+      setHlsUrl(url);
+      setPlaying(true);
+      setStatus("playing");
     } catch {
       setStatus("error");
     }
@@ -39,9 +52,7 @@ export default function LiveView() {
 
   const stopStream = useCallback(async () => {
     if (!camera) return;
-    try {
-      await apiClient.post(`/cameras/${camera.id}/live/stop`);
-    } catch { /* ignore */ }
+    try { await apiClient.post(`/cameras/${camera.id}/live/stop`); } catch {}
     setPlaying(false);
     setHlsUrl(null);
     setStatus("idle");
@@ -52,21 +63,14 @@ export default function LiveView() {
       const hls = new Hls({ enableWorker: false });
       hls.loadSource(hlsUrl);
       hls.attachMedia(videoRef.current);
-      return () => {
-        hls.destroy();
-      };
+      return () => { hls.destroy(); };
     }
   }, [hlsUrl]);
 
-  // Auto-start stream when page opens, auto-stop when leaving
   useEffect(() => {
-    if (camera) {
-      startStream();
-    }
-    return () => {
-      stopStream();
-    };
-  }, [camera?.id]);
+    if (camera) startStream();
+    return () => { stopStream(); };
+  }, [cameraId]);
 
   if (!camera) {
     return (

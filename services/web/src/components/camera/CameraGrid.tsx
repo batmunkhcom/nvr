@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { useCameras } from "../../hooks/useCameras";
 import { Camera } from "../../types/camera";
 import { Play } from "lucide-react";
+import MiniLivePreview from "./MiniLivePreview";
 
 const statusColors: Record<string, string> = {
   online: "bg-green-500",
@@ -20,10 +21,14 @@ function CameraTile({ camera }: { camera: Camera }) {
       onClick={() => navigate(`/live/${camera.id}`)}
       className="aspect-video bg-gray-800 rounded border border-gray-700 relative group overflow-hidden cursor-pointer hover:border-gray-500 transition-colors"
     >
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-        <span className="text-gray-500 text-4xl font-light">{camera.name.charAt(0).toUpperCase()}</span>
-        <span className="text-gray-600 text-xs">{camera.name}</span>
-      </div>
+      {isLive && <MiniLivePreview cameraId={camera.id} />}
+
+      {!isLive && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+          <span className="text-gray-500 text-4xl font-light">{camera.name.charAt(0).toUpperCase()}</span>
+          <span className="text-gray-600 text-xs">{camera.name}</span>
+        </div>
+      )}
 
       <div className="absolute top-2 left-2 flex items-center gap-1.5">
         <span className={`w-2.5 h-2.5 rounded-full ${dot} ${isLive ? "animate-pulse" : ""}`} />
