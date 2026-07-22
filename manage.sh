@@ -8,6 +8,16 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
 
+# ── load env ──
+load_env() {
+  set -a
+  [[ -f "${PROJECT_DIR}/.env" ]] && source "${PROJECT_DIR}/.env"
+  set +a
+  # Override to localhost for host-native commands (Docker exposes ports to host)
+  export POSTGRES_HOST=localhost
+  export REDIS_HOST=localhost
+}
+
 # ── colors ──
 CYAN='\033[0;36m'
 GREEN='\033[0;32m'
@@ -34,6 +44,11 @@ GRAFANA_URL="http://localhost:3001"
 help_cmd() {
   cat <<EOF
 Usage: ./manage.sh <command> [options]
+
+══ MAIN ══
+  start             Start everything (infra + API + Web + MediaMTX)
+  stop              Stop everything
+  status            Show full system status
 
 ══ INFRASTRUCTURE ══
   infra-up          Start DB + Redis + MinIO
@@ -117,6 +132,7 @@ infra_status() {
 #  DATABASE
 # ────────────────────────────────────────
 db_migrate() {
+  load_env
   info "Running Alembic migrations..."
   cd services/api
   PYTHONPATH="${PROJECT_DIR}/services/api:${PROJECT_DIR}/packages/common" \
@@ -126,6 +142,7 @@ db_migrate() {
 }
 
 db_seed() {
+  load_env
   info "Seeding initial configuration..."
   PYTHONPATH="${PROJECT_DIR}/services/api:${PROJECT_DIR}/packages/common" \
     python3 scripts/seed_db.py
@@ -140,6 +157,7 @@ db_setup() {
 }
 
 db_reset() {
+  load_env
   warn "Resetting database (all data will be lost)..."
   read -rp "Are you sure? [y/N] " confirm
   if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
@@ -160,6 +178,7 @@ db_reset() {
 #  SERVICES (DEV MODE)
 # ────────────────────────────────────────
 api_dev() {
+  load_env
   info "Starting API dev server on port 8000..."
   cd services/api
   PYTHONPATH="${PROJECT_DIR}/services/api:${PROJECT_DIR}/packages/common" \
@@ -374,6 +393,27 @@ show_status() {
   echo "── Infrastructure ──"
   docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "  No containers"
   echo ""
+  echo "── Dev Processes ──"
+  if [[ -f "${PID_DIR}/api.pid" ]]; then
+    PID=$(cat "${PID_DIR}/api.pid")
+    if kill -0 "$PID" 2>/dev/null; then
+      echo "  API:     PID $PID  → ${API_URL} (docs: ${API_DOCS})"
+    else
+      echo "  API:     (stale PID $PID — not running)"
+    fi
+  else
+    echo "  API:     not running"
+  fi
+  if [[ -f "${PID_DIR}/web.pid" ]]; then
+    PID=$(cat "${PID_DIR}/web.pid")
+    if kill -0 "$PID" 2>/dev/null; then
+      echo "  Web UI:  PID $PID  → ${WEB_URL}"
+    else
+      echo "  Web UI:  (stale PID $PID — not running)"
+    fi
+  else
+    echo "  Web UI:  not running"
+  fi
   echo "── URLs ──"
   echo "  Web UI:  ${WEB_URL}"
   echo "  API:     ${API_URL}"
@@ -427,6 +467,97 @@ all_setup() {
 }
 
 # ────────────────────────────────────────
+#  START / STOP / STATUS
+# ────────────────────────────────────────
+PID_DIR="${PROJECT_DIR}/.pids"
+
+start_cmd() {
+  load_env
+  mkdir -p "$PID_DIR"
+
+  echo ""
+  echo -e "${GREEN}══════ Starting NVR System ══════${NC}"
+  echo ""
+
+  # 1. Infrastructure
+  info "[1/5] Starting infrastructure (DB, Redis, MinIO, MediaMTX)..."
+  docker compose up -d nvr-db nvr-redis nvr-minio nvr-mediamtx 2>/dev/null
+  info "  Waiting for services to be healthy..."
+  sleep 4
+
+  # 2. DB migrations
+  info "[2/5] Running DB migrations..."
+  cd services/api
+  PYTHONPATH="${PROJECT_DIR}/services/api:${PROJECT_DIR}/packages/common" \
+    python3 -m alembic upgrade head 2>&1 | tail -1
+  cd "$PROJECT_DIR"
+
+  # 3. API
+  info "[3/5] Starting API (port 8000)..."
+  cd services/api
+  PYTHONPATH="${PROJECT_DIR}/services/api:${PROJECT_DIR}/packages/common" \
+    nohup python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 \
+    > "${PID_DIR}/api.log" 2>&1 &
+  echo $! > "${PID_DIR}/api.pid"
+  cd "$PROJECT_DIR"
+  ok "  API PID: $(cat "${PID_DIR}/api.pid")"
+
+  # 4. Web UI
+  info "[4/5] Starting Web UI (port 3000)..."
+  cd services/web
+  npm install --silent 2>/dev/null || true
+  nohup npx vite --host 0.0.0.0 --port 3000 \
+    > "${PID_DIR}/web.log" 2>&1 &
+  echo $! > "${PID_DIR}/web.pid"
+  cd "$PROJECT_DIR"
+  ok "  Web UI PID: $(cat "${PID_DIR}/web.pid")"
+
+  # 5. Verify
+  info "[5/5] Verifying services..."
+  sleep 3
+  echo ""
+  show_status
+}
+
+stop_cmd() {
+  echo ""
+  echo -e "${YELLOW}══════ Stopping NVR System ══════${NC}"
+  echo ""
+
+  # Kill API
+  if [[ -f "${PID_DIR}/api.pid" ]]; then
+    PID=$(cat "${PID_DIR}/api.pid")
+    if kill -0 "$PID" 2>/dev/null; then
+      info "Stopping API (PID: $PID)..."
+      kill "$PID" 2>/dev/null
+      rm -f "${PID_DIR}/api.pid"
+      ok "  API stopped"
+    else
+      rm -f "${PID_DIR}/api.pid"
+    fi
+  fi
+
+  # Kill Web UI
+  if [[ -f "${PID_DIR}/web.pid" ]]; then
+    PID=$(cat "${PID_DIR}/web.pid")
+    if kill -0 "$PID" 2>/dev/null; then
+      info "Stopping Web UI (PID: $PID)..."
+      kill "$PID" 2>/dev/null
+      rm -f "${PID_DIR}/web.pid"
+      ok "  Web UI stopped"
+    else
+      rm -f "${PID_DIR}/web.pid"
+    fi
+  fi
+
+  # Stop Docker containers
+  info "Stopping Docker containers..."
+  docker compose down 2>/dev/null
+  ok "All services stopped"
+  echo ""
+}
+
+# ────────────────────────────────────────
 #  MAIN
 # ────────────────────────────────────────
 
@@ -434,6 +565,8 @@ all_setup() {
 [[ -x "$0" ]] || chmod +x "$0"
 
 case "${1:-help}" in
+  start)                                 start_cmd ;;
+  stop)                                  stop_cmd ;;
   help|--help|-h)                       help_cmd ;;
   infra-up)                              infra_up ;;
   infra-down)                            infra_down ;;
