@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { AlertTriangle, Wifi } from "lucide-react";
 import { useCameras, useCameraMutations } from "../hooks/useCameras";
 import type { Camera, TestResult } from "../types/camera";
@@ -33,11 +33,24 @@ export default function Cameras() {
   const { data: cameras, isLoading } = useCameras();
   const { deleteCamera, testCamera } = useCameraMutations();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [showAdd, setShowAdd] = useState(false);
   const [editCam, setEditCam] = useState<Camera | null>(null);
   const [showDiscovery, setShowDiscovery] = useState(false);
   const [testingAll, setTestingAll] = useState(false);
   const [testResult, setTestResult] = useState<Record<string, TestResult>>({});
+
+  // Handle ?edit={id} query param from dashboard tile menu
+  useEffect(() => {
+    const editId = searchParams.get("edit");
+    if (editId && cameras) {
+      const cam = cameras.find((c) => c.id === editId);
+      if (cam) {
+        setEditCam(cam);
+        setSearchParams({}, { replace: true });
+      }
+    }
+  }, [searchParams, cameras, setSearchParams]);
 
   const handleTest = async (id: string) => {
     try {

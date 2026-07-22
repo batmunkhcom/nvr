@@ -1,8 +1,9 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useCameras } from "../../hooks/useCameras";
+import { useCameras, useCameraMutations } from "../../hooks/useCameras";
 import { useUiPreference } from "../../hooks/useUiPreference";
 import { Camera } from "../../types/camera";
-import { LayoutGrid, Play } from "lucide-react";
+import { LayoutGrid, Play, MoreVertical, Wifi, Pencil, Trash2, MonitorPlay } from "lucide-react";
 import MiniLivePreview from "./MiniLivePreview";
 
 const statusColors: Record<string, string> = {
@@ -23,37 +24,93 @@ const gridColsClass: Record<number, string> = {
 
 function CameraTile({ camera }: { camera: Camera }) {
   const navigate = useNavigate();
+  const { deleteCamera, testCamera } = useCameraMutations();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [testing, setTesting] = useState(false);
   const dot = statusColors[camera.status] || statusColors.unknown;
   const isLive = camera.status === "online";
 
+  const handleTest = async () => {
+    setMenuOpen(false);
+    setTesting(true);
+    try { await testCamera.mutateAsync(camera.id); } catch {}
+    setTesting(false);
+  };
+
+  const handleDelete = () => {
+    setMenuOpen(false);
+    if (!confirm(`Delete "${camera.name}"?`)) return;
+    deleteCamera.mutate(camera.id);
+  };
+
   return (
     <div
-      onClick={() => navigate(`/live/${camera.id}`)}
       className="aspect-video bg-gray-800 rounded border border-gray-700 relative group overflow-hidden cursor-pointer hover:border-gray-500 transition-colors"
     >
-      {isLive && <MiniLivePreview cameraId={camera.id} />}
-
-      {!isLive && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-          <span className="text-gray-500 text-4xl font-light">{camera.name.charAt(0).toUpperCase()}</span>
-          <span className="text-gray-600 text-xs">{camera.name}</span>
-        </div>
-      )}
+      <div onClick={() => navigate(`/live/${camera.id}`)} className="absolute inset-0">
+        {isLive && <MiniLivePreview cameraId={camera.id} />}
+        {!isLive && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+            <span className="text-gray-500 text-4xl font-light">{camera.name.charAt(0).toUpperCase()}</span>
+            <span className="text-gray-600 text-xs">{camera.name}</span>
+          </div>
+        )}
+      </div>
 
       <div className="absolute top-2 left-2 flex items-center gap-1.5">
         <span className={`w-2.5 h-2.5 rounded-full ${dot} ${isLive ? "animate-pulse" : ""}`} />
         <span className="text-xs text-gray-400">{camera.status}</span>
       </div>
 
-      {isLive && (
-        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+      {/* 3-dot menu */}
+      <div className="absolute top-2 right-2 z-20" onClick={(e) => e.stopPropagation()}>
+        <button
+          onClick={() => setMenuOpen(!menuOpen)}
+          className="opacity-0 group-hover:opacity-100 hover:bg-gray-700 rounded p-1 transition-all"
+        >
+          <MoreVertical size={16} className="text-gray-300" />
+        </button>
+        {menuOpen && (
+          <div className="absolute right-0 top-7 w-44 bg-gray-800 border border-gray-600 rounded shadow-xl py-1 z-30">
+            <button
+              onClick={() => { setMenuOpen(false); navigate(`/live/${camera.id}`); }}
+              className="flex items-center gap-2 w-full px-3 py-2 text-xs text-gray-200 hover:bg-gray-700"
+            >
+              <MonitorPlay size={13} /> Live View
+            </button>
+            <button
+              onClick={() => { setMenuOpen(false); navigate(`/cameras?edit=${camera.id}`); }}
+              className="flex items-center gap-2 w-full px-3 py-2 text-xs text-gray-200 hover:bg-gray-700"
+            >
+              <Pencil size={13} /> Edit Camera
+            </button>
+            <button
+              onClick={handleTest}
+              disabled={testing}
+              className="flex items-center gap-2 w-full px-3 py-2 text-xs text-gray-200 hover:bg-gray-700 disabled:opacity-50"
+            >
+              <Wifi size={13} /> {testing ? "Testing..." : "Test Connection"}
+            </button>
+            <div className="border-t border-gray-700 my-1" />
+            <button
+              onClick={handleDelete}
+              className="flex items-center gap-2 w-full px-3 py-2 text-xs text-red-400 hover:bg-gray-700"
+            >
+              <Trash2 size={13} /> Delete
+            </button>
+          </div>
+        )}
+      </div>
+
+      {isLive && !menuOpen && (
+        <div className="absolute top-2 right-8 opacity-0 group-hover:opacity-100 transition-opacity">
           <span className="flex items-center gap-1 px-2 py-0.5 bg-green-700 rounded text-xs text-white">
             <Play size={10} /> Live
           </span>
         </div>
       )}
 
-      <div className="absolute bottom-2 left-2 right-2 flex justify-between items-center opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="absolute bottom-2 left-2 right-2 flex justify-between items-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
         <span className="text-xs text-gray-400 truncate">{camera.ip_address}</span>
         {camera.has_ptz && <span className="text-xs bg-blue-700 px-1.5 py-0.5 rounded text-white">PTZ</span>}
       </div>

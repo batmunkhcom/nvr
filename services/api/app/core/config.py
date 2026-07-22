@@ -1,10 +1,16 @@
 """Application configuration loaded from environment variables (Pydantic Settings)."""
 
+import os
+
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+    model_config = {
+        "env_file": os.environ.get("NVR_ENV_FILE", os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", ".env")),
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+    }
 
     # Application
     api_host: str = "0.0.0.0"

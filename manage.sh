@@ -484,6 +484,10 @@ start_cmd() {
     warn "ffmpeg not found — live streaming will not work"
     info "  Install: apt-get install ffmpeg"
   fi
+  if ! python3 -c "import cryptography" 2>/dev/null; then
+    warn "cryptography module not found — camera auth will fail"
+    info "  Install: pip install cryptography --break-system-packages"
+  fi
 
   # 1. Infrastructure
   info "[1/5] Starting infrastructure (DB, Redis, MinIO, MediaMTX)..."

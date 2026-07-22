@@ -168,11 +168,14 @@ async def camera_ptz(
 
 def _authed_rtsp_uri(camera, rtsp_uri: str) -> str:
     """Embed decrypted credentials into an RTSP URI for FFmpeg."""
+    import structlog
     from urllib.parse import urlparse, urlunparse
 
     from ...core.security import decrypt_password_aes
 
+    logger = structlog.get_logger()
     if not (camera.username and camera.encrypted_password):
+        logger.warning("live_no_credentials", camera_id=str(camera.id))
         return rtsp_uri
     try:
         password = decrypt_password_aes(camera.encrypted_password)
@@ -182,7 +185,8 @@ def _authed_rtsp_uri(camera, rtsp_uri: str) -> str:
             + (f":{parsed.port}" if parsed.port else "")
         )
         return urlunparse(authed)
-    except Exception:
+    except Exception as exc:
+        logger.error("live_decrypt_failed", camera_id=str(camera.id), error=str(exc))
         return rtsp_uri
 
 
