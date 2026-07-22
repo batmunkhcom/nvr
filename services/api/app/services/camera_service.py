@@ -46,7 +46,9 @@ async def list_cameras(
     total = (await db.execute(count_query)).scalar() or 0
 
     sort_col = getattr(Camera, sort, Camera.name)
-    query = query.order_by(sort_col.desc()) if order == "desc" else query.order_by(sort_col.asc())
+    query = query.order_by(Camera.display_order.asc(), sort_col.asc())
+    if order == "desc":
+        query = query.order_by(Camera.display_order.asc(), sort_col.desc())
 
     result = await db.execute(query.offset(offset).limit(per_page))
     cameras = result.scalars().all()
@@ -290,6 +292,7 @@ def _camera_to_response(camera: Camera) -> dict:
         "location_id": str(camera.location_id) if camera.location_id else None,
         "location_name": camera.location_ref.name if camera.location_ref else None,
         "notes": camera.notes,
+        "display_order": camera.display_order if camera.display_order is not None else 0,
         "privacy_mode": camera.privacy_mode,
         "created_at": camera.created_at.isoformat() if camera.created_at else None,
         "updated_at": camera.updated_at.isoformat() if camera.updated_at else None,

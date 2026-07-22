@@ -1,5 +1,7 @@
 """Camera Pydantic schemas."""
 
+import uuid
+
 from pydantic import BaseModel, Field
 
 
@@ -36,6 +38,7 @@ class CameraUpdate(BaseModel):
     location: str | None = None
     location_id: str | None = None
     notes: str | None = None
+    display_order: int | None = None
     privacy_mode: str | None = None
 
 
@@ -72,6 +75,7 @@ class CameraResponse(BaseModel):
     location_id: str | None = None
     location_name: str | None = None
     notes: str | None = None
+    display_order: int = 0
     privacy_mode: str | None = None
     created_at: str
     updated_at: str
@@ -141,3 +145,12 @@ class CameraTestResponse(BaseModel):
     stream_codec: str | None = None
     manufacturer: str | None = None
     open_ports: list[int] = []
+
+
+class CameraReorderItem(BaseModel):
+    id: uuid.UUID
+    display_order: int
+
+
+class CameraReorderRequest(BaseModel):
+    cameras: list[CameraReorderItem]

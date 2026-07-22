@@ -55,7 +55,15 @@ export function useCameraMutations() {
     },
   });
 
-  return { createCamera, updateCamera, deleteCamera, testCamera };
+  const reorderCameras = useMutation({
+    mutationFn: (items: { id: string; display_order: number }[]) =>
+      apiClient.patch("/cameras/reorder", { cameras: items }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["cameras"] });
+    },
+  });
+
+  return { createCamera, updateCamera, deleteCamera, testCamera, reorderCameras };
 }
 
 export function useCameraProbe() {

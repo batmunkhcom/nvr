@@ -32,8 +32,14 @@ export interface Camera {
   location_name: string | null;
   notes: string | null;
   privacy_mode: string | null;
+  display_order: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface CameraReorderItem {
+  id: string;
+  display_order: number;
 }
 
 export interface Location {

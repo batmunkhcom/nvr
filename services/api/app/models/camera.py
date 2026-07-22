@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .location import Location
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, SmallInteger, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, SmallInteger, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, INET, JSON, MACADDR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -117,6 +117,9 @@ class Camera(Base):
         ForeignKey("locations.id", ondelete="SET NULL"),
     )
     notes: Mapped[str | None] = mapped_column(Text)
+    display_order: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),

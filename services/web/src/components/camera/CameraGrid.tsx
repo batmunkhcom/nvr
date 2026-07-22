@@ -22,7 +22,7 @@ const gridColsClass: Record<number, string> = {
   4: "grid-cols-4",
 };
 
-function CameraTile({ camera }: { camera: Camera }) {
+function CameraTile({ camera, index }: { camera: Camera; index: number }) {
   const navigate = useNavigate();
   const { deleteCamera, testCamera } = useCameraMutations();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -57,9 +57,10 @@ function CameraTile({ camera }: { camera: Camera }) {
         )}
       </div>
 
-      <div className="absolute top-2 left-2 flex items-center gap-1.5">
-        <span className={`w-2.5 h-2.5 rounded-full ${dot} ${isLive ? "animate-pulse" : ""}`} />
-        <span className="text-xs text-gray-400">{camera.status}</span>
+      <div className="absolute top-2 left-2 flex items-center gap-1.5 max-w-[75%]">
+        <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${dot} ${isLive ? "animate-pulse" : ""}`} />
+        <span className="text-xs text-gray-200 truncate">{camera.name}</span>
+        <span className="text-[10px] text-gray-500 flex-shrink-0">(cam{index + 1})</span>
       </div>
 
       {/* 3-dot menu */}
@@ -161,8 +162,8 @@ export default function CameraGrid() {
         ))}
       </div>
       <div className={`grid ${gridColsClass[cols]} gap-4`}>
-        {cameras.map((camera) => (
-          <CameraTile key={camera.id} camera={camera} />
+        {cameras.map((camera, i) => (
+          <CameraTile key={camera.id} camera={camera} index={i} />
         ))}
       </div>
     </div>

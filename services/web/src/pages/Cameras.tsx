@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { AlertTriangle, Wifi } from "lucide-react";
+import { ArrowUp, ArrowDown, AlertTriangle, Wifi } from "lucide-react";
 import { useCameras, useCameraMutations } from "../hooks/useCameras";
 import type { Camera, TestResult } from "../types/camera";
 import CameraAddDialog from "../components/camera/CameraAddDialog";
@@ -31,7 +31,7 @@ function errorLabel(errorCode: string | null | undefined, fallback: string): str
 
 export default function Cameras() {
   const { data: cameras, isLoading } = useCameras();
-  const { deleteCamera, testCamera } = useCameraMutations();
+  const { deleteCamera, testCamera, reorderCameras } = useCameraMutations();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [showAdd, setShowAdd] = useState(false);
@@ -81,6 +81,22 @@ export default function Cameras() {
   const handleDelete = async (cam: Camera) => {
     if (!confirm(`Delete "${cam.name}"? This cannot be undone.`)) return;
     deleteCamera.mutate(cam.id);
+  };
+
+  const handleMoveUp = (index: number) => {
+    if (!cameras || index <= 0) return;
+    const updated = [...cameras];
+    [updated[index - 1], updated[index]] = [updated[index], updated[index - 1]];
+    const items = updated.map((c, i) => ({ id: c.id, display_order: i }));
+    reorderCameras.mutate(items);
+  };
+
+  const handleMoveDown = (index: number) => {
+    if (!cameras || index >= cameras.length - 1) return;
+    const updated = [...cameras];
+    [updated[index], updated[index + 1]] = [updated[index + 1], updated[index]];
+    const items = updated.map((c, i) => ({ id: c.id, display_order: i }));
+    reorderCameras.mutate(items);
   };
 
   return (
@@ -147,7 +163,7 @@ export default function Cameras() {
 
       {!isLoading && cameras && cameras.length > 0 && (
         <div className="space-y-1.5">
-          {cameras.map((cam) => (
+          {cameras.map((cam, i) => (
             <div
               key={cam.id}
               className="flex items-center gap-3 bg-gray-900 border border-gray-800 hover:border-gray-700 rounded px-4 py-3 transition-colors"
@@ -218,6 +234,24 @@ export default function Cameras() {
                   }
                   return null;
                 })()}
+              </div>
+              <div className="flex items-center gap-0.5 flex-shrink-0">
+                <button
+                  onClick={() => handleMoveUp(i)}
+                  disabled={i === 0}
+                  title="Move Up"
+                  className="p-1 text-gray-500 hover:text-white hover:bg-gray-700 rounded disabled:opacity-30 disabled:hover:bg-transparent"
+                >
+                  <ArrowUp size={14} />
+                </button>
+                <button
+                  onClick={() => handleMoveDown(i)}
+                  disabled={i === (cameras?.length || 1) - 1}
+                  title="Move Down"
+                  className="p-1 text-gray-500 hover:text-white hover:bg-gray-700 rounded disabled:opacity-30 disabled:hover:bg-transparent"
+                >
+                  <ArrowDown size={14} />
+                </button>
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
                 {cam.has_ptz && (

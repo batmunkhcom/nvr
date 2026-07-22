@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.database import get_db
 from ...middleware.auth import get_current_user, require_operator
-from ...schemas.camera import CameraCreate, CameraUpdate, DiscoveryRequest, ProbeRequest
+from ...schemas.camera import CameraCreate, CameraUpdate, CameraReorderRequest, DiscoveryRequest, ProbeRequest
 from ...services.camera_probe import probe_ip
 from ...services.camera_service import (
     camera_to_dict,
@@ -98,6 +98,25 @@ async def delete_camera_by_id(
     keep_recordings: bool = Query(False),
 ):
     await delete_camera(camera_id, keep_recordings, db)
+
+
+@router.patch("/reorder")
+async def reorder_cameras(
+    body: CameraReorderRequest,
+    current_user: Annotated[dict, Depends(require_operator)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    from sqlalchemy import update
+    from ...models.camera import Camera
+
+    for item in body.cameras:
+        await db.execute(
+            update(Camera)
+            .where(Camera.id == item.id)
+            .values(display_order=item.display_order)
+        )
+    await db.commit()
+    return {"data": {"status": "ok", "count": len(body.cameras)}}
 
 
 @router.post("/probe")
