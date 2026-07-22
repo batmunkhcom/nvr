@@ -1,36 +1,9 @@
-# MediaMTX — RTSP to WebRTC bridge configuration
-# Used by stream-manager for low-latency WebRTC streaming
-
 logLevel: info
-logDestinations: [stdout]
-logFile: /dev/null
-
 api: yes
 apiAddress: :9997
-metrics: no
-pprof: no
-playback: no
-waitForClient: no
-
-rtsp:
-  protocols: [tcp, udp]
-  listenIP: 0.0.0.0
-
-rtmp: no
-
-hls:
-  enabled: yes
-  address: :8888
-  directory: /tmp/hls
-
+hls: yes
+hlsAddress: :8888
 webrtc: yes
 webrtcAddress: :8889
-srt: no
-
 paths:
   all:
-    source: publisher
-    sourceProtocol: automatic
-    publishIP: 127.0.0.1
-    runOnDemand: yes
-    runOnDemandCloseAfter: 30s

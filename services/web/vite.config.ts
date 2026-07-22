@@ -56,6 +56,7 @@ export default defineConfig({
       "/hls": {
         target: "http://10.10.0.229:8888",
         changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/hls/, ""),
       },
     },
   },

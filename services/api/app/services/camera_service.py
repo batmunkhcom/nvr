@@ -131,6 +131,9 @@ async def test_camera_connection(camera_id: uuid.UUID, db: AsyncSession) -> dict
     from .camera_probe import probe_ip
     ip_str = str(camera.ip_address)
     result = await probe_ip(ip_str)
+    camera.status = "online" if result["reachable"] else "offline"
+    camera.last_seen_at = datetime.now(UTC)
+    await db.flush()
     return {
         "reachable": result["reachable"],
         "rtsp_ok": result.get("has_rtsp", False),

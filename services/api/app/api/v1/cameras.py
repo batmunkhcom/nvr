@@ -27,7 +27,6 @@ from ...services.discovery_service import (
     get_discovery_status,
     start_discovery,
 )
-from ...services.live_relay import relay_status, start_relay, stop_relay
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/api/v1/cameras", tags=["cameras"])
@@ -174,6 +173,7 @@ async def live_start(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     from ...services.camera_service import get_camera
+    from ...services.live_relay import start_relay
     camera = await get_camera(camera_id, db)
     if not camera.stream_main_uri:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Camera has no stream URI")
@@ -186,6 +186,7 @@ async def live_stop(
     camera_id: uuid.UUID,
     current_user: Annotated[dict, Depends(require_operator)],
 ):
+    from ...services.live_relay import stop_relay
     result = await stop_relay(camera_id)
     return {"data": result}
 
@@ -195,6 +196,7 @@ async def live_status(
     camera_id: uuid.UUID,
     current_user: Annotated[dict, Depends(get_current_user)],
 ):
+    from ...services.live_relay import relay_status
     result = await relay_status(camera_id)
     return {"data": result}
 
