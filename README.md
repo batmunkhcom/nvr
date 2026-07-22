@@ -1,26 +1,26 @@
 # NVR System
 
-Олон төрлийн IP камеруудыг (ONVIF, RTSP, Hikvision, Dahua, Axis, Reolink зэрэг)
-төвлөрсөн удирдлагаар хянах, бичлэг хийх, AI-аар объект таних, хөдөлгөөн илрүүлэх
-Network Video Recorder систем.
+Centralized Network Video Recorder for managing multiple IP cameras (ONVIF, RTSP,
+Hikvision, Dahua, Axis, Reolink, etc.) with live monitoring, recording, AI object
+detection, and motion detection.
 
-## Быстрая старт
+## Quick Start
 
 ```bash
-# Инфраструктур эхлүүлэх
+# Start infrastructure
 make infra
 
-# Тохиргоог анхлан ачаалах
+# Seed initial configuration
 make seed
 
-# API сервер ажиллуулах
+# Start API server
 make dev
 ```
 
-## Бүрэн баримт бичиг
+## Full Documentation
 
-[PLAN.md](docs/PLAN.md) — Архитектур төлөвлөгөө, API spec, DB schema
+[PLAN.md](docs/PLAN.md) — Architecture plan, API spec, DB schema
 
-## Хөгжүүлэлт
+## Development
 
-[AGENTS.md](AGENTS.md) — AI хөгжүүлэлтийн чиглүүлэг
+[AGENTS.md](AGENTS.md) — AI development guide
