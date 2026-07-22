@@ -496,8 +496,8 @@ start_cmd() {
   info "[3/5] Starting API (port 8000)..."
   cd services/api
   PYTHONPATH="${PROJECT_DIR}/services/api:${PROJECT_DIR}/packages/common" \
-    nohup python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 \
-    > "${PID_DIR}/api.log" 2>&1 &
+    setsid python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 \
+    </dev/null >"${PID_DIR}/api.log" 2>&1 &
   echo $! > "${PID_DIR}/api.pid"
   cd "$PROJECT_DIR"
   ok "  API PID: $(cat "${PID_DIR}/api.pid")"
@@ -506,8 +506,8 @@ start_cmd() {
   info "[4/5] Starting Web UI (port 3000)..."
   cd services/web
   npm install --silent 2>/dev/null || true
-  nohup npx vite --host 0.0.0.0 --port 3000 \
-    > "${PID_DIR}/web.log" 2>&1 &
+  setsid npx vite --host 0.0.0.0 --port 3000 \
+    </dev/null >"${PID_DIR}/web.log" 2>&1 &
   echo $! > "${PID_DIR}/web.pid"
   cd "$PROJECT_DIR"
   ok "  Web UI PID: $(cat "${PID_DIR}/web.pid")"

@@ -72,3 +72,4 @@ todo.md
 AGENTS.md
 SKILLS/
 scripts/auto-sanitize-push.sh
+.pids/

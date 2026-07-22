@@ -5,11 +5,12 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.database import get_db
 from ...middleware.auth import get_current_user, require_admin
+from ...models.camera import Camera
 from ...models.system_config import SystemConfig
 from ...services.recording_service import get_recording_stats
 from ...services.self_test import run_self_test
@@ -25,7 +26,18 @@ class UiConfigUpdate(BaseModel):
 
 
 @router.get("/health")
-async def health():
+async def health(db: Annotated[AsyncSession, Depends(get_db)]):
+    total_result = await db.execute(select(func.count()).select_from(Camera))
+    total = total_result.scalar() or 0
+    online_result = await db.execute(
+        select(func.count()).select_from(Camera).where(Camera.status == "online")
+    )
+    online = online_result.scalar() or 0
+    offline_result = await db.execute(
+        select(func.count()).select_from(Camera).where(Camera.status == "offline")
+    )
+    offline = offline_result.scalar() or 0
+
     return {
         "data": {
             "status": "healthy",
@@ -37,7 +49,7 @@ async def health():
                 "minio": "ok",
                 "ffmpeg": "ok",
             },
-            "cameras": {"total": 0, "online": 0, "offline": 0},
+            "cameras": {"total": total, "online": online, "offline": offline},
             "storage": {"total_pct": 0, "status": "ok"},
             "recording": {"active_recordings": 0, "errors_24h": 0},
         }
