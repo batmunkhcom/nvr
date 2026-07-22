@@ -129,7 +129,9 @@ services:
       S3_SECURE: ${S3_SECURE}
       DISCOVERY_SUBNETS: ${DISCOVERY_SUBNETS}
       NVR_ENCRYPTION_KEY: ${NVR_ENCRYPTION_KEY}
-      MEDIAMTX_RTSP: ${MEDIAMTX_RTSP:-rtsp://127.0.0.1:8554}
+      MEDIAMTX_RTSP: ${MEDIAMTX_RTSP:-rtsp://host.docker.internal:8554}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./services/api:/app/services/api
       - ./packages:/app/packages
@@ -286,6 +288,8 @@ services:
       - "443:443"
     depends_on:
       - nvr-api
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - nvr-net
 
@@ -299,7 +303,9 @@ services:
     environment:
       VITE_API_URL: http://localhost:8000
       VITE_WS_URL: ws://localhost:8000
-      MEDIAMTX_HLS_URL: ${MEDIAMTX_HLS_URL:-http://127.0.0.1:8888}
+      MEDIAMTX_HLS_URL: ${MEDIAMTX_HLS_URL:-http://host.docker.internal:8888}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./services/web/src:/app/src
       - ./services/web/public:/app/public
