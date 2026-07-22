@@ -67,3 +67,8 @@ alembic/versions/*.pyc
 Thumbs.db
 backups/
 todo.md
+
+# Local-only files (sensitive / agent-internal)
+AGENTS.md
+SKILLS/
+scripts/auto-sanitize-push.sh
