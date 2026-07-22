@@ -29,6 +29,8 @@ export default function LiveView() {
         setHlsUrl(url);
         setPlaying(true);
         setStatus("playing");
+      } else {
+        setStatus("error");
       }
     } catch {
       setStatus("error");
@@ -45,24 +47,6 @@ export default function LiveView() {
     setStatus("idle");
   }, [camera]);
 
-  const doPtz = useCallback(async (direction: string) => {
-    if (!camera) return;
-    try {
-      await apiClient.post(`/cameras/${camera.id}/ptz`, null, {
-        params: { action: "move", direction, speed: 0.5 },
-      });
-    } catch { /* ignore */ }
-  }, [camera]);
-
-  const doZoom = useCallback(async (z: string) => {
-    if (!camera) return;
-    try {
-      await apiClient.post(`/cameras/${camera.id}/ptz`, null, {
-        params: { action: "move", zoom: z, speed: 0.5 },
-      });
-    } catch { /* ignore */ }
-  }, [camera]);
-
   useEffect(() => {
     if (hlsUrl && videoRef.current && Hls.isSupported()) {
       const hls = new Hls({ enableWorker: false });
@@ -74,11 +58,15 @@ export default function LiveView() {
     }
   }, [hlsUrl]);
 
+  // Auto-start stream when page opens, auto-stop when leaving
   useEffect(() => {
+    if (camera) {
+      startStream();
+    }
     return () => {
       stopStream();
     };
-  }, []);
+  }, [camera?.id]);
 
   if (!camera) {
     return (
