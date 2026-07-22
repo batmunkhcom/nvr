@@ -26,7 +26,10 @@ export const useAuthStore = create<AuthStore>((set) => ({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password }),
     });
-    if (!res.ok) throw new Error("Login failed");
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(errBody?.error?.message || `Login failed (${res.status})`);
+    }
     const json = await res.json();
     const { access_token, refresh_token, user } = json;
     localStorage.setItem("access_token", access_token);

@@ -1,12 +1,19 @@
-import { useState, FormEvent } from "react";
+import { useState, FormEvent, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../store/authStore";
 
 export default function Login() {
   const login = useAuthStore((s) => s.login);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (isAuthenticated) navigate("/dashboard", { replace: true });
+  }, [isAuthenticated, navigate]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -14,8 +21,9 @@ export default function Login() {
     setLoading(true);
     try {
       await login(username, password);
-    } catch {
-      setError("Invalid username or password");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Invalid username or password";
+      setError(msg);
     } finally {
       setLoading(false);
     }
