@@ -2,126 +2,89 @@
 
 > **Status legend:** `[ ]` not started, `[~]` in progress, `[x]` done, `[-]` blocked/not applicable
 > **Created:** 2026-07-23
-> **Last updated:** 2026-07-23 (v2 — final plan with all features)
+> **Last updated:** 2026-07-23 (v3 — reviewed & simplified MVP)
 
 ---
 
 ## Overview
 
-Network monitoring dashboard showing real-time bandwidth, latency, packet loss per camera. Historical data stored for trend analysis. Linear charts with time-range selector. All cameras overview + location-based filtering. WebSocket real-time push. Anomaly detection. Capacity planning. Export & reporting.
+Network monitoring dashboard showing real-time bandwidth, latency, packet loss per camera. Historical data stored for trend analysis. Linear charts with time-range selector. All cameras overview + location-based filtering.
+
+**MVP scope:** Core metrics collection, dashboard UI, basic alerts. Advanced features (WebSocket push, anomaly detection, topology map, export/reports) deferred to later phases.
 
 ---
 
-## Phase 1: Data Collection (Backend)
+## Phase 1: Database Schema (MVP — 3 Tables)
 
-### 1.1 Database Schema — Network Metrics Storage
-
-**Table:** `network_metrics` (TimescaleDB hypertable)
+### 1.1 `network_metrics` — Time-series metrics storage
 
 ```sql
 CREATE TABLE network_metrics (
-    camera_id           UUID NOT NULL REFERENCES cameras(id),
-    recorded_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    id              BIGSERIAL PRIMARY KEY,          -- Timeseries ID (not UUID)
+    camera_id       UUID NOT NULL REFERENCES cameras(id),
+    recorded_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     
-     -- Bandwidth (Mbps)
-    inbound_mbps        NUMERIC(10,2),    -- RTSP stream incoming bandwidth
-    outbound_mbps       NUMERIC(10,2),    -- FFmpeg relay outgoing bandwidth
-    theoretical_max_mbps NUMERIC(8,2),    -- Expected max based on resolution/profile
+      -- Bandwidth (Mbps)
+    inbound_mbps    NUMERIC(10,2),                  -- RTSP stream incoming bandwidth
+    outbound_mbps   NUMERIC(10,2),                  -- FFmpeg relay outgoing bandwidth
     
-     -- Latency (ms)
-    rtt_ms              NUMERIC(8,2),     -- Round-trip time to camera IP
-    jitter_ms           NUMERIC(8,2),     -- RTT variation
-    rtsp_latency        NUMERIC(8,2),     -- RTSP session setup latency
-    hls_segment_delay_s NUMERIC(6,2),     -- MediaMTX HLS segment generation delay
+      -- Latency (ms)
+    rtt_ms          NUMERIC(8,2),                   -- Round-trip time to camera IP
+    jitter_ms       NUMERIC(8,2),                   -- RTT variation
+    rtsp_latency    NUMERIC(8,2),                   -- RTSP session setup latency
     
-     -- Packet stats
-    packets_sent        BIGINT,           -- ICMP/RTSP packets sent
-    packets_recv        BIGINT,           -- Packets received
-    packet_loss_pct     NUMERIC(5,2),     -- Percentage loss
-    retransmission_cnt  BIGINT DEFAULT 0, -- RTSP retransmissions
+      -- Packet stats
+    packets_sent    BIGINT,                         -- ICMP/RTSP packets sent
+    packets_recv    BIGINT,                         -- Packets received
+    packet_loss_pct NUMERIC(5,2),                   -- Percentage loss
     
-     -- Connection quality (NEW)
-    fps_current         INTEGER,          -- Current FPS from FFmpeg stderr
-    fps_expected        INTEGER,          -- Expected FPS from camera config
-    fps_variance_pct    NUMERIC(6,2),     -- FPS fluctuation % (stability indicator)
-    bitrate_current     NUMERIC(10,2),    -- Current bitrate from FFmpeg stderr
-    bitrate_variance_pct NUMERIC(6,2),    -- Bitrate variance % (buffering indicator)
-    rtsp_reconnect_cnt  INTEGER DEFAULT 0, -- Session reconnection count
+      -- Connection quality
+    fps_current     INTEGER,                        -- Current FPS from FFmpeg stderr
+    bitrate_current NUMERIC(10,2),                  -- Current bitrate from FFmpeg stderr
+    rtsp_reconnect_cnt INTEGER DEFAULT 0,           -- Session reconnection count
     
-     -- FFmpeg process metrics
-    ffmpeg_pid          INTEGER,          -- FFmpeg process ID (if running)
-    ffmpeg_cpu          NUMERIC(5,2),     -- CPU usage of FFmpeg process
-    ffmpeg_memory_mb    NUMERIC(8,2),     -- Memory usage of FFmpeg process
-    ffmpeg_threads      INTEGER,          -- Number of FFmpeg encoder threads
+      -- FFmpeg process metrics
+    ffmpeg_pid      INTEGER,                        -- FFmpeg process ID (if running)
+    ffmpeg_cpu      NUMERIC(5,2),                   -- CPU usage of FFmpeg process
+    ffmpeg_memory_mb NUMERIC(8,2),                  -- Memory usage of FFmpeg process
     
-     -- Anomaly detection (NEW)
-    anomaly_score       NUMERIC(4,2) DEFAULT 0.0,  -- 0-100 deviation from baseline
-    anomaly_type        VARCHAR(50),                -- 'bandwidth_spike', 'latency_surge', 'fps_drop', etc.
-    
-     -- Status
-    status              VARCHAR(20) DEFAULT 'unknown',   -- online/offline/degraded
-    error_message       TEXT,
-    
-     -- Raw data for debugging
-    ffmpeg_stderr_sample TEXT        -- Last 500 chars of FFmpeg stderr
+      -- Status
+    status          VARCHAR(20) DEFAULT 'unknown',  -- online/offline/degraded
+    error_message   TEXT
 );
 
--- Hypertable for time-series optimization
-SELECT create_hypertable('network_metrics', 'recorded_at');
+-- Hypertable if TimescaleDB available, otherwise regular table
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+        PERFORM create_hypertable('network_metrics', 'recorded_at', if_not_exists => TRUE);
+    END IF;
+END $$;
 
 -- Indexes
 CREATE INDEX idx_network_metrics_camera_time ON network_metrics (camera_id, recorded_at DESC);
 CREATE INDEX idx_network_metrics_time ON network_metrics (recorded_at DESC);
-CREATE INDEX idx_network_metrics_status ON network_metrics (status, recorded_at DESC);
-CREATE INDEX idx_network_metrics_anomaly ON network_metrics (anomaly_score DESC, recorded_at DESC) WHERE anomaly_score > 0;
+CREATE INDEX idx_network_metrics_status ON network_metrics (status, recorded_at DESC) WHERE status != 'online';
 ```
 
-**Table:** `network_metrics_baseline` (per-camera baseline for anomaly detection)
-
-```sql
-CREATE TABLE network_metrics_baseline (
-    camera_id         UUID PRIMARY KEY REFERENCES cameras(id),
-    
-     -- Baseline averages (calculated from first 7 days of data)
-    avg_bandwidth_mbps NUMERIC(8,2),
-    avg_latency_ms     NUMERIC(8,2),
-    avg_fps            NUMERIC(6,2),
-    avg_bitrate        NUMERIC(10,2),
-    
-     -- Standard deviations (for anomaly threshold)
-    stddev_bandwidth   NUMERIC(8,2),
-    stddev_latency     NUMERIC(8,2),
-    stddev_fps         NUMERIC(6,2),
-    
-     -- Time-of-day patterns (hourly buckets for "same time comparison")
-    hourly_pattern    JSONB,  -- { "00": {bw: 4.2, lat: 12}, "01": {...}, ... }
-    
-     -- Calculation metadata
-    calculated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    data_points       INTEGER NOT NULL DEFAULT 0,
-    valid_until       TIMESTAMPTZ
-);
-```
-
-**Table:** `camera_network_config` (per-camera monitoring config)
+### 1.2 `camera_network_config` — Per-camera monitoring config
 
 ```sql
 CREATE TABLE camera_network_config (
     camera_id         UUID PRIMARY KEY REFERENCES cameras(id),
     
-     -- Polling interval (seconds)
+      -- Polling interval (seconds)
     poll_interval     INTEGER NOT NULL DEFAULT 30,
     
-     -- ICMP ping config
+      -- ICMP ping config
     ping_enabled      BOOLEAN NOT NULL DEFAULT true,
     ping_count        INTEGER NOT NULL DEFAULT 3,
     ping_timeout      INTEGER NOT NULL DEFAULT 5,
     
-     -- RTSP quality check
+      -- RTSP quality check
     rtsp_check_enabled BOOLEAN NOT NULL DEFAULT true,
-    rtsp_sample_size   INTEGER NOT NULL DEFAULT 100,   -- frames to sample
     
-     -- Alert thresholds
+      -- Alert thresholds
     bandwidth_warn_mbps NUMERIC(8,2) DEFAULT 10.0,
     bandwidth_crit_mbps NUMERIC(8,2) DEFAULT 5.0,
     latency_warn_ms     NUMERIC(8,2) DEFAULT 100,
@@ -129,17 +92,8 @@ CREATE TABLE camera_network_config (
     packet_loss_warn_pct NUMERIC(5,2) DEFAULT 1.0,
     packet_loss_crit_pct NUMERIC(5,2) DEFAULT 5.0,
     
-     -- Anomaly thresholds (NEW)
-    anomaly_stddev_multiplier NUMERIC(4,2) DEFAULT 2.0,  -- X standard deviations = anomaly
-    
-     -- Historical data retention (days)
+      -- Historical data retention (days)
     retention_days INTEGER NOT NULL DEFAULT 90,
-    
-     -- WebSocket push enabled (NEW)
-    ws_push_enabled BOOLEAN NOT NULL DEFAULT true,
-    
-     -- Baseline recalculation schedule (NEW)
-    baseline_recalc_interval_days INTEGER NOT NULL DEFAULT 7,
     
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -147,27 +101,31 @@ CREATE TABLE camera_network_config (
 
 -- Seed with all existing cameras
 INSERT INTO camera_network_config (camera_id)
-SELECT id FROM cameras;
+SELECT id FROM cameras ON CONFLICT (camera_id) DO NOTHING;
 ```
 
-**Table:** `network_alerts` (alert history, integrates with existing `alert_log`)
+### 1.3 `network_alerts` — Alert history (independent from `alert_log`)
+
+**Note:** Existing `alert_log` table tracks notification delivery (event_id → notification_id). `network_alerts` is a separate table for network-specific alerts, linked to `events.id` for correlation.
 
 ```sql
 CREATE TABLE network_alerts (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     camera_id       UUID NOT NULL REFERENCES cameras(id),
-    alert_type      VARCHAR(50) NOT NULL,  -- 'bandwidth_low', 'latency_high', 'packet_loss_high', 'camera_offline', 'fps_drop', 'anomaly_detected'
-    severity        VARCHAR(10) NOT NULL,  -- 'warning', 'critical'
+    event_id        UUID REFERENCES events(id),     -- Correlate with existing events
+    
+      -- Alert details
+    alert_type      VARCHAR(50) NOT NULL,           -- 'bandwidth_low', 'latency_high', 'packet_loss_high', 'camera_offline'
+    severity        VARCHAR(10) NOT NULL,           -- 'warning', 'critical'
     message         TEXT NOT NULL,
     triggered_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     acknowledged_at TIMESTAMPTZ,
     acknowledged_by UUID REFERENCES users(id),
     resolved_at     TIMESTAMPTZ,
-    metadata        JSONB,  -- { current_value: 4.2, threshold: 5.0, unit: 'mbps' }
     
-     -- Correlation (NEW)
-    related_camera_ids UUID[],  -- Other cameras affected at same time
-    location          VARCHAR(255),  -- Denormalized for quick filtering
+      -- Alert context
+    metadata        JSONB,                          -- { current_value: 4.2, threshold: 5.0, unit: 'mbps' }
+    location        VARCHAR(255),                   -- Denormalized for quick filtering
     
     CONSTRAINT chk_network_alert_severity CHECK (severity IN ('warning', 'critical'))
 );
@@ -177,154 +135,262 @@ CREATE INDEX idx_network_alerts_unack ON network_alerts (acknowledged_at IS NULL
 CREATE INDEX idx_network_alerts_type ON network_alerts (alert_type, triggered_at DESC);
 ```
 
-**Table:** `network_topology` (NEW — physical/logical network map)
+### 1.4 Deferred Tables (Future Phases)
 
-```sql
-CREATE TABLE network_topology (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name            VARCHAR(255) NOT NULL,           -- 'Main Switch', 'Floor 2 AP', etc.
-    type            VARCHAR(50) NOT NULL,             -- 'switch', 'access_point', 'router', 'nvr', 'camera'
-    parent_id       UUID REFERENCES network_topology(id),  -- Hierarchical: switch → AP → camera
-    ip_address      INET,
-    mac_address     MACADDR,
-    location_id     UUID REFERENCES locations(id),
-    description     TEXT,
-    
-     -- Port/bandwidth capacity (NEW)
-    total_bandwidth_mbps NUMERIC(8,2),                -- Switch port aggregate capacity
-    used_bandwidth_mbps NUMERIC(8,2) DEFAULT 0.0,     -- Current utilization
-    port_count      INTEGER,                           -- Total ports on switch
-    active_ports    INTEGER DEFAULT 0,                 -- Ports in use
-    
-     -- Status
-    status          VARCHAR(20) DEFAULT 'unknown',     -- online/offline/maintenance
-    last_seen_at    TIMESTAMPTZ,
-    
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+These tables are planned but **NOT** in MVP:
 
-CREATE INDEX idx_network_topology_location ON network_topology (location_id);
-CREATE INDEX idx_network_topology_type ON network_topology (type);
+| Table | Phase | Description |
+|-------|-------|-------------|
+| `network_metrics_baseline` | Phase 5+ | Baseline averages for anomaly detection |
+| `network_topology` | Phase 6+ | Physical network map (switch/AP/camera hierarchy) |
+| `network_metrics_hourly` | Phase 4 | Downsampled hourly aggregates |
+| `network_metrics_daily` | Phase 4 | Downsampled daily aggregates |
+
+---
+
+## Phase 2: Backend — Metrics Collector Service
+
+### 2.1 File Structure
+
+```
+services/api/app/services/
+├── network_monitor.py        # Main collector service + background task
+└── network_alerts.py         # Alert evaluation + creation logic
 ```
 
-### 1.2 Network Metrics Collector Service
-
-**File:** `services/api/app/services/network_monitor.py`
+### 2.2 `network_monitor.py` — Core Collector
 
 **Responsibilities:**
-- Periodic RTSP stream sampling (get FFmpeg stderr stats)
-- ICMP ping to camera IP (async subprocess or `scapy`)
-- CPU/memory tracking for FFmpeg processes
-- HLS segment delay measurement from MediaMTX
-- FPS variance + bitrate variance calculation
-- Anomaly detection (baseline comparison)
+- Periodic ping to camera IP (ICMP)
+- Parse FFmpeg stderr for FPS + bitrate stats
 - Store metrics in `network_metrics` table
-- Alert threshold evaluation → create `network_alerts` records
-- Historical data cleanup (cron job / background task)
-- WebSocket broadcast for real-time updates
-- Baseline recalculation (weekly)
+- Staggered polling: each camera polls at different offset to avoid simultaneous spikes
 
-**Key methods:**
+**Key design decisions:**
+
+1. **Staggered polling** — Camera N starts at `(N * poll_interval / total_cameras) % poll_interval`. Prevents all 10 cameras from pinging simultaneously (2s sequential → ~0.5s effective).
+
+2. **Concurrent limit** — `asyncio.Semaphore(5)` limits concurrent ping/parse operations. Prevents API thread starvation.
+
+3. **FFmpeg stderr parsing** — Use structured `-stats_interval 1` flag output instead of fragile regex on frame= lines. Parse key=value pairs:
+   ```
+   size=      8192kB time=00:00:10.50 bitrate=6376.4kbits/s speed=1x    
+   video:8100kB audio:0kB subtitle:0kB other streams:0kB global headers:0kB
+   Output fps:25.00
+   ```
+
+4. **Error resilience** — Failed ping/parse per camera does NOT stop other cameras. Each camera collection is wrapped in try/except, failures logged but collected separately.
+
+5. **No TimescaleDB fallback** — Migration checks for `timescaledb` extension. If unavailable, creates regular table. Queries work either way (indexes provide similar performance for small datasets).
 
 ```python
 class NetworkMonitor:
-    async def collect_camera_metrics(self, camera_id: UUID) -> dict
-    async def ping_camera(self, ip_address: str) -> PingResult
-    async def parse_ffmpeg_stats(self, ffmpeg_output: str) -> FFmpegStats
-    async def measure_hls_segment_delay(self, camera_id: UUID) -> float | None
-    async def calculate_fps_variance(self, camera_id: UUID) -> float
-    async def calculate_bitrate_variance(self, camera_id: UUID) -> float
-    async def detect_anomaly(self, camera_id: UUID, metrics: dict) -> AnomalyResult | None
-    async def store_metrics(self, metrics: dict) -> None
-    async def evaluate_alerts(self, camera_id: UUID, metrics: dict) -> list[Alert]
-    async def cleanup_old_data(self, retention_days: int) -> int
-    async def recalculate_baseline(self, camera_id: UUID) -> BaselineResult
-    async def broadcast_metric(self, camera_id: UUID, metrics: dict) -> None  # WebSocket push
-    async def background_collector(self) -> None  # Main loop
+    def __init__(self):
+        self.running = False
+        self._task: asyncio.Task | None = None
+        self._semaphore = asyncio.Semaphore(5)  # Concurrent limit
+        self._camera_offsets: dict[UUID, float] = {}  # Stagger offsets
+    
+    async def start(self):
+        """Start background collection loop. Called from app lifespan."""
+        if self.running:
+            return
+        self.running = True
+        self._task = asyncio.create_task(self._collect_loop())
+    
+    async def stop(self):
+        """Stop background collection. Called on app shutdown."""
+        self.running = False
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+    
+    async def _collect_loop(self):
+        """Main polling loop with staggered offsets."""
+        while self.running:
+            start_time = asyncio.get_event_loop().time()
+            
+            # Get all cameras with monitoring enabled
+            cameras = await self._get_monitored_cameras()
+            
+            # Collect metrics for each camera (concurrent, semaphore-limited)
+            tasks = [self._collect_single_camera(c, offset) 
+                     for c, offset in self._camera_offsets.items()]
+            await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Calculate next sleep: align to poll_interval boundaries
+            elapsed = asyncio.get_event_loop().time() - start_time
+            poll_interval = 30  # Default (can be per-camera avg)
+            sleep_time = max(0, poll_interval - elapsed)
+            await asyncio.sleep(sleep_time)
+    
+    async def _collect_single_camera(self, camera: Camera, offset_seconds: float):
+        """Collect metrics for one camera. Independent error handling."""
+        # Stagger start
+        await asyncio.sleep(offset_seconds)
+        
+        async with self._semaphore:
+            try:
+                metrics = await self.collect_metrics(camera)
+                if metrics:
+                    await self.store_metrics(metrics)
+                    await self.evaluate_alerts(camera, metrics)
+            except Exception as e:
+                logger.error("network_collect_error", camera_id=str(camera.id), error=str(e))
+    
+    async def collect_metrics(self, camera: Camera) -> dict | None:
+        """Collect all metrics for one camera. Returns None if collection failed."""
+        results = {}
+        
+        # 1. ICMP ping
+        if camera.config.ping_enabled:
+            ping_result = await self.ping_camera(camera.ip_address)
+            results.update(ping_result)
+        
+        # 2. FFmpeg stats parsing
+        if camera.config.rtsp_check_enabled:
+            ffmpeg_stats = await self.parse_ffmpeg_stats(camera.id)
+            results.update(ffmpeg_stats)
+        
+        # Determine status
+        results['status'] = self._determine_status(results)
+        
+        return results if results else None
+    
+    async def ping_camera(self, ip_address: str) -> dict:
+        """ICMP ping via subprocess. Returns rtt_ms, jitter_ms, packet_loss_pct."""
+        # Use "ping -c 3 -W 5 <ip>" in executor
+        # Parse output for avg RTT, min/max RTT (for jitter), packet loss %
+        pass
+    
+    async def parse_ffmpeg_stats(self, camera_id: UUID) -> dict:
+        """Parse /proc/[pid]/stat + FFmpeg stderr for FPS, bitrate, CPU, memory."""
+        # 1. Find FFmpeg PID from STREAM_DICT (live_relay.py)
+        # 2. Read /proc/{pid}/stat for CPU %
+        # 3. Read /proc/{pid}/status for VmRSS (memory MB)
+        # 4. Parse last FFmpeg stderr line for fps=, bitrate=
+        pass
+    
+    def _determine_status(self, metrics: dict) -> str:
+        """Determine camera status from collected metrics."""
+        if not metrics.get('rtt_ms'):
+            return 'offline'
+        if metrics.get('packet_loss_pct', 0) > 5.0:
+            return 'degraded'
+        return 'online'
+    
+    async def store_metrics(self, metrics: dict) -> None:
+        """Insert metrics into database."""
+        # INSERT INTO network_metrics (camera_id, recorded_at, ...) VALUES (...)
+        pass
+    
+    async def evaluate_alerts(self, camera: Camera, metrics: dict) -> None:
+        """Check thresholds, create alerts if breached."""
+        # Compare metrics against camera_network_config thresholds
+        # If breached AND no active alert of same type in last 5 min → create alert
+        pass
 ```
 
-**RTSP stream sampling approach:**
-- Parse FFmpeg stderr for `frame=`, `fps=`, `bitrate=` stats
-- Sample every N seconds (configurable per camera)
-- Calculate bandwidth from bitrate
-- Track FPS drops as quality indicator (`fps_variance_pct`)
-- Track bitrate stability (`bitrate_variance_pct`) — high variance = potential buffering
+### 2.3 `network_alerts.py` — Alert Logic
 
-**ICMP ping approach:**
-- Use `asyncio.create_subprocess_exec("ping", ...)` or Python `scapy`
-- Send 3 pings, calculate RTT, jitter, packet loss
-- Non-blocking (run in executor)
+**Responsibilities:**
+- Evaluate threshold breaches
+- Deduplicate alerts (same type within 5-minute cooldown)
+- Auto-resolve when metrics return to normal
+- Create `network_alerts` DB records
 
-**FFmpeg process tracking:**
-- Query `/proc/[pid]/stat` for CPU %
-- Query `/proc/[pid]/status` for VmRSS (memory)
-- Cross-reference with `STREAM_DICT` from live_relay
+**Key design decisions:**
 
-**HLS segment delay measurement (NEW):**
-- Query MediaMTX REST API: `GET /v3/paths/{camera_id}`
-- Parse `playback` → `segment` timing info
-- Calculate delay between `recorded_at` and segment generation time
-- High delay = network congestion or encoding bottleneck
+1. **Alert cooldown** — Same alert type for same camera fires at most once per 5 minutes. Prevents alert storms.
 
-**FPS variance calculation (NEW):**
-- Store last N FPS samples in memory ring buffer (per camera)
-- Calculate standard deviation / mean = variance %
-- >10% variance = unstable stream (frame drops)
-- Used for `fps_variance_pct` field + anomaly detection
+2. **Auto-resolve** — When metrics return within thresholds, alert is marked resolved automatically. No manual intervention needed.
 
-**Bitrate variance calculation (NEW):**
-- Store last N bitrate samples in memory ring buffer (per camera)
-- Calculate standard deviation / mean = variance %
-- >15% variance = potential buffering / network instability
-- Used for `bitrate_variance_pct` field + anomaly detection
+3. **No email/push in MVP** — Alerts are in-app only (stored in DB, shown on UI). Email/push integration deferred until notification service is built (Phase 4.6).
 
-**Anomaly detection (NEW):**
-- Compare current metrics against `network_metrics_baseline`
-- Use Z-score: `z = (current_value - baseline_avg) / baseline_stddev`
-- If `|z| > anomaly_stddev_multiplier` → anomaly detected
-- Classify anomaly type: 'bandwidth_spike', 'latency_surge', 'fps_drop', 'packet_loss_sudden'
-- Store in `anomaly_score` (0-100) + `anomaly_type` fields
+```python
+class NetworkAlertService:
+    ALERT_COOLDOWN_SECONDS = 300  # 5 minutes
+    
+    async def evaluate_alerts(self, camera: Camera, metrics: dict) -> list[dict]:
+        """Check thresholds, create alerts if breached. Returns list of created alerts."""
+        created = []
+        
+        checks = [
+            ('bandwidth_low', metrics.get('outbound_mbps'), camera.config.bandwidth_crit_mbps, 'critical'),
+            ('bandwidth_warn', metrics.get('outbound_mbps'), camera.config.bandwidth_warn_mbps, 'warning'),
+            ('latency_high', metrics.get('rtt_ms'), camera.config.latency_crit_ms, 'critical'),
+            ('latency_warn', metrics.get('rtt_ms'), camera.config.latency_warn_ms, 'warning'),
+            ('packet_loss_high', metrics.get('packet_loss_pct'), camera.config.packet_loss_crit_pct, 'critical'),
+            ('packet_loss_warn', metrics.get('packet_loss_pct'), camera.config.packet_loss_warn_pct, 'warning'),
+        ]
+        
+        for alert_type, current_value, threshold, severity in checks:
+            if current_value is None:
+                continue
+            
+            breached = (
+                ('low' in alert_type and current_value < threshold) or
+                ('high' in alert_type and current_value > threshold)
+            )
+            
+            if breached:
+                # Check cooldown — no same-type alert in last 5 min
+                if await self._is_in_cooldown(camera.id, alert_type):
+                    continue
+                
+                alert = await self._create_alert(camera, alert_type, severity, {
+                    'current_value': current_value,
+                    'threshold': threshold,
+                })
+                created.append(alert)
+                
+                # Also resolve any active alerts of opposite type (e.g., resolve warn when crit fires)
+                await self._resolve_related_alerts(camera.id, alert_type)
+        
+        # Auto-resolve if metrics are back to normal
+        await self._auto_resolve_if_ok(camera, metrics)
+        
+        return created
+    
+    async def _is_in_cooldown(self, camera_id: UUID, alert_type: str) -> bool:
+        """Check if same alert type was fired within cooldown period."""
+        # SELECT COUNT(1) FROM network_alerts 
+        # WHERE camera_id = ? AND alert_type = ? 
+        # AND triggered_at > NOW() - INTERVAL '5 minutes'
+        pass
+    
+    async def _create_alert(self, camera: Camera, alert_type: str, severity: str, metadata: dict) -> dict:
+        """Create new network alert record."""
+        # INSERT INTO network_alerts (camera_id, alert_type, severity, message, metadata, location)
+        pass
+    
+    async def _resolve_related_alerts(self, camera_id: UUID, new_alert_type: str):
+        """Resolve warning alerts when critical fires (or vice versa)."""
+        pass
+    
+    async def _auto_resolve_if_ok(self, camera: Camera, metrics: dict):
+        """If all metrics within thresholds, resolve active alerts."""
+        # Check if any active (unresolved) alerts exist for this camera
+        # If current values are within warn thresholds → mark resolved
+        pass
+```
 
-**Baseline recalculation (NEW):**
-- Triggered weekly (configurable interval)
-- Uses last 7 days of data
-- Calculates hourly patterns (`hourly_pattern` JSONB)
-- Updates `network_metrics_baseline` table
-- Used for "same time comparison" feature in UI
-
-**WebSocket broadcast (NEW):**
-- When new metrics stored, broadcast to connected WebSocket clients
-- Format: `{ type: 'metric_update', camera_id: 'uuid', metrics: {...} }`
-- Clients subscribe per camera or all cameras
-- Enables real-time dashboard updates without polling
-
-### 1.3 API Endpoints — Network Metrics
+### 2.4 API Endpoints (MVP)
 
 ```
-POST    /api/v1/network/monitor/start         # Start monitoring for camera(s)
-POST    /api/v1/network/monitor/stop          # Stop monitoring
-GET     /api/v1/network/metrics               # Latest metrics for all cameras (paginated)
-GET     /api/v1/network/metrics/{camera_id}   # Latest metrics for single camera
-GET     /api/v1/network/metrics/{camera_id}/history   # Historical data (time range)
-PATCH   /api/v1/network/config/{camera_id}    # Update per-camera monitoring config
-GET     /api/v1/network/alerts                # Active alerts (unacknowledged)
-GET     /api/v1/network/alerts/all            # All alerts (paginated, filterable)
-GET     /api/v1/network/summary               # Summary: total online/offline, avg bandwidth, etc.
-POST    /api/v1/network/alerts/{id}/acknowledge   # Acknowledge alert
-WS      /api/v1/network/ws                    # WebSocket real-time metric stream
-GET     /api/v1/network/baselines             # All baselines
-GET     /api/v1/network/baselines/{camera_id} # Single baseline
-POST    /api/v1/network/baselines/{camera_id}/recalculate  # Trigger manual recalculation
-GET     /api/v1/network/baselines/{camera_id}/compare      # Compare current vs baseline
-GET     /api/v1/network/topology              # Network topology tree
-POST    /api/v1/network/topology              # Add network device
-PATCH   /api/v1/network/topology/{id}         # Update network device
-DELETE  /api/v1/network/topology/{id}         # Remove network device
-GET     /api/v1/network/capacity              # Bandwidth capacity per location
-POST    /api/v1/network/export                # Export metrics to CSV/PDF
-GET     /api/v1/network/reports/scheduled     # Scheduled reports list
-POST    /api/v1/network/reports/scheduled     # Create scheduled report
+POST    /api/v1/network/monitor/start          # Start background collection
+POST    /api/v1/network/monitor/stop           # Stop background collection
+GET     /api/v1/network/metrics                # Latest metrics for all cameras (paginated)
+GET     /api/v1/network/metrics/{camera_id}    # Latest metrics for single camera
+GET     /api/v1/network/metrics/{camera_id}/history   # Historical data (time range, paginated)
+PATCH   /api/v1/network/config/{camera_id}     # Update per-camera monitoring config
+GET     /api/v1/network/alerts                 # Active (unacknowledged) alerts for current user
+GET     /api/v1/network/alerts/all             # All alerts (paginated, filterable by camera/severity/type)
+POST    /api/v1/network/alerts/{id}/acknowledge    # Acknowledge alert
+GET     /api/v1/network/summary                # Summary: total online/offline, avg bandwidth, etc.
 ```
 
 **Response format — `/api/v1/network/metrics/{camera_id}/history`:**
@@ -348,29 +414,15 @@ POST    /api/v1/network/reports/scheduled     # Create scheduled report
          "jitter_ms": 2.1,
          "packet_loss_pct": 0.0,
          "fps_current": 25,
-         "fps_expected": 25,
-         "fps_variance_pct": 2.3,
          "bitrate_current": 4200,
-         "bitrate_variance_pct": 5.1,
-         "hls_segment_delay_s": 1.2,
-         "rtsp_reconnect_cnt": 0,
          "ffmpeg_cpu": 8.5,
          "ffmpeg_memory_mb": 85.3,
-         "anomaly_score": 0.0,
-         "anomaly_type": null,
          "status": "online"
        }
      ],
-     "summary_stats": {
-       "avg_bandwidth_mbps": 4.1,
-       "max_bandwidth_mbps": 5.2,
-       "min_bandwidth_mbps": 3.5,
-       "avg_latency_ms": 13.2,
-       "max_latency_ms": 45.0,
-       "avg_fps": 24.8,
-       "total_reconnects": 2,
-       "total_anomalies": 0
-     }
+     "total_count": 2880,
+     "page": 1,
+     "per_page": 100
    }
 }
 ```
@@ -382,284 +434,157 @@ POST    /api/v1/network/reports/scheduled     # Create scheduled report
    "data": {
      "total_cameras": 10,
      "online_cameras": 8,
-     "offline_cameras": 2,
+     "degraded_cameras": 1,
+     "offline_cameras": 1,
      "avg_bandwidth_mbps": 4.5,
      "avg_latency_ms": 15.2,
      "avg_packet_loss_pct": 0.1,
-     "total_anomalies_24h": 3,
      "active_alerts": 1,
+     "alerts_by_severity": { "warning": 1, "critical": 0 },
      "cameras_by_location": {
-       "Entrance": { "total": 3, "online": 3, "avg_bw": 4.8, "capacity_used_pct": 60 },
-       "Parking": { "total": 4, "online": 2, "avg_bw": 3.9, "capacity_used_pct": 45 },
-       "Office": { "total": 3, "online": 3, "avg_bw": 5.1, "capacity_used_pct": 72 }
+       "Entrance": { "total": 3, "online": 3, "avg_bw": 4.8 },
+       "Parking": { "total": 4, "online": 2, "degraded": 1, "offline": 1, "avg_bw": 3.9 },
+       "Office": { "total": 3, "online": 3, "avg_bw": 5.1 }
      }
    }
 }
 ```
 
-**Response format — `/api/v1/network/baselines/{camera_id}/compare`:**
+**Response format — `/api/v1/network/alerts`:**
 
 ```json
 {
-   "data": {
-     "camera_id": "uuid",
-     "camera_name": "Camera 01",
-     "comparison_period": {
-       "baseline_date": "2026-07-16T00:00:00Z",
-       "current_date": "2026-07-23T12:00:00Z"
-     },
-     "metrics": {
-       "bandwidth": {
-         "baseline_avg": 4.2,
-         "current_avg": 3.8,
-         "change_pct": -9.5,
-         "status": "below_baseline"
-       },
-       "latency": {
-         "baseline_avg": 12.0,
-         "current_avg": 15.5,
-         "change_pct": 29.2,
-         "status": "above_baseline"
-       },
-       "fps": {
-         "baseline_avg": 25.0,
-         "current_avg": 24.5,
-         "change_pct": -2.0,
-         "status": "normal"
-       }
+   "data": [
+     {
+       "id": "uuid",
+       "camera_id": "uuid",
+       "camera_name": "Camera 03",
+       "location": "Parking",
+       "alert_type": "latency_high",
+       "severity": "critical",
+       "message": "RTT 450ms exceeds critical threshold of 300ms",
+       "triggered_at": "2026-07-23T12:05:00Z",
+       "acknowledged_at": null,
+       "metadata": { "current_value": 450, "threshold": 300, "unit": "ms" }
      }
-   }
+   ]
 }
 ```
 
-**Response format — `/api/v1/network/capacity`:**
+### 2.5 Background Task Integration
 
-```json
-{
-   "data": {
-     "locations": [
-       {
-         "location_id": "uuid",
-         "location_name": "Entrance",
-         "total_cameras": 3,
-         "current_bandwidth_mbps": 14.4,
-         "theoretical_max_mbps": 30.0,
-         "capacity_used_pct": 48,
-         "recommended_max_cameras": 6,
-         "warning_threshold_reached": false
-       }
-     ],
-     "system_total": {
-       "total_cameras": 10,
-       "total_bandwidth_mbps": 45.0,
-       "network_capacity_mbps": 1000.0,
-       "utilization_pct": 4.5
-     }
-   }
-}
-```
-
-**Response format — `/api/v1/network/export` (CSV download):**
-
-```
-HTTP/1.1 200 OK
-Content-Type: text/csv
-Content-Disposition: attachment; filename="network_metrics_2026-07-23.csv"
-
-camera_name,recorded_at,inbound_mbps,outbound_mbps,rtt_ms,jitter_ms,packet_loss_pct,fps_current,bitrate_current,status
-Camera 01,2026-07-23T12:00:00Z,4.2,3.8,12.5,2.1,0.0,25,4200,online
-Camera 01,2026-07-23T12:00:30Z,4.1,3.7,13.0,2.3,0.0,25,4100,online
-...
-```
-
-### 1.4 Background Task — Metrics Collector
-
-**File:** `services/api/app/services/network_monitor.py` → `NetworkMonitor.background_collector()`
-
-- Runs every N seconds (default 30s, configurable per camera)
-- Iterates over all cameras with `ping_enabled=true` or `rtsp_check_enabled=true`
-- Collects metrics concurrently using `asyncio.gather()`
-- Stores to database in batch (INSERT ... ON CONFLICT UPDATE for latest row per camera)
-- Evaluates alert thresholds, creates alerts if breached
-- Periodic cleanup of old data (> retention_days)
-- Weekly baseline recalculation (scheduled task)
-- WebSocket broadcast after each metrics store
-
-**Scheduling:**
-- Start on API lifespan (`app/main.py`)
-- Stop on API shutdown
-- Use `asyncio.create_task()` for background loop
-- Graceful shutdown: finish current collection cycle before stopping
-
-### 1.5 WebSocket Server — Real-time Push
-
-**File:** `services/api/app/services/network_ws.py` (new)
-
-**Responsibilities:**
-- Manage WebSocket connections
-- Authenticate WS clients (JWT token)
-- Subscribe/unsubscribe to camera metric streams
-- Broadcast metric updates to subscribers
-- Handle client disconnects
-- Connection limit enforcement (per-user, global)
-
-**WebSocket protocol:**
-
-```
-# Client → Server
-{ "type": "subscribe", "camera_id": "uuid" }    # Subscribe to specific camera
-{ "type": "subscribe_all" }                       # Subscribe to all cameras
-{ "type": "unsubscribe", "camera_id": "uuid" }   # Unsubscribe from specific camera
-{ "type": "ping" }                                 # Keep-alive
-
-# Server → Client
-{ "type": "metric_update", "camera_id": "uuid", "metrics": { ... } }
-{ "type": "alert_triggered", "alert": { ... } }
-{ "type": "pong" }
-{ "type": "error", "message": "..." }
-```
-
-**Key methods:**
+**File:** `services/api/app/main.py` (modify lifespan)
 
 ```python
-class NetworkWebSocketManager:
-    async def connect(self, websocket: WebSocket, token: str) -> None
-    async def disconnect(self, websocket: WebSocket) -> None
-    async def subscribe(self, websocket: WebSocket, camera_id: UUID | None) -> None
-    async def broadcast_metric(self, camera_id: UUID, metrics: dict) -> None
-    async def broadcast_alert(self, alert: dict) -> None
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("app_starting", version="0.1.0", env=settings.api_log_level)
     
-    async def worker(self) -> None  # Main message loop
+    await get_redis()
+    
+     # Start network monitor (non-blocking)
+    from .services.network_monitor import network_monitor
+    await network_monitor.start()
+    
+    yield
+    
+    # Cleanup
+    await network_monitor.stop()
+    await close_redis()
+    await engine.dispose()
+    logger.info("app_stopped")
 ```
-
-### 1.6 Export & Reporting Service
-
-**File:** `services/api/app/services/network_report.py` (new)
-
-**Responsibilities:**
-- CSV export (ad-hoc, time range filter)
-- PDF report generation (daily/weekly summary)
-- Scheduled report generation + email delivery
-- Report template rendering
-
-**Methods:**
-
-```python
-class NetworkReportService:
-    async def export_csv(self, camera_ids: list[UUID], start: datetime, end: datetime) -> bytes
-    async def generate_pdf_report(self, report_type: str, params: dict) -> bytes
-    async def schedule_report(self, schedule: ReportSchedule) -> UUID
-    async def send_report_email(self, report_id: UUID, recipients: list[str]) -> None
-```
-
-**Report types:**
-- `daily_summary` — daily bandwidth/latency summary per camera
-- `weekly_trend` — weekly trends with anomaly highlights
-- `incident_report` — offline periods + root cause analysis
-- `capacity_planning` — bandwidth utilization + recommendations
-
-### 1.7 Alert Integration with Existing System
-
-**Integration points:**
-- `network_alerts` table links to existing `alert_log` via foreign key or shared `id`
-- Alert severity mapping: network alerts → existing notification templates
-- Email/push notifications reuse existing notification service
-- Alert acknowledgment integrates with existing user system
-- Correlation: related_camera_ids field helps identify switch/AP failures affecting multiple cameras
 
 ---
 
-## Phase 2: Frontend — Network Dashboard
+## Phase 3: Frontend — Dashboard & Components (MVP)
 
-### 2.1 New Page — Network Dashboard
+### 3.1 File Structure
 
-**File:** `services/web/src/pages/NetworkDashboard.tsx`
+```
+services/web/src/
+├── pages/
+│   └── NetworkDashboard.tsx           # Main dashboard page
+├── components/
+│   └── network/
+│       ├── NetworkSummaryBar.tsx      # Top summary stats
+│       ├── LocationFilter.tsx         # Location tab filter
+│       ├── CameraMetricCard.tsx       # Per-camera metric card with sparkline
+│       └── NetworkChart.tsx           # Full-page linear chart component
+├── hooks/
+│   └── useNetwork.ts                  # All TanStack Query hooks
+├── types/
+│   └── network.ts                     # TypeScript interfaces
+└── api/
+    └── network.ts                     # API client methods
+```
 
-**Layout:**
+### 3.2 `NetworkDashboard.tsx` — Main Page Layout
+
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
-│  Network Dashboard                        [Live ●] [Export ▼] [Settings] │
+│  Network Dashboard                                    [Start ▶] [Stop ■] │
 ├───────────────────────────────────────────────────────────────────────┤
-│   ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐    │
-│   │ Total: 10   │ │ Online: 8   │ │ Alerts: 1   │ │ Anomalies: 3 │    │
-│   └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘    │
-│                                                                       │
-│   [All Cameras] [Entrance] [Parking] [Office]                         │
-│                                                                       │
-│   ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐               │
-│   │ Camera 01│ │ Camera 02│ │ Camera 03│ │ Camera 04│ ...           │
-│   │ Online ● │ │ Degraded ●│ │ Offline ● │ │ Online ● │               │
-│   │ BW: 4.2  │ │ BW: 3.1  │ │ BW: --    │ │ BW: 5.1  │               │
-│   │ Lat: 12ms│ │ Lat: 85ms│ │ Lat: --   │ │ Lat: 10ms│               │
-│   │ FPS: 25  │ │ FPS: 18  │ │ FPS: --   │ │ FPS: 25  │               │
-│   │ Loss: 0% │ │ Loss: 0.5%│ │ Loss: -- │ │ Loss: 0% │               │
-│   │ ──▁▂▃▅▄▃──│ │ ──▅▄▃▂▁▂──│ │           │ │ ──▁▂▃▄▅▆──│               │
-│   └──────────┘ └──────────┘ └──────────┘ └──────────┘               │
-│                                                                       │
-│   ┌───────────────────────────────────────────────────────────────┐   │
-│   │ Bandwidth History (24h) — Linear Chart              [▼ 1h/6h/12h/24h/7d] │
-│   │ ────────────────────────────────────────────────────────────   │   │
-│   │                                                               │   │
-│   │    BW (Mbps)                                                  │   │
-│   │    5.0 ┤     ╱╲         ╱╲                                   │   │
-│   │    4.0 ┤   ╱╱  ╲──────╱  ╲──╲                                │   │
-│   │    3.0 ┤ ╱╱      ╲    ╱    ╲  ╲                              │   │
-│   │    2.0 ┤╱        ╲__/╱      ╲__╲                            │   │
-│   │    1.0 ┤          ╲/         ╲___╲                          │   │
-│   │    0.0 ┼──────────┴────────────┴───────────→ Time           │   │
-│   │          00:00   06:00   12:00   18:00   24:00              │   │
-│   └───────────────────────────────────────────────────────────────┘   │
-│                                                                       │
-│   ┌───────────────────────────────────────────────────────────────┐   │
-│   │ Latency History (24h) — Linear Chart                [▼ 1h/6h/12h/24h/7d] │
-│   │ ────────────────────────────────────────────────────────────   │   │
-│   │                                                               │   │
-│   │    Latency (ms)                                    Warning ─┤   │
-│   │    300 ┤                                                    │   │
-│   │    200 ┤                                                    │   │
-│   │    100 ┤ ─────────────────────── Warning line               │   │
-│   │     50 ┤        ╱╲       ╱╲                                 │   │
-│   │     25 ┤      ╱╱  ╲────╱    ╲────                           │   │
-│   │     10 ┤    ╱╱      ╲__/        ╲___                       │   │
-│   │      0 ┼───╱────────────────────────────→ Time             │   │
-│   │          00:00   06:00   12:00   18:00   24:00              │   │
-│   └───────────────────────────────────────────────────────────────┘   │
-│                                                                       │
-│   ┌───────────────────────────────────────────────────────────────┐   │
-│   │ Packet Loss History (24h) — Linear Chart            [▼ 1h/6h/12h/24h/7d] │
-│   │ ────────────────────────────────────────────────────────────   │   │
-│   │                                                               │   │
-│   │    Loss (%)                                   Critical ─┤     │   │
-│   │      5 ┤                                                    │   │
-│   │      2 ┤ ───────────────────── Critical line               │   │
-│   │      1 ┤ ───────────────────── Warning line                │   │
-│   │      0 ┤ ─────────────────────────────────────────         │   │
-│   │        ┼───────────────────────────────────→ Time          │   │
-│   │          00:00   06:00   12:00   18:00   24:00              │   │
-│   └───────────────────────────────────────────────────────────────┘   │
+│    ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌────────────┐ │
+│    │ Total: 10    │ │ Online: 8    │ │ Alerts: 1     │ │ Degraded: 1│ │
+│    └──────────────┘ └──────────────┘ └──────────────┘ └────────────┘ │
+│                                                                        │
+│    [All Cameras] [Entrance] [Parking] [Office]                         │
+│                                                                        │
+│    ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐                │
+│    │ Camera 01│ │ Camera 02│ │ Camera 03│ │ Camera 04│ ...            │
+│    │ Online ● │ │ Degraded ●│ │ Offline ○ │ │ Online ● │                │
+│    │ BW: 4.2   │ │ BW: 3.1   │ │ BW: --     │ │ BW: 5.1   │                │
+│    │ Lat: 12ms│ │ Lat: 85ms│ │ Lat: --    │ │ Lat: 10ms│                │
+│    │ FPS: 25   │ │ FPS: 18   │ │ FPS: --    │ │ FPS: 25   │                │
+│    │ Loss: 0% │ │ Loss: 0.5%│ │ Loss: -- │ │ Loss: 0% │                │
+│    │ ──▁▂▃▅▄▃──│ │ ──▅▄▃▂▁▂──│ │            │ │ ──▁▂▃▄▅▆──│                │
+│    └──────────┘ └──────────┘ └──────────┘ └──────────┘                │
+│                                                                        │
+│    ┌───────────────────────────────────────────────────────────────┐    │
+│    │ Bandwidth (Mbps) — Last 24h                        [▼ 1h/6h/12h/24h/7d]│
+│    │ ────────────────────────────────────────────────────────────    │    │
+│    │                                                                │    │
+│    │    5.0 ┤      ╱╲          ╱╲                                  │    │
+│    │    4.0 ┤    ╱╱   ╲──────╱   ╲──╲                             │    │
+│    │    3.0 ┤ ╱╱       ╲     ╱     ╲   ╲                          │    │
+│    │    2.0 ┤╱         ╲__/╱       ╲__╲                          │    │
+│    │    1.0 ┤           ╲/          ╲___╲                        │    │
+│    │    0.0 ┼───────────┴────────────┴───────────→ Time           │    │
+│    │          00:00     06:00     12:00     18:00     24:00        │    │
+│    └───────────────────────────────────────────────────────────────┘    │
+│                                                                        │
+│    ┌───────────────────────────────────────────────────────────────┐    │
+│    │ Latency (ms) — Last 24h                        [▼ 1h/6h/12h/24h/7d]│
+│    │ ────────────────────────────────────────────────────────────    │    │
+│    │                                                                │    │
+│    │   300 ┤ ───────────── Warning (100ms)                          │    │
+│    │   200 ┤                                                        │    │
+│    │   100 ┤         ╱╲        ╱╲                                  │    │
+│    │    50 ┤       ╱╱   ╲────╱     ╲────                          │    │
+│    │    25 ┤     ╱╱       ╲__/         ╲___                       │    │
+│    │     10 ┤   ╱                                                          │    │
+│    │      0 ┼──╱────────────────────────────→ Time                   │    │
+│    │          00:00     06:00     12:00     18:00     24:00            │    │
+│    └───────────────────────────────────────────────────────────────┘    │
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
-**Features:**
-- Grid view: all cameras with current metrics (bandwidth, latency, packet loss, FPS)
-- Location filter tabs: All Cameras / Entrance / Parking / Office / etc.
-- Per-camera mini sparkline chart (last 1h trend) — visual trend at a glance
-- Full page linear charts (Recharts): bandwidth + latency + packet loss over time
-- Time range selector: 1h / 6h / 12h / 24h / 7d / 30d (per chart, independent)
-- Color coding: green (healthy), yellow (warning), red (critical)
-- Live indicator: pulsing "●" when WebSocket connected, real-time updates active
-- Export button: CSV/PDF export dropdown
-- Settings gear: per-camera config modal
+**Features (MVP):**
+- Summary bar: total/online/degraded/offline camera counts, active alert count
+- Location filter tabs: All Cameras / Entrance / Parking / Office (uses existing `/api/v1/locations`)
+- Camera grid: cards with current metrics + sparkline trend (last 30 min)
+- Bandwidth chart: linear chart, all cameras color-coded, time range selector
+- Latency chart: linear chart with warning threshold reference line
+- Start/Stop buttons: control background collection
+- Manual refresh button (polling-based, no WebSocket in MVP)
 
 **Interactive features:**
-- Click camera card → expand to show detailed chart + metrics panel (slide-over drawer)
-- Hover on main chart → crosshair showing all cameras' values at that timestamp
-- Click data point on main chart → highlight corresponding camera card
+- Click camera card → expand to show full history for that camera (inline expansion, not drawer — simpler for MVP)
+- Hover on chart → tooltip with all cameras' values at that timestamp
 - Alert badge on camera card when active alert exists
 
-### 2.2 Chart Component — NetworkChart
-
-**File:** `services/web/src/components/network/NetworkChart.tsx`
+### 3.3 `NetworkChart.tsx` — Linear Chart Component
 
 **Library:** Recharts
 
@@ -667,156 +592,76 @@ class NetworkReportService:
 npm install recharts
 ```
 
-**Props:**
+**Props (MVP):**
 
 ```typescript
 interface NetworkChartProps {
   data: NetworkMetricPoint[];
-  metrics: ('bandwidth' | 'latency' | 'packetLoss' | 'fps')[];
-  timeRange: '1h' | '6h' | '12h' | '24h' | '7d' | '30d';
+  metric: 'bandwidth' | 'latency';
+  timeRange: '1h' | '6h' | '12h' | '24h' | '7d';
   height?: number;
-  showLegend?: boolean;
-  showGrid?: boolean;
-  warningThresholds?: { bandwidth?: number; latency?: number; packetLoss?: number };
-  onPointClick?: (point: NetworkMetricPoint, index: number) => void;
-}
-
-interface MultiCameraChartProps {
-  cameras: { id: string; name: string; data: NetworkMetricPoint[]; color: string }[];
-  metric: 'bandwidth' | 'latency' | 'packetLoss' | 'fps';
-  timeRange: '1h' | '6h' | '12h' | '24h' | '7d' | '30d';
-  height?: number;
+  showThresholdLine?: boolean;
+  thresholdValue?: number;
+  thresholdLabel?: string;
 }
 ```
 
-**Features:**
-- Linear line chart (Recharts `LineChart` + `Line`)
-- Multiple metric lines on same chart (bandwidth, latency)
-- Multiple cameras on same chart (color-coded lines)
+**Features (MVP):**
+- Linear line chart (`Recharts.LineChart` + `Recharts.Line`)
+- Multiple cameras on same chart (color-coded lines, one per camera)
 - Time axis with auto-formatted labels (respects timeRange)
-- Hover tooltip with exact values
-- Crosshair on hover (shows all cameras' values at cursor position)
-- Warning/critical threshold reference lines
+- Hover tooltip with exact values for all cameras at cursor position
+- Warning/critical threshold reference line (dashed red)
 - Responsive sizing
-- Color coding per metric type
-- Smooth animation on data update
 - Area fill option (translucent gradient under line)
 
-### 2.3 Camera Metric Card Component
+### 3.4 `CameraMetricCard.tsx` — Per-Camera Card
 
-**File:** `services/web/src/components/network/CameraMetricCard.tsx`
-
-**Shows per camera:**
-- Camera name + status indicator (green/yellow/red dot)
-- Current bandwidth (Mbps) — with sparkline trend
-- Current latency (ms) — with sparkline trend
-- FPS (current/expected) — with variance %
+**Shows per camera (MVP):**
+- Camera name + status indicator (green dot = online, yellow = degraded, gray = offline)
+- Current bandwidth (Mbps)
+- Current latency (ms)
+- FPS (current)
 - Packet loss (%)
-- Mini sparkline chart (last 1h trend) — Recharts `AreaChart` mini
+- Mini sparkline chart (last 30 min, 60 points at 30s interval) — Recharts `AreaChart` mini
 - Alert badge (red dot with number) if active alert exists
-- Click → expand to full chart view (slide-over drawer)
 
 **Sparkline behavior:**
-- Shows last 60 data points (30min at 30s interval)
+- Shows last 60 data points (30 min at 30s interval)
 - Compressed horizontally, ~120px wide
 - Color matches status (green/yellow/red)
 - Hover shows exact value at that point
 
-### 2.4 Network Summary Bar
-
-**File:** `services/web/src/components/network/NetworkSummaryBar.tsx`
+### 3.5 `NetworkSummaryBar.tsx` — Top Summary Stats
 
 Shows at top of dashboard:
-- Total cameras / online / offline count
-- Average bandwidth across all cameras
-- Average latency
-- Active alert count (clickable → alerts list)
-- 24h anomaly count
-- Last updated timestamp
-- Live indicator (pulsing dot when WebSocket connected)
+- Total cameras / online / degraded / offline count
+- Active alert count (clickable → scrolls to alerts section or opens alert list)
+- Last updated timestamp (e.g., "Updated 15s ago")
+- Start/Stop monitoring buttons
 
-### 2.5 Location-based Filtering
-
-**File:** `services/web/src/components/network/LocationFilter.tsx`
+### 3.6 `LocationFilter.tsx` — Location Tabs
 
 - Tab bar with locations from API
 - "All Cameras" tab shows everything
 - Selected location tab filters grid + charts
 - Uses existing `/api/v1/locations` endpoint for location list
-- Location badge on each camera card
-- Capacity usage indicator per location (color-coded bar)
+- Active tab highlighted (blue bg, white text — same pattern as Sidebar NavLink)
 
-### 2.6 Camera Detail Drawer
+### 3.7 Inline Camera Expansion
 
-**File:** `services/web/src/components/network/CameraDetailDrawer.tsx` (NEW)
+**Instead of a slide-over drawer (deferred), MVP uses inline expansion:**
 
-Slide-over panel when clicking a camera card:
-- Full history chart for selected metric (bandwidth/latency/FPS/packet loss)
-- Time range selector (1h/6h/12h/24h/7d/30d)
-- Current metrics table (all fields)
-- Alert history for this camera (last 7 days)
-- Anomaly events list with timestamps
-- Compare vs baseline button → opens comparison view
-- FFmpeg process info (PID, CPU, memory, threads)
-- RTSP connection info (reconnect count, session latency)
-- HLS segment delay trend
+When clicking a camera card:
+- Card expands downward (CSS max-height transition)
+- Shows full history chart for that single camera (bandwidth + latency)
+- Shows detailed metrics table (all fields)
+- Shows recent alert history for this camera (last 7 days, last 5 entries)
+- Click again or click elsewhere → collapses
 
-### 2.7 Comparison View Modal
+This avoids needing a drawer component and is simpler to implement.
 
-**File:** `services/web/src/components/network/ComparisonView.tsx` (NEW)
-
-Modal showing current vs baseline comparison:
-- Side-by-side metrics table with change %
-- Overlapping line chart (baseline = dashed, current = solid)
-- Hourly pattern comparison (heatmap grid)
-- "Same time yesterday" comparison row
-- Recommendations based on deviations
-
-### 2.8 Network Topology View
-
-**File:** `services/web/src/components/network/TopologyView.tsx` (NEW)
-
-Visual network topology map:
-- Hierarchical tree: NVR → Switch → AP → Cameras
-- Nodes colored by status (green/yellow/red)
-- Connection lines show bandwidth utilization (thickness/color)
-- Click node → show details + metrics
-- Zoom/pan support
-- Export as SVG/PNG
-
-**Library:** React Flow or D3.js for graph rendering
-
-```bash
-npm install @xyflow/react   # React Flow (simpler, good for tree layouts)
-```
-
-### 2.9 Export & Report Modal
-
-**File:** `services/web/src/components/network/ExportModal.tsx` (NEW)
-
-Modal for exporting data:
-- Date range picker (start/end)
-- Camera selection (all / specific cameras)
-- Format selector (CSV / PDF)
-- Report type (for PDF): daily summary / weekly trend / incident report / capacity planning
-- Scheduled report setup (frequency, recipients, time)
-- Generate button → shows progress → download link
-
-### 2.10 Settings/Config Modal
-
-**File:** `services/web/src/components/network/NetworkSettingsModal.tsx` (NEW)
-
-Per-camera monitoring configuration:
-- Poll interval (10s / 30s / 60s / custom)
-- Ping enabled/disabled toggle
-- RTSP check enabled/disabled toggle
-- Alert thresholds (bandwidth warn/crit, latency warn/crit, packet loss warn/crit)
-- Anomaly detection sensitivity (stddev multiplier: 1.5 / 2.0 / 3.0)
-- WebSocket push enabled/disabled toggle
-- Retention period (30d / 60d / 90d / custom)
-- Save button → PATCH request to API
-
-### 2.11 Sidebar Navigation Item
+### 3.8 Sidebar Navigation Item
 
 **File:** `services/web/src/components/layout/Sidebar.tsx` (modify)
 
@@ -826,7 +671,7 @@ Add network monitoring icon:
 const navItems = [
    { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
    { to: "/cameras", icon: Video, label: "Cameras" },
-   { to: "/network", icon: Activity, label: "Network" },   // <-- NEW
+   { to: "/network", icon: Activity, label: "Network" },    // <-- NEW
    { to: "/recordings", icon: Film, label: "Recordings" },
    { to: "/events", icon: Bell, label: "Events" },
    { to: "/storage", icon: HardDrive, label: "Storage" },
@@ -836,11 +681,7 @@ const navItems = [
 
 **Icon:** `Activity` from `lucide-react` (pulse/heartbeat icon)
 
-### 2.12 Route Configuration
-
-**File:** `services/web/src/App.tsx` (modify)
-
-Add route for network dashboard page.
+### 3.9 Route Configuration
 
 **File:** `services/web/src/components/layout/AppShell.tsx` (modify)
 
@@ -848,81 +689,9 @@ Add `/network` route pointing to `NetworkDashboard`.
 
 ---
 
-## Phase 3: Frontend — Hooks & Types
+## Phase 4: Frontend — Hooks, Types & API Client
 
-### 3.1 Network API Client Methods
-
-**File:** `services/web/src/api/network.ts` (new)
-
-```typescript
-import apiClient from './client';
-
-export const networkApi = {
-   // Metrics
-  getMetrics: () => apiClient.get('/network/metrics'),
-  getCameraMetrics: (cameraId: string) => 
-    apiClient.get(`/network/metrics/${cameraId}`),
-  getCameraHistory: (cameraId: string, params: { start?: string; end?: string; range?: string }) => 
-    apiClient.get(`/network/metrics/${cameraId}/history`, { params }),
-  
-  // Summary & Capacity
-  getSummary: () => apiClient.get('/network/summary'),
-  getCapacity: () => apiClient.get('/network/capacity'),
-  
-  // Alerts
-  getAlerts: () => apiClient.get('/network/alerts'),
-  getAllAlerts: (params?: { camera_id?: string; severity?: string; limit?: number }) => 
-    apiClient.get('/network/alerts/all', { params }),
-  acknowledgeAlert: (alertId: string) => 
-    apiClient.post(`/network/alerts/${alertId}/acknowledge`),
-  
-  // Monitoring control
-  startMonitoring: (cameraIds?: string[]) => 
-    apiClient.post('/network/monitor/start', { camera_ids: cameraIds }),
-  stopMonitoring: (cameraIds?: string[]) => 
-    apiClient.post('/network/monitor/stop', { camera_ids: cameraIds }),
-  
-  // Config
-  updateConfig: (cameraId: string, config: Partial<NetworkConfig>) => 
-    apiClient.patch(`/network/config/${cameraId}`, config),
-  getCameraConfig: (cameraId: string) => 
-    apiClient.get(`/network/config/${cameraId}`),
-  
-  // Baselines
-  getBaselines: () => apiClient.get('/network/baselines'),
-  getBaseline: (cameraId: string) => apiClient.get(`/network/baselines/${cameraId}`),
-  recalculateBaseline: (cameraId: string) => 
-    apiClient.post(`/network/baselines/${cameraId}/recalculate`),
-  compareBaseline: (cameraId: string) => 
-    apiClient.get(`/network/baselines/${cameraId}/compare`),
-  
-  // Topology
-  getTopology: () => apiClient.get('/network/topology'),
-  createTopologyNode: (data: TopologyNodeCreate) => 
-    apiClient.post('/network/topology', data),
-  updateTopologyNode: (id: string, data: Partial<TopologyNodeUpdate>) => 
-    apiClient.patch(`/network/topology/${id}`, data),
-  deleteTopologyNode: (id: string) => 
-    apiClient.delete(`/network/topology/${id}`),
-  
-  // Export & Reports
-  exportCSV: (params: ExportParams) => 
-    apiClient.post('/network/export', params, { responseType: 'blob' }),
-  generatePDFReport: (params: ReportParams) => 
-    apiClient.post('/network/reports/generate', params, { responseType: 'blob' }),
-  getScheduledReports: () => apiClient.get('/network/reports/scheduled'),
-  createScheduledReport: (schedule: ReportSchedule) => 
-    apiClient.post('/network/reports/scheduled', schedule),
-  
-  // WebSocket URL builder
-  getWSUrl: () => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${window.location.host}/api/v1/network/ws`;
-  },
-};
-```
-
-### 3.2 TypeScript Types
+### 4.1 TypeScript Types
 
 **File:** `services/web/src/types/network.ts` (new)
 
@@ -930,55 +699,44 @@ export const networkApi = {
 export interface NetworkMetricPoint {
   recorded_at: string;
   
-   // Bandwidth
+    // Bandwidth
   inbound_mbps: number | null;
   outbound_mbps: number | null;
-  theoretical_max_mbps: number | null;
   
-   // Latency
+    // Latency
   rtt_ms: number | null;
   jitter_ms: number | null;
   rtsp_latency: number | null;
-  hls_segment_delay_s: number | null;
   
-   // Packet stats
+    // Packet stats
   packets_sent: number | null;
   packets_recv: number | null;
   packet_loss_pct: number | null;
-  retransmission_cnt: number | null;
   
-   // Connection quality
+    // Connection quality
   fps_current: number | null;
-  fps_expected: number | null;
-  fps_variance_pct: number | null;
   bitrate_current: number | null;
-  bitrate_variance_pct: number | null;
   rtsp_reconnect_cnt: number | null;
   
-   // FFmpeg process metrics
+    // FFmpeg process metrics
   ffmpeg_pid: number | null;
   ffmpeg_cpu: number | null;
   ffmpeg_memory_mb: number | null;
-  ffmpeg_threads: number | null;
   
-   // Anomaly detection
-  anomaly_score: number | null;
-  anomaly_type: string | null;
-  
-   // Status
+    // Status
   status: 'online' | 'offline' | 'degraded' | 'unknown';
   error_message: string | null;
 }
 
-export interface MetricSummary {
-  avg_bandwidth_mbps: number | null;
-  max_bandwidth_mbps: number | null;
-  min_bandwidth_mbps: number | null;
-  avg_latency_ms: number | null;
-  max_latency_ms: number | null;
-  avg_fps: number | null;
-  total_reconnects: number;
-  total_anomalies: number;
+export interface MetricPageResponse {
+  camera_id: string;
+  camera_name: string;
+  location: string | null;
+  time_range: { start: string; end: string };
+  metrics: NetworkMetricPoint[];
+  total_count: number;
+  page: number;
+  per_page: number;
 }
 
 export interface CameraNetworkSummary {
@@ -998,37 +756,34 @@ export interface NetworkConfig {
   ping_count: number;
   ping_timeout: number;
   rtsp_check_enabled: boolean;
-  rtsp_sample_size: number;
   bandwidth_warn_mbps: number;
   bandwidth_crit_mbps: number;
   latency_warn_ms: number;
   latency_crit_ms: number;
   packet_loss_warn_pct: number;
   packet_loss_crit_pct: number;
-  anomaly_stddev_multiplier: number;
   retention_days: number;
-  ws_push_enabled: boolean;
-  baseline_recalc_interval_days: number;
 }
 
-export interface NetworkSummary {
+export interface NetworkDashboardSummary {
   total_cameras: number;
   online_cameras: number;
+  degraded_cameras: number;
   offline_cameras: number;
   avg_bandwidth_mbps: number | null;
   avg_latency_ms: number | null;
   avg_packet_loss_pct: number | null;
-  total_anomalies_24h: number;
   active_alerts: number;
+  alerts_by_severity: { warning: number; critical: number };
   cameras_by_location: Record<string, LocationSummary>;
 }
 
 export interface LocationSummary {
   total: number;
   online: number;
+  degraded: number;
   offline: number;
   avg_bw: number | null;
-  capacity_used_pct: number | null;
 }
 
 export interface NetworkAlert {
@@ -1036,119 +791,66 @@ export interface NetworkAlert {
   camera_id: string;
   camera_name: string;
   location: string | null;
-  alert_type: 'bandwidth_low' | 'latency_high' | 'packet_loss_high' | 'camera_offline' | 'fps_drop' | 'anomaly_detected';
+  alert_type: 'bandwidth_low' | 'latency_high' | 'packet_loss_high' | 'camera_offline';
   severity: 'warning' | 'critical';
   message: string;
   triggered_at: string;
   acknowledged_at: string | null;
-  acknowledged_by: string | null;
-  resolved_at: string | null;
   metadata: Record<string, any> | null;
-  related_camera_ids: string[];
 }
 
-export interface BaselineData {
-  camera_id: string;
-  avg_bandwidth_mbps: number | null;
-  avg_latency_ms: number | null;
-  avg_fps: number | null;
-  avg_bitrate: number | null;
-  stddev_bandwidth: number | null;
-  stddev_latency: number | null;
-  stddev_fps: number | null;
-  hourly_pattern: Record<string, HourlyPattern> | null;
-  calculated_at: string;
-  data_points: number;
-}
-
-export interface HourlyPattern {
-  bw: number | null;
-  lat: number | null;
-  fps: number | null;
-}
-
-export interface BaselineComparison {
-  camera_id: string;
-  camera_name: string;
-  comparison_period: {
-    baseline_date: string;
-    current_date: string;
-  };
-  metrics: {
-    bandwidth: ComparisonResult;
-    latency: ComparisonResult;
-    fps: ComparisonResult;
-    bitrate: ComparisonResult;
-  };
-}
-
-export interface ComparisonResult {
-  baseline_avg: number | null;
-  current_avg: number | null;
-  change_pct: number | null;
-  status: 'normal' | 'above_baseline' | 'below_baseline';
-}
-
-export interface CapacityInfo {
-  location_id: string;
-  location_name: string;
-  total_cameras: number;
-  current_bandwidth_mbps: number;
-  theoretical_max_mbps: number;
-  capacity_used_pct: number;
-  recommended_max_cameras: number;
-  warning_threshold_reached: boolean;
-}
-
-export interface TopologyNode {
-  id: string;
-  name: string;
-  type: 'switch' | 'access_point' | 'router' | 'nvr' | 'camera';
-  parent_id: string | null;
-  ip_address: string | null;
-  mac_address: string | null;
-  location_id: string | null;
-  total_bandwidth_mbps: number | null;
-  used_bandwidth_mbps: number | null;
-  port_count: number | null;
-  active_ports: number;
-  status: 'online' | 'offline' | 'maintenance';
-  children?: TopologyNode[];
-}
-
-export interface ExportParams {
-  camera_ids?: string[];
-  start: string;
-  end: string;
-  format: 'csv' | 'pdf';
-  report_type?: 'daily_summary' | 'weekly_trend' | 'incident_report' | 'capacity_planning';
-}
-
-export interface ReportSchedule {
-  name: string;
-  report_type: string;
-  frequency: 'daily' | 'weekly' | 'monthly';
-  time_of_day: string;  // HH:MM
-  recipients: string[];
-  camera_ids?: string[];
-  enabled: boolean;
-}
-
-export interface WSMessage {
-  type: 'metric_update' | 'alert_triggered' | 'pong' | 'error' | 'subscribe_ack' | 'unsubscribe_ack';
-  camera_id?: string;
-  metrics?: NetworkMetricPoint;
-  alert?: NetworkAlert;
-  message?: string;
-}
-
-export interface WSSubscription {
-  type: 'subscribe' | 'subscribe_all' | 'unsubscribe';
-  camera_id?: string;
+export interface NetworkConfigUpdate {
+  poll_interval?: number;
+  ping_enabled?: boolean;
+  ping_count?: number;
+  ping_timeout?: number;
+  rtsp_check_enabled?: boolean;
+  bandwidth_warn_mbps?: number;
+  bandwidth_crit_mbps?: number;
+  latency_warn_ms?: number;
+  latency_crit_ms?: number;
+  packet_loss_warn_pct?: number;
+  packet_loss_crit_pct?: number;
+  retention_days?: number;
 }
 ```
 
-### 3.3 React Hooks
+### 4.2 API Client Methods
+
+**File:** `services/web/src/api/network.ts` (new)
+
+```typescript
+import apiClient from './client';
+
+export const networkApi = {
+    // Metrics
+  getMetrics: () => apiClient.get('/network/metrics'),
+  getCameraMetrics: (cameraId: string) => 
+    apiClient.get(`/network/metrics/${cameraId}`),
+  getCameraHistory: (cameraId: string, params: { start?: string; end?: string; range?: string; page?: number; per_page?: number }) => 
+    apiClient.get(`/network/metrics/${cameraId}/history`, { params }),
+  
+   // Summary & Alerts
+  getSummary: () => apiClient.get('/network/summary'),
+  getActiveAlerts: () => apiClient.get('/network/alerts'),
+  getAllAlerts: (params?: { camera_id?: string; severity?: string; alert_type?: string; page?: number; per_page?: number }) => 
+    apiClient.get('/network/alerts/all', { params }),
+  acknowledgeAlert: (alertId: string) => 
+    apiClient.post(`/network/alerts/${alertId}/acknowledge`),
+  
+   // Monitoring control
+  startMonitoring: () => apiClient.post('/network/monitor/start'),
+  stopMonitoring: () => apiClient.post('/network/monitor/stop'),
+  
+   // Config
+  getCameraConfig: (cameraId: string) => 
+    apiClient.get(`/network/config/${cameraId}`),
+  updateConfig: (cameraId: string, config: NetworkConfigUpdate) => 
+    apiClient.patch(`/network/config/${cameraId}`, config),
+};
+```
+
+### 4.3 React Hooks
 
 **File:** `services/web/src/hooks/useNetwork.ts` (new)
 
@@ -1162,182 +864,212 @@ export function useCameraMetrics(cameraId: string) { ... }
 // useCameraHistory — historical data with time range
 export function useCameraHistory(
   cameraId: string,
-  timeRange: '1h' | '6h' | '12h' | '24h' | '7d' | '30d'
+  timeRange: '1h' | '6h' | '12h' | '24h' | '7d'
 ) { ... }
 
 // useNetworkSummary — dashboard summary stats
 export function useNetworkSummary() { ... }
 
-// useNetworkAlerts — active alerts (unacknowledged)
-export function useNetworkAlerts() { ... }
+// useActiveAlerts — active (unacknowledged) alerts
+export function useActiveAlerts() { ... }
 
-// useAllNetworkAlerts — all alerts with pagination/filters
-export function useAllNetworkAlerts(params?: AlertFilterParams) { ... }
+// useAllAlerts — all alerts with pagination/filters
+export function useAllAlerts(params?: AlertFilterParams) { ... }
 
 // useNetworkConfig — per-camera config CRUD
 export function useNetworkConfig(cameraId: string) { ... }
 
-// useStartMonitoring — start/stop background collection
-export function useStartMonitoring() { ... }
+// useMonitoringControl — start/stop background collection
+export function useMonitoringControl() { 
+  const { mutateAsync: start } = useMutation({ mutationFn: networkApi.startMonitoring });
+  const { mutateAsync: stop } = useMutation({ mutationFn: networkApi.stopMonitoring });
+  return { start, stop };
+}
 
-// useBaseline — baseline data for a camera
-export function useBaseline(cameraId: string) { ... }
-
-// useBaselineComparison — current vs baseline comparison
-export function useBaselineComparison(cameraId: string) { ... }
-
-// useCapacity — bandwidth capacity per location
-export function useCapacity() { ... }
-
-// useTopology — network topology tree
-export function useTopology() { ... }
-
-// useExport — CSV/PDF export
-export function useExport() { ... }
-
-// useWebSocketMetrics — WebSocket real-time metric stream
-export function useWebSocketMetrics(
-  cameraId: string | null,         // null = all cameras
-  onMetricUpdate?: (metrics: NetworkMetricPoint) => void,
-  onAlert?: (alert: NetworkAlert) => void
-) { ... }
-
-// useScheduledReports — scheduled report management
-export function useScheduledReports() { ... }
+// useManualRefresh — polling-based refresh (no WebSocket in MVP)
+export function useManualRefresh(refreshIntervalMs: number = 30000) {
+  const { mutate: refresh } = useNetworkSummary();
+  useEffect(() => {
+    const id = setInterval(refresh, refreshIntervalMs);
+    return () => clearInterval(id);
+  }, [refreshIntervalMs]);
+  return { refresh };
+}
 ```
-
-**useWebSocketMetrics implementation notes:**
-- Manages WebSocket connection lifecycle (connect/reconnect/disconnect)
-- JWT token in URL query parameter or subprotocol
-- Auto-reconnect with exponential backoff (1s → 2s → 4s → max 30s)
-- Heartbeat: client sends ping every 25s, server responds with pong
-- Subscription management: subscribe on mount, unsubscribe on unmount
-- Message routing: dispatch to appropriate callbacks based on message type
-- Connection status exposed: `isConnected`, `lastError`
 
 ---
 
-## Phase 4: Database Migration
+## Phase 5: Database Migration
 
-### 4.1 Alembic Migration
+### 5.1 Alembic Migration
 
 **File:** `services/api/alembic/versions/XXXX_add_network_monitoring.py` (new)
 
 Steps:
-1. Create `network_metrics` table (TimescaleDB hypertable)
-2. Create `network_metrics_baseline` table
-3. Create `camera_network_config` table
-4. Seed `camera_network_config` for all existing cameras
-5. Create `network_alerts` table
-6. Create `network_topology` table
-7. Create indexes for time-series queries
-8. Down migration: drop tables in reverse order (topology → alerts → config → baseline → metrics)
+1. Create `network_metrics` table (with TimescaleDB hypertable if extension available)
+2. Create `camera_network_config` table
+3. Seed `camera_network_config` for all existing cameras (`ON CONFLICT DO NOTHING`)
+4. Create `network_alerts` table with constraints
+5. Create indexes for time-series queries
+6. Down migration: drop tables in reverse order (alerts → config → metrics)
+
+**TimescaleDB fallback:** Migration checks `pg_extension` for `timescaledb`. If not present, creates regular table. All queries use standard PostgreSQL syntax that works on both.
 
 ---
 
-## Phase 5: Integration & Testing
+## Phase 6: Testing
 
-### 5.1 API Tests
+### 6.1 API Tests
 
 **File:** `services/api/tests/test_network_monitor.py`
 
-- Mock FFmpeg output parsing
-- Mock ICMP ping responses
-- Test metrics storage and retrieval
-- Test alert threshold evaluation
+- Mock FFmpeg output parsing (test regex on sample stderr lines)
+- Mock ICMP ping responses (mock subprocess output)
+- Test metrics storage and retrieval (use test DB session)
+- Test alert threshold evaluation (breach + cooldown + auto-resolve)
 - Test historical data time-range queries
-- Test anomaly detection logic (Z-score calculation)
-- Test baseline recalculation
-- Test WebSocket message broadcasting
-- Test CSV export generation
-- Test FPS variance calculation
-- Test bitrate variance calculation
+- Test staggered polling logic (offset calculation)
 
-**File:** `services/api/tests/test_network_ws.py`
+**File:** `services/api/tests/test_network_alerts.py`
 
-- Mock WebSocket connection
-- Test subscribe/unsubscribe
-- Test metric broadcast to subscribers
-- Test reconnection logic
+- Test alert cooldown (same type within 5 min → no duplicate)
+- Test auto-resolve (metrics return to normal → alert resolved)
+- Test severity escalation (warn → critical → resolve warn automatically)
 
-**File:** `services/api/tests/test_network_report.py`
-
-- Test CSV export with various date ranges
-- Test PDF report generation
-- Test scheduled report creation
-
-### 5.2 Frontend Tests
+### 6.2 Frontend Tests
 
 **File:** `services/web/src/test/network.test.tsx`
 
 - NetworkChart component rendering with sample data
 - CameraMetricCard with various states (online/offline/degraded)
-- Location filtering logic
-- Time range selector behavior
-- Sparkline chart rendering
-- Comparison view modal rendering
-- Topology view rendering (basic)
-- Export modal form validation
-- WebSocket hook connection/reconnection logic
+- Location filtering logic (filter by location name)
+- Time range selector behavior (change timeRange → fetch new data)
+- Sparkline chart rendering (60 points, compressed width)
+- Inline camera expansion (click card → expand/collapse)
 - useCameraHistory data fetching and error handling
 
-### 5.3 Manual Testing Checklist
+### 6.3 Manual Testing Checklist
 
 **Backend:**
 - [ ] Start network monitoring → verify metrics appear in DB
 - [ ] Verify FFmpeg stderr parsing captures fps/bitrate correctly
 - [ ] Verify ICMP ping returns accurate RTT/jitter/packet_loss
 - [ ] Verify alert thresholds trigger correctly (manually set low thresholds)
-- [ ] Verify anomaly detection identifies known anomalies
-- [ ] Verify baseline recalculation produces reasonable values
-- [ ] Verify WebSocket broadcast delivers metrics to connected clients
-- [ ] Verify CSV export contains correct data
-- [ ] Verify historical cleanup removes old data (> retention_days)
+- [ ] Verify alert cooldown works (same type doesn't fire within 5 min)
+- [ ] Verify auto-resolve works (metrics return to normal → alert resolved)
+- [ ] Verify staggered polling (cameras don't all ping simultaneously)
 - [ ] Verify hardware load → monitoring doesn't overwhelm system
 
 **Frontend:**
 - [ ] View dashboard → verify all cameras show correct metrics
 - [ ] Click location filter → verify grid + charts update
 - [ ] Change time range (1h/6h/12h/24h/7d) → verify chart data updates
-- [ ] Offline camera → verify red status + no chart data
-- [ ] Alert thresholds → verify warning/critical indicators
-- [ ] Auto-refresh → verify metrics update every 30s
-- [ ] Click camera card → verify detail drawer opens with full chart
-- [ ] Compare vs baseline → verify comparison view shows correct deltas
-- [ ] Topology view → verify tree renders correctly
-- [ ] Export CSV → verify file downloads and contains correct data
-- [ ] WebSocket live mode → verify pulsing indicator + real-time updates
+- [ ] Offline camera → verify gray status + no chart data
+- [ ] Degraded camera → verify yellow status + warning indicators
+- [ ] Alert thresholds → verify alert badge appears on camera card
+- [ ] Manual refresh → verify metrics update every 30s
+- [ ] Click camera card → verify inline expansion with full chart
+- [ ] Start/Stop monitoring → verify background collection starts/stops
 - [ ] Responsive layout → verify on mobile/tablet sizes
+
+---
+
+## Deferred Features (Future Phases)
+
+### Phase 7: WebSocket Real-time Push
+
+**When to implement:** After MVP is stable, or if user explicitly requests real-time updates without manual refresh.
+
+**Changes needed:**
+- Add `services/api/app/services/network_ws.py` — WebSocket manager
+- Modify `useNetwork.ts` → `useWebSocketMetrics` hook
+- Replace polling with WebSocket subscription
+- Add WS auth via subprotocol (`Sec-WebSocket-Protocol: bearer <token>`)
+- Dashboard shows pulsing "● Live" indicator
+
+**NOT in MVP** — polling every 30s is sufficient for monitoring use case.
+
+### Phase 8: Anomaly Detection + Baseline
+
+**When to implement:** After 7+ days of metric data collected.
+
+**Changes needed:**
+- Add `network_metrics_baseline` table
+- Add baseline recalculation background task (weekly)
+- Add Z-score anomaly detection in collector
+- Add `anomaly_score` + `anomaly_type` fields to `network_metrics`
+- Add comparison view UI (current vs baseline)
+
+**NOT in MVP** — requires historical data first.
+
+### Phase 9: Network Topology Map
+
+**When to implement:** When physical network infrastructure needs visualization.
+
+**Changes needed:**
+- Add `network_topology` table
+- Add CRUD API endpoints for topology nodes
+- Add React Flow component for tree visualization
+- Add zoom/pan support
+
+**NOT in MVP** — nice-to-have, not core monitoring functionality.
+
+### Phase 10: Export & Scheduled Reports
+
+**When to implement:** When compliance/audit requirements demand it.
+
+**Changes needed:**
+- CSV export endpoint + download UI
+- PDF report generation (daily/weekly/incident/capacity)
+- Scheduled report creation + email delivery
+- Date range picker + camera selection modal
+
+**NOT in MVP** — can be added manually via DB query if needed now.
+
+### Phase 11: Email/Push Notifications
+
+**When to implement:** After notification service is built (Phase 4.6 of main todo.md).
+
+**Changes needed:**
+- Integrate with existing notification service
+- Email template for network alerts
+- Push notification support (FCM)
+- Notification preference per user
+
+**NOT in MVP** — MVP uses in-app alerts only (UI badge + alerts page).
 
 ---
 
 ## Implementation Order (Recommended)
 
-### Sprint 1: Foundation
-1. **Database schema** — migrations for all new tables
-2. **Backend collector core** — `NetworkMonitor` with ping + FFmpeg parsing
-3. **Backend API basic** — metrics endpoints (list, history, summary)
-4. **Frontend types** — TypeScript interfaces in `types/network.ts`
-5. **Frontend hooks basic** — data fetching hooks (`useNetworkMetrics`, `useCameraHistory`)
+### Sprint 1: Backend Foundation (~3-4 days)
+1. Database migration (3 tables + seed data)
+2. `network_monitor.py` — collector service with ping + FFmpeg parsing
+3. `network_alerts.py` — alert evaluation + cooldown + auto-resolve
+4. API endpoints (metrics, history, summary, alerts, config, start/stop)
+5. Background task integration in `app/main.py` lifespan
+6. Unit tests (collector, alerts, thresholds)
 
-### Sprint 2: Dashboard & Charts
-6. **Frontend components** — `NetworkChart`, `CameraMetricCard`, `NetworkSummaryBar`
-7. **Frontend page** — `NetworkDashboard.tsx` with grid + charts
-8. **Location filtering** — `LocationFilter` component + integration
-9. **Sidebar + routes** — add to navigation
+### Sprint 2: Frontend Dashboard (~3-4 days)
+7. TypeScript types (`types/network.ts`)
+8. API client (`api/network.ts`)
+9. Hooks (`hooks/useNetwork.ts`) — data fetching + manual refresh
+10. `NetworkChart.tsx` — linear chart component with Recharts
+11. `CameraMetricCard.tsx` — per-camera card with sparkline
+12. `NetworkSummaryBar.tsx` — top summary stats
+13. `LocationFilter.tsx` — location tab filter
+14. `NetworkDashboard.tsx` — main page layout
+15. Sidebar + routes (AppShell.tsx)
+16. Frontend tests
 
-### Sprint 3: Advanced Features
-10. **WebSocket real-time** — `NetworkWebSocketManager` + `useWebSocketMetrics`
-11. **Anomaly detection** — Z-score calculation + baseline comparison
-12. **Camera detail drawer** — full chart + metrics + alert history
-13. **Comparison view** — current vs baseline modal
+### Sprint 3: Polish & QA (~2 days)
+17. Manual testing checklist
+18. Performance tuning (query optimization, chart rendering)
+19. Error handling improvements
+20. Responsive layout fixes
+21. Documentation update (README.md, API docs)
 
-### Sprint 4: Polish & Extras
-14. **Network topology** — `TopologyView` with React Flow
-15. **Export & reports** — CSV/PDF export + scheduled reports
-16. **Settings modal** — per-camera config UI
-17. **Testing** — unit tests + integration tests + manual verification
-18. **Performance tuning** — query optimization, chart rendering optimization
+**Total estimated: ~8-10 days for MVP**
 
 ---
 
@@ -1346,97 +1078,83 @@ Steps:
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Chart library | Recharts | Lightweight, React-native, good linear chart support |
-| Topology library | React Flow (@xyflow/react) | Tree layout support, zoom/pan, simpler than D3 |
 | Data granularity | 30-second intervals | Balance between detail and storage size |
 | Historical retention | 90 days default | Configurable per camera |
 | Ping method | `asyncio.create_subprocess_exec("ping")` | No extra dependencies, reliable |
-| FFmpeg parsing | stderr regex on `frame=`, `fps=`, `bitrate=` | Standard FFmpeg output format |
+| FFmpeg parsing | `/proc/{pid}/stat` + stderr key=value pairs | More robust than regex on frame= lines |
 | Alert evaluation | On-store (triggered when metrics written) | Real-time, no extra polling |
-| Auto-refresh | 30s interval via `setInterval` in hook | Matches collection interval |
-| WebSocket auth | JWT in URL query param | Simple, works with existing auth |
-| WS reconnection | Exponential backoff (1s→30s max) | Prevents reconnect storms |
-| Anomaly detection | Z-score vs baseline (configurable stddev multiplier) | Statistically sound, tunable |
-| FPS variance | Ring buffer (last 60 samples) → std dev / mean | Low overhead, accurate |
-| Bitrate variance | Ring buffer (last 60 samples) → std dev / mean | Low overhead, accurate |
-| Export format | CSV (text/csv), PDF (application/pdf) | Universal compatibility |
-| Baseline recalculation | Weekly, uses last 7 days of data | Captures normal patterns, avoids seasonal bias |
+| Auto-refresh | 30s polling via `setInterval` in hook (MVP) | Simple, sufficient for monitoring |
+| WebSocket auth | Subprotocol `Sec-WebSocket-Protocol: bearer <token>` (future) | Safer than URL query param |
+| Staggered polling | Offset = `(camera_index * poll_interval / total_cameras)` | Prevents simultaneous ping spikes |
+| Concurrent limit | `asyncio.Semaphore(5)` | Prevents API thread starvation |
+| TimescaleDB | Optional (fallback to regular table) | Works with or without extension |
+| Alert cooldown | 5 minutes per camera per type | Prevents alert storms |
+| Inline expansion | Card expands downward (MVP) | Simpler than slide-over drawer |
+| Error handling | Per-camera try/except in gather | One camera failure doesn't affect others |
 
 ---
 
 ## Storage Estimation
 
 **Per camera per day (30s intervals = 2880 points):**
-- ~2880 rows × ~300 bytes/row ≈ 864 KB/day (increased due to new fields)
-- 90 days retention ≈ 78 MB/camera
-- 10 cameras ≈ 780 MB total
+- ~2880 rows × ~250 bytes/row ≈ 720 KB/day
+- 90 days retention ≈ 65 MB/camera
+- 10 cameras ≈ 650 MB total
 
-**Per camera baseline:**
-- ~168 hourly buckets × ~100 bytes ≈ 17 KB (negligible)
+**Per camera config:**
+- ~500 bytes/camera (negligible)
 
 **Network alerts:**
 - Estimated 5 alerts/camera/month × 10 cameras × 90 days ≈ 1350 rows ≈ 500 KB (negligible)
 
-**Topology nodes:**
-- Estimated 20 nodes (switches/APs/cameras) × ~500 bytes ≈ 10 KB (negligible)
-
-**Optimization strategy:**
-- Downsample old data automatically: hourly avg for >7d, daily avg for >30d
-- Store downsampled data in separate `network_metrics_hourly` / `network_metrics_daily` tables
-- Original 30s data retained for 7d, then replaced by hourly aggregates
-- Reduces 90-day storage from 780 MB to ~150 MB
+**Total MVP storage: ~650 MB for 10 cameras over 90 days**
 
 ---
 
 ## Performance Considerations
 
 **Backend:**
-- Concurrent metric collection: `asyncio.gather()` for all cameras in parallel
-- Batch DB inserts: accumulate metrics, insert in batches of 50
-- Connection pooling: ensure PostgreSQL pool has enough connections (20 base + monitoring)
-- FFmpeg stderr parsing: regex compiled once at module level, not per-parse
-- WebSocket broadcast: fan-out to subscribers asynchronously, don't block collector
+- Staggered polling: cameras poll at different offsets, effective collection time ~0.5s instead of 22s sequential
+- Concurrent limit: `asyncio.Semaphore(5)` prevents thread starvation
+- Batch DB inserts: accumulate metrics per cycle, single INSERT ... VALUES (...), (...), (...) query
+- FFmpeg parsing: `/proc/{pid}/stat` read is instant, no subprocess needed
+- Regex compiled once at module level, not per-parse
 
 **Frontend:**
 - Chart data loading: TanStack Query caching + stale-while-revalidate
 - Sparkline optimization: only render last 60 points, not full history
-- Large dataset rendering: use Recharts `dataKey` sampling for >1000 points
-- WebSocket message throttling: debounce metric updates to 1s max render frequency
-- Component lazy loading: toplogy view + export modal loaded on demand (React.lazy)
+- Large dataset rendering: Recharts handles ~1000 points fine (24h at 30s = 2880 points, may need sampling for 7d/30d views)
+- Manual refresh throttling: min 10s between manual refreshes (auto-refresh is 30s)
 
 **Database:**
-- TimescaleDB hypertable: automatic chunking by time (1 week per chunk)
-- Indexes on frequently queried columns (camera_id, recorded_at, status)
-- Partial indexes for active alerts (`acknowledged_at IS NULL`)
-- Query optimization: use `latest()` or `first()` for current metrics to avoid full table scan
+- Indexes on (camera_id, recorded_at DESC) for efficient per-camera history queries
+- Index on (recorded_at DESC) for summary aggregations
+- Partial index on status where status != 'online' for quick degraded/offline detection
+- For >10k rows per camera: consider adding `network_metrics_hourly` downsample table (Phase 4 deferred)
 
 ---
 
 ## Security Considerations
 
 - Network metrics endpoint: same auth as other API endpoints (JWT required)
-- WebSocket connection: validate JWT before accepting connection
-- Export data: respect user permissions (viewer can only see cameras they have access to)
-- CSV export: sanitize camera names/IPs in output (no SQL injection risk, but good practice)
-- Rate limit metric collection: prevent misconfiguration from excessive polling (< 10s interval rejected)
+- Export data (future): respect user permissions (viewer can only see cameras they have access to)
+- Rate limit metric collection: prevent misconfiguration from excessive polling (< 10s interval rejected by backend)
+- WebSocket auth (future): use subprotocol, NOT URL query param (URLs are logged in browser history/proxy logs)
 
 ---
 
 ## Monitoring the Monitor
 
-**Self-health checks:**
-- Background collector task status: running/stopped/errored
-- Last collection timestamp per camera (stale data detection)
-- WebSocket connection count + error rate
-- DB write latency for metrics table (slow writes = performance issue)
-- Memory usage of collector process (memory leak detection)
+**Self-health checks (MVP):**
+- Background collector task status: running/stopped/errored (exposed via `/api/v1/network/summary` → `monitoring_status` field)
+- Last collection timestamp per camera (stale data detection — if >2× poll_interval since last metric, show "data stale" warning)
 
-**Metrics about network monitoring:**
-- `network_metrics_collected_total` — total metrics stored (Prometheus counter)
-- `network_metrics_collection_duration_seconds` — time to collect all cameras (Prometheus histogram)
-- `network_websocket_connections_active` — currently connected WS clients (Prometheus gauge)
-- `network_alerts_triggered_total` — alerts triggered by type (Prometheus counter)
+**Future Prometheus metrics:**
+- `network_metrics_collected_total` — total metrics stored (counter)
+- `network_metrics_collection_duration_seconds` — time to collect all cameras (histogram)
+- `network_alerts_triggered_total` — alerts triggered by type (counter)
 
 ---
 
 *Last updated: 2026-07-23*
-*Plan version: v2 (final)*
+*Plan version: v3 (reviewed, simplified MVP, deferred advanced features)*

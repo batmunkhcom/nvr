@@ -217,6 +217,7 @@ async def live_start(
     stream: str = "main",
 ):
     from ...services.camera_service import get_camera
+    from ...services.config_service import get_config_value
     from ...services.live_relay import start_relay
 
     camera = await get_camera(camera_id, db)
@@ -230,7 +231,9 @@ async def live_start(
 
     relay_key = f"{camera_id}_sub" if use_sub else str(camera_id)
     rtsp_uri = _authed_rtsp_uri(camera, source_uri)
-    result = await start_relay(relay_key, rtsp_uri, camera.stream_transport)
+    # Rule 1: relay target from system_config DB, env var as fallback
+    relay_target = await get_config_value(db, "mediamtx.rtsp_url", None)
+    result = await start_relay(relay_key, rtsp_uri, camera.stream_transport, relay_target)
     return {"data": result}
 
 

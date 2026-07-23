@@ -24,16 +24,20 @@ MAX_BACKOFF = 600  # Rule 17: circuit breaker caps exponential backoff at 10 min
 
 
 async def start_relay(
-    relay_key: str | uuid.UUID, rtsp_uri: str, rtsp_transport: str = "tcp"
+    relay_key: str | uuid.UUID,
+    rtsp_uri: str,
+    rtsp_transport: str = "tcp",
+    relay_target: str | None = None,
 ) -> dict[str, Any]:
     cid = str(relay_key)
+    target = relay_target or MEDIAMTX_RTSP
 
     if cid in STREAM_DICT and STREAM_DICT[cid].get("running"):
         return {"hls_url": f"/hls/{cid}/index.m3u8", "status": "already_running"}
 
     logger.info("relay_start", camera_id=cid, rtsp_uri=rtsp_uri)
 
-    proc = await _spawn_ffmpeg(rtsp_uri, rtsp_transport, cid)
+    proc = await _spawn_ffmpeg(rtsp_uri, rtsp_transport, cid, target)
     if proc is None:
         return {"hls_url": None, "status": "error", "error": "ffmpeg not installed"}
 
@@ -42,6 +46,7 @@ async def start_relay(
         "process": proc,
         "rtsp_uri": rtsp_uri,
         "rtsp_transport": rtsp_transport,
+        "relay_target": target,
         "started_at": asyncio.get_event_loop().time(),
         "restart_count": 0,
     }
@@ -54,11 +59,12 @@ async def start_relay(
 
 
 async def _spawn_ffmpeg(
-    rtsp_uri: str, rtsp_transport: str, cid: str
+    rtsp_uri: str, rtsp_transport: str, cid: str, relay_target: str | None = None
 ) -> asyncio.subprocess.Process | None:
     # Always transcode to H264 for universal browser compatibility.
     # -preset ultrafast keeps CPU overhead minimal for live monitoring.
     codec_args = ["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency"]
+    target = relay_target or MEDIAMTX_RTSP
 
     try:
         return await asyncio.create_subprocess_exec(
@@ -70,7 +76,7 @@ async def _spawn_ffmpeg(
             "-an",
             "-f", "rtsp",
             "-rtsp_transport", "tcp",
-            f"{MEDIAMTX_RTSP}/{cid}",
+            f"{target}/{cid}",
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -153,7 +159,10 @@ async def _monitor(camera_id: str, proc: asyncio.subprocess.Process):
             if camera_id not in STREAM_DICT or STREAM_DICT.get(camera_id, {}).get("_stopped_by_user"):
                 return
             new_proc = await _spawn_ffmpeg(
-                info["rtsp_uri"], info.get("rtsp_transport", "tcp"), camera_id
+                info["rtsp_uri"],
+                info.get("rtsp_transport", "tcp"),
+                camera_id,
+                info.get("relay_target"),
             )
             if new_proc:
                 info["process"] = new_proc

@@ -8,11 +8,16 @@ import Events from "./pages/Events";
 import Storage from "./pages/Storage";
 import Settings from "./pages/Settings";
 import AppShell from "./components/layout/AppShell";
+import { ToastProvider } from "./components/ui/Toast";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   if (!isAuthenticated) return <Navigate to="/login" replace />;
-  return <>{children}</>;
+  return (
+    <ToastProvider>
+      {children}
+    </ToastProvider>
+  );
 }
 
 export default function App() {
