@@ -1,4 +1,4 @@
-# NVR System — Бүрэн архитектур төлөвлөгөө
+# mBm NVR System — Бүрэн архитектур төлөвлөгөө
 
 **Хамрах хүрээ:** Database schema, API specification, streaming architecture, AI pipeline,
 security design, recording engine, storage lifecycle, deployment, vendor analysis, frontend architecture.
@@ -1298,7 +1298,7 @@ Metrics: camera_count, recording_count, ffmpeg_processes,
 // Response 200 (admin only, бүх system_config key-value)
 {
   "data": {
-    "system.name": "NVR System",
+    "system.name": "mBm NVR System",
     "system.timezone": "Asia/Ulaanbaatar",
     "recording.default_mode": "continuous",
     "storage.default_retention_days": 30

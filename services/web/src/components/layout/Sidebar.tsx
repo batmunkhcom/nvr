@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Video, Film, Bell, HardDrive,
   MapPin, Clock, Users, Settings,
   ChevronsLeft, ChevronsRight,
-  BookOpen, ExternalLink,
+  BookOpen, ExternalLink, Code,
 } from "lucide-react";
 import { useUiPreference } from "../../hooks/useUiPreference";
 import { useLocale } from "../../i18n/LocaleContext";
@@ -78,7 +78,15 @@ export default function Sidebar() {
             rel="noopener"
             className="flex items-center gap-1.5 px-2 py-1 hover:text-gray-400 rounded"
           >
-            <BookOpen size={11} /> About / Docs
+            <BookOpen size={11} /> About
+          </a>
+          <a
+            href="https://github.com/batmunkhcom/nvr#readme"
+            target="_blank"
+            rel="noopener"
+            className="flex items-center gap-1.5 px-2 py-1 hover:text-gray-400 rounded"
+          >
+            <ExternalLink size={11} /> Docs
           </a>
           <a
             href="/docs"
@@ -86,10 +94,11 @@ export default function Sidebar() {
             rel="noopener"
             className="flex items-center gap-1.5 px-2 py-1 hover:text-gray-400 rounded"
           >
-            <ExternalLink size={11} /> API Docs
+            <Code size={11} /> API Docs
           </a>
-          <div className="px-2 py-1 text-gray-700">
-            mBm TECHNOLOGY LLC &copy; 2025
+          <div className="px-2 pt-1 text-gray-700 leading-tight">
+            mBm NVR System v0.2<br />
+            <span className="text-gray-800">mBm TECHNOLOGY &copy; 2025</span>
           </div>
         </div>
       )}

@@ -141,5 +141,5 @@ async def send_test_notification() -> dict[str, Any]:
         camera_id="test",
         camera_name="Test Camera",
         status="test",
-        error_message="This is a test notification from NVR System.",
+        error_message="This is a test notification from mBm NVR System.",
     )

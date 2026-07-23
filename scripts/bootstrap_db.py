@@ -68,7 +68,7 @@ async def main():
 
         # 4. Seed default system config
         defaults = {
-            "system.name": "NVR System",
+            "system.name": "mBm NVR System",
             "system.timezone": "UTC",
             "storage.default_path": "/data/recordings",
             "retention.default_days": "30",

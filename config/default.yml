@@ -1,10 +1,10 @@
-# NVR System — Default Configuration
+# mBm NVR System — Default Configuration
 # ЗӨВХӨН АНХНЫ DB SEED-д ашиглана. Энэ файл runtime үед УНШИГДАХГҮЙ.
 # Бүх тохиргоо API-аар дамжин PostgreSQL-д хадгалагдана.
 # DO NOT hardcode values from this file in application code.
 
 system:
-  name: "NVR System"
+  name: "mBm NVR System"
   version: "0.1.0"
   timezone: "Asia/Ulaanbaatar"
   log_level: "info"

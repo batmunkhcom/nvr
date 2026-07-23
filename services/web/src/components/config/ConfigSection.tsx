@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Save, RotateCw, Bell } from "lucide-react";
+import { Save, RotateCw, Bell, Monitor, Camera, Radio, Disc, MessageSquare, Brain } from "lucide-react";
 import apiClient from "../../api/client";
 import { useToast } from "../ui/Toast";
 
@@ -11,14 +11,14 @@ interface ConfigEntry {
   type: "text" | "number" | "toggle";
 }
 
-const CATEGORIES: Record<string, string> = {
-  "ui.": "User Interface",
-  "camera.": "Camera",
-  "mediamtx.": "MediaMTX",
-  "recording.": "Recording",
-  "notification.": "Notifications",
-  "ai.": "AI Engine",
-};
+const CATEGORIES: { prefix: string; label: string; icon: typeof Monitor }[] = [
+  { prefix: "ui.", label: "User Interface", icon: Monitor },
+  { prefix: "camera.", label: "Camera Defaults", icon: Camera },
+  { prefix: "mediamtx.", label: "MediaMTX", icon: Radio },
+  { prefix: "recording.", label: "Recording", icon: Disc },
+  { prefix: "notification.", label: "Notifications", icon: MessageSquare },
+  { prefix: "ai.", label: "AI Engine", icon: Brain },
+];
 
 const LABELS: Record<string, [string, string | undefined, "text" | "number" | "toggle"]> = {
   "ui.refresh_interval_s": ["Refresh Interval (s)", "Camera list auto-refresh period", "number"],
@@ -26,8 +26,8 @@ const LABELS: Record<string, [string, string | undefined, "text" | "number" | "t
   "ui.language": ["Language", "Interface language (mn/en)", "text"],
   "camera.test_timeout_s": ["Test Timeout (s)", "RTSP auth check timeout", "number"],
   "camera.health_check_interval_s": ["Health Check Interval (s)", "Auto health-check loop period", "number"],
-  "mediamtx.rtsp_url": ["MediaMTX RTSP URL", "Relay target for FFmpeg", "text"],
-  "mediamtx.hls_url": ["MediaMTX HLS URL", "HLS base URL for web players", "text"],
+  "mediamtx.rtsp_url": ["RTSP URL", "Relay target for FFmpeg", "text"],
+  "mediamtx.hls_url": ["HLS URL", "HLS base URL for web players", "text"],
   "recording.retention_days": ["Retention (days)", "Days to keep recordings", "number"],
   "notification.channels_enabled": ["Enabled Channels", 'JSON list, e.g. ["telegram","webhook"]', "text"],
   "notification.telegram_bot_token": ["Telegram Bot Token", "Create via @BotFather", "text"],
@@ -49,6 +49,7 @@ export default function ConfigSection() {
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [loaded, setLoaded] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const load = async () => {
     try {
@@ -61,9 +62,7 @@ export default function ConfigSection() {
     setLoaded(true);
   };
 
-  useEffect(() => {
-    load();
-  }, []);
+  useEffect(() => { load(); }, []);
 
   const save = async (key: string) => {
     const value = editing[key] ?? configs[key];
@@ -71,11 +70,7 @@ export default function ConfigSection() {
     try {
       await apiClient.patch("/system/config", null, { params: { key, value: String(value) } });
       setConfigs((prev) => ({ ...prev, [key]: String(value) }));
-      setEditing((prev) => {
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      });
+      setEditing((prev) => { const n = { ...prev }; delete n[key]; return n; });
       toast("success", "Saved");
     } catch {
       toast("error", "Failed to save");
@@ -89,118 +84,47 @@ export default function ConfigSection() {
       const res = await apiClient.post("/system/notification/test");
       const results = res.data?.data?.results || [];
       const sent = results.filter((r: { status: string }) => r.status === "sent").length;
-      toast(sent > 0 ? "success" : "warning", `Notification test: ${sent}/${results.length} channels sent`);
+      toast(sent > 0 ? "success" : "warning", `Notification test: ${sent}/${results.length} sent`);
     } catch {
       toast("error", "Notification test failed");
     }
     setTesting(false);
   };
 
-  const displayValue = (key: string) =>
-    key in editing ? editing[key] : (configs[key] ?? "");
+  const displayValue = (key: string) => key in editing ? editing[key] : (configs[key] ?? "");
 
-  const changed = (key: string) =>
-    key in editing && editing[key] !== (configs[key] ?? "");
+  const changed = (key: string) => key in editing && editing[key] !== (configs[key] ?? "");
 
-  const entries: ConfigEntry[] = Object.keys(LABELS)
-    .map((key) => {
-      const [label, desc, type] = LABELS[key];
-      return { key, value: "", label, description: desc, type };
-    })
-    .filter(() => true);
-
-  const grouped = entries.reduce(
-    (acc, entry) => {
-      const cat = Object.keys(CATEGORIES).find((p) => entry.key.startsWith(p)) || "other";
-      if (!acc[cat]) acc[cat] = [];
-      acc[cat].push(entry);
-      return acc;
-    },
-    {} as Record<string, ConfigEntry[]>,
-  );
+  const entries: ConfigEntry[] = Object.keys(LABELS).map((key) => {
+    const [label, desc, type] = LABELS[key];
+    return { key, value: "", label, description: desc, type };
+  });
 
   if (!loaded) {
     return (
-      <div className="space-y-3">
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="h-10 bg-gray-800 rounded animate-pulse" />
+      <div className="grid grid-cols-2 gap-4">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className="h-40 bg-gray-800 rounded-xl animate-pulse" />
         ))}
       </div>
     );
   }
 
-  const renderField = (entry: ConfigEntry) => {
-    const val = displayValue(entry.key);
-    const isChanged = changed(entry.key);
-    const isSaving = saving[entry.key];
-
-    if (entry.type === "toggle") {
-      const isOn = String(val) === "true" || String(val).toLowerCase() === "true";
-      return (
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => {
-              const newVal = isOn ? "false" : "true";
-              setEditing((prev) => ({ ...prev, [entry.key]: newVal }));
-              setConfigs((prev) => ({ ...prev, [entry.key]: String(val) }));
-              // save immediately for toggle
-              apiClient.patch("/system/config", null, { params: { key: entry.key, value: newVal } }).then(() => {
-                setConfigs((prev) => ({ ...prev, [entry.key]: newVal }));
-                setEditing((prev) => {
-                  const next = { ...prev };
-                  delete next[entry.key];
-                  return next;
-                });
-              });
-            }}
-            className={`relative w-10 h-5 rounded-full transition-colors ${
-              isOn ? "bg-blue-600" : "bg-gray-600"
-            }`}
-          >
-            <span
-              className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-                isOn ? "left-5" : "left-0.5"
-              }`}
-            />
-          </button>
-          <span className="text-xs text-gray-400">{isOn ? "On" : "Off"}</span>
-        </div>
-      );
-    }
-
-    return (
-      <div className="flex items-center gap-2">
-        <input
-          type={entry.type === "number" ? "number" : "text"}
-          value={val}
-          onChange={(e) =>
-            setEditing((prev) => ({ ...prev, [entry.key]: e.target.value }))
-          }
-          min={entry.type === "number" ? 0 : undefined}
-          className="px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white w-48"
-        />
-        {isChanged && (
-          <button
-            onClick={() => save(entry.key)}
-            disabled={isSaving}
-            className="p-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50"
-            title="Save"
-          >
-            {isSaving ? (
-              <RotateCw size={14} className="animate-spin" />
-            ) : (
-              <Save size={14} />
-            )}
-          </button>
-        )}
-      </div>
-    );
+  const toggleCategory = (prefix: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      next.has(prefix) ? next.delete(prefix) : next.add(prefix);
+      return next;
+    });
   };
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-bold">System Configuration</h2>
+        <div>
+          <h2 className="text-lg font-bold text-white">Configuration</h2>
+          <p className="text-xs text-gray-500 mt-0.5">System-wide settings organized by category</p>
+        </div>
         <button
           onClick={load}
           className="flex items-center gap-1 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs text-gray-300"
@@ -209,40 +133,105 @@ export default function ConfigSection() {
         </button>
       </div>
 
-      <div className="space-y-6">
-        {Object.entries(grouped).map(([cat, groupEntries]) => (
-          <div key={cat}>
-            <h3 className="text-sm font-semibold text-gray-300 mb-2 border-b border-gray-700 pb-1 flex items-center justify-between">
-              <span>{CATEGORIES[cat] || cat}</span>
-              {cat === "notification." && (
-                <button
-                  onClick={testNotification}
-                  disabled={testing}
-                  className="flex items-center gap-1 px-2 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-xs text-white"
-                >
-                  <Bell size={11} /> {testing ? "Testing..." : "Test"}
-                </button>
-              )}
-            </h3>
-            <div className="space-y-2">
-              {groupEntries.map((entry) => (
-                <div
-                  key={entry.key}
-                  className="flex items-center justify-between gap-4 py-1.5"
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm text-white">{entry.label}</div>
-                    {entry.description && (
-                      <div className="text-xs text-gray-500">{entry.description}</div>
-                    )}
-                    <div className="text-[10px] text-gray-600 font-mono">{entry.key}</div>
-                  </div>
-                  {renderField(entry)}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {CATEGORIES.map(({ prefix, label, icon: Icon }) => {
+          const groupEntries = entries.filter((e) => e.key.startsWith(prefix));
+          if (!groupEntries.length) return null;
+          const isOpen = !collapsed.has(prefix);
+
+          return (
+            <div
+              key={prefix}
+              className="bg-gray-800/50 rounded-xl border border-gray-700/50 overflow-hidden transition-colors hover:border-gray-600/50"
+            >
+              <button
+                onClick={() => toggleCategory(prefix)}
+                className="w-full flex items-center gap-2.5 px-4 py-3 bg-gray-800/80 border-b border-gray-700/30 text-left"
+              >
+                <Icon size={15} className="text-blue-400 flex-shrink-0" />
+                <span className="text-sm font-semibold text-gray-200">{label}</span>
+                <span className="text-[10px] text-gray-600 ml-auto">
+                  {groupEntries.length} setting{groupEntries.length > 1 ? "s" : ""}
+                </span>
+                <span className={`text-gray-500 text-xs transition-transform ${isOpen ? "rotate-0" : "-rotate-90"}`}>
+                  ▼
+                </span>
+              </button>
+
+              {isOpen && (
+                <div className="p-4 space-y-2.5">
+                  {groupEntries.map((entry) => {
+                    const val = displayValue(entry.key);
+                    const isChanged = changed(entry.key);
+                    const isSaving = saving[entry.key];
+
+                    return (
+                      <div key={entry.key} className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[13px] text-gray-200">{entry.label}</div>
+                          {entry.description && (
+                            <div className="text-[11px] text-gray-500 mt-0.5">{entry.description}</div>
+                          )}
+                          <div className="text-[10px] text-gray-700 font-mono mt-0.5">{entry.key}</div>
+                        </div>
+                        <div className="flex-shrink-0">
+                          {entry.type === "toggle" ? (
+                            <button
+                              onClick={() => {
+                                const v = String(val) === "true" ? "false" : "true";
+                                apiClient.patch("/system/config", null, { params: { key: entry.key, value: v } }).then(() => {
+                                  setConfigs((prev) => ({ ...prev, [entry.key]: v }));
+                                });
+                              }}
+                              className={`relative w-9 h-5 rounded-full transition-colors ${
+                                String(val) === "true" ? "bg-blue-600" : "bg-gray-600"
+                              }`}
+                            >
+                              <span
+                                className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                                  String(val) === "true" ? "left-4" : "left-0.5"
+                                }`}
+                              />
+                            </button>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type={entry.type === "number" ? "number" : "text"}
+                                value={val}
+                                onChange={(e) => setEditing((prev) => ({ ...prev, [entry.key]: e.target.value }))}
+                                min={entry.type === "number" ? 0 : undefined}
+                                className="w-36 px-2 py-1 bg-gray-700/70 border border-gray-600 rounded text-[13px] text-white outline-none focus:border-blue-500"
+                              />
+                              {isChanged && (
+                                <button
+                                  onClick={() => save(entry.key)}
+                                  disabled={isSaving}
+                                  className="p-1 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50"
+                                >
+                                  {isSaving ? <RotateCw size={13} className="animate-spin" /> : <Save size={13} />}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {prefix === "notification." && (
+                    <button
+                      onClick={testNotification}
+                      disabled={testing}
+                      className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded text-xs text-gray-200"
+                    >
+                      <Bell size={11} /> {testing ? "Testing..." : "Test Notification"}
+                    </button>
+                  )}
                 </div>
-              ))}
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

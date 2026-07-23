@@ -1,4 +1,4 @@
-# NVR System — Docker Compose (Development)
+# mBm NVR System — Docker Compose (Development)
 # All 13 services for the full NVR pipeline
 
 name: nvr

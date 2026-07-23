@@ -35,7 +35,7 @@ export default function Login() {
         onSubmit={handleSubmit}
         className="w-full max-w-sm bg-gray-900 p-8 rounded-lg border border-gray-800 space-y-5"
       >
-        <h1 className="text-2xl font-bold text-blue-400 text-center">NVR System</h1>
+        <h1 className="text-2xl font-bold text-blue-400 text-center">mBm NVR System</h1>
         {error && <p className="text-red-400 text-sm text-center">{error}</p>}
         <input
           type="text"
