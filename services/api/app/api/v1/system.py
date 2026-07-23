@@ -136,6 +136,7 @@ async def get_system_logs(
 
 @router.get("/metrics")
 async def get_metrics(
+    current_user: Annotated[dict, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     stats = await get_recording_stats(db)
