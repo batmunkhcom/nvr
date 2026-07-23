@@ -14,6 +14,7 @@ from .snapshot import router as snapshot_router
 from .storage import router as storage_router
 from .system import router as system_router
 from .users import router as users_router
+from .ws import router as ws_router
 
 router = APIRouter()
 router.include_router(ai_router)
@@ -28,3 +29,4 @@ router.include_router(snapshot_router)
 router.include_router(storage_router)
 router.include_router(system_router)
 router.include_router(users_router)
+router.include_router(ws_router)

@@ -185,6 +185,20 @@ async def _record_motion_event(
             session.add(event)
             await session.commit()
         logger.info("motion_event_recorded", camera_id=str(camera_id))
+        try:
+            from .ws_manager import ws_manager
+
+            await ws_manager.broadcast_event(
+                {
+                    "id": str(event.id),
+                    "camera_id": str(camera_id),
+                    "event_type": "motion_detected",
+                    "start_time": event.start_time.isoformat(),
+                    "camera_name": camera_name,
+                }
+            )
+        except Exception:
+            pass
     except Exception as exc:
         logger.warning("motion_event_failed", camera_id=str(camera_id), error=str(exc))
 

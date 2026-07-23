@@ -21,6 +21,14 @@ async def _check_single(camera: Camera) -> dict[str, Any]:
     prev_status = (camera.status or "unknown").lower()
 
     async def _notify_if_changed(new_status: str, error_msg: str | None = None):
+        if new_status != prev_status:
+            try:
+                from .ws_manager import ws_manager
+
+                await ws_manager.broadcast_camera_update(cam_id, new_status, error_msg)
+            except Exception:
+                pass
+
         if new_status != prev_status and prev_status != "online":
             try:
                 from .notification_service import send_camera_alert

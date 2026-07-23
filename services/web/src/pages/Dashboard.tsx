@@ -2,9 +2,11 @@ import CameraGrid from "../components/camera/CameraGrid";
 import { useCameras } from "../hooks/useCameras";
 import { useStorageUsage } from "../hooks/useRecordings";
 import { useEvents } from "../hooks/useEvents";
+import { useNvrWebSocket } from "../hooks/useWebSocket";
 import apiClient from "../api/client";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Video, HardDrive, Bell, Film, AlertTriangle } from "lucide-react";
+import { useCallback } from "react";
 
 function fmtBytes(bytes: number) {
   if (!bytes || bytes <= 0) return "—";
@@ -19,6 +21,17 @@ export default function Dashboard() {
   const { data: cameras } = useCameras();
   const usage = useStorageUsage();
   const { data: events } = useEvents();
+  const qc = useQueryClient();
+
+  const onCameraStatus = useCallback(
+    () => { qc.invalidateQueries({ queryKey: ["cameras"] }); },
+    [qc],
+  );
+  const onEvent = useCallback(
+    () => { qc.invalidateQueries({ queryKey: ["events"] }); },
+    [qc],
+  );
+  useNvrWebSocket(onCameraStatus, onEvent);
 
   const stats = useQuery({
     queryKey: ["recordings", "stats"],
