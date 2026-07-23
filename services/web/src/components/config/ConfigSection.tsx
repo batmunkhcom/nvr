@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Save, RotateCw } from "lucide-react";
+import { Save, RotateCw, Bell } from "lucide-react";
 import apiClient from "../../api/client";
 import { useToast } from "../ui/Toast";
 
@@ -16,6 +16,7 @@ const CATEGORIES: Record<string, string> = {
   "camera.": "Camera",
   "mediamtx.": "MediaMTX",
   "recording.": "Recording",
+  "notification.": "Notifications",
   "ai.": "AI Engine",
 };
 
@@ -28,6 +29,10 @@ const LABELS: Record<string, [string, string | undefined, "text" | "number" | "t
   "mediamtx.rtsp_url": ["MediaMTX RTSP URL", "Relay target for FFmpeg", "text"],
   "mediamtx.hls_url": ["MediaMTX HLS URL", "HLS base URL for web players", "text"],
   "recording.retention_days": ["Retention (days)", "Days to keep recordings", "number"],
+  "notification.channels_enabled": ["Enabled Channels", 'JSON list, e.g. ["telegram","webhook"]', "text"],
+  "notification.telegram_bot_token": ["Telegram Bot Token", "Create via @BotFather", "text"],
+  "notification.telegram_chat_id": ["Telegram Chat ID", "Your user/group chat ID", "text"],
+  "notification.webhook_url": ["Webhook URL", "HTTP endpoint for POST notifications", "text"],
   "ai.enabled": ["AI Detection", "Enable AI object detection engine", "toggle"],
   "ai.confidence_threshold": ["Confidence Threshold", "Minimum detection confidence (0–1)", "number"],
 };
@@ -38,6 +43,7 @@ export default function ConfigSection() {
   const [editing, setEditing] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [loaded, setLoaded] = useState(false);
+  const [testing, setTesting] = useState(false);
 
   const load = async () => {
     try {
@@ -70,6 +76,19 @@ export default function ConfigSection() {
       toast("error", "Failed to save");
     }
     setSaving((prev) => ({ ...prev, [key]: false }));
+  };
+
+  const testNotification = async () => {
+    setTesting(true);
+    try {
+      const res = await apiClient.post("/system/notification/test");
+      const results = res.data?.data?.results || [];
+      const sent = results.filter((r: { status: string }) => r.status === "sent").length;
+      toast(sent > 0 ? "success" : "warning", `Notification test: ${sent}/${results.length} channels sent`);
+    } catch {
+      toast("error", "Notification test failed");
+    }
+    setTesting(false);
   };
 
   const displayValue = (key: string) =>
@@ -188,8 +207,17 @@ export default function ConfigSection() {
       <div className="space-y-6">
         {Object.entries(grouped).map(([cat, groupEntries]) => (
           <div key={cat}>
-            <h3 className="text-sm font-semibold text-gray-300 mb-2 border-b border-gray-700 pb-1">
-              {CATEGORIES[cat] || cat}
+            <h3 className="text-sm font-semibold text-gray-300 mb-2 border-b border-gray-700 pb-1 flex items-center justify-between">
+              <span>{CATEGORIES[cat] || cat}</span>
+              {cat === "notification." && (
+                <button
+                  onClick={testNotification}
+                  disabled={testing}
+                  className="flex items-center gap-1 px-2 py-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded text-xs text-white"
+                >
+                  <Bell size={11} /> {testing ? "Testing..." : "Test"}
+                </button>
+              )}
             </h3>
             <div className="space-y-2">
               {groupEntries.map((entry) => (

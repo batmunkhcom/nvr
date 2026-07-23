@@ -19,28 +19,57 @@ logger = structlog.get_logger()
 async def _check_single(camera: Camera) -> dict[str, Any]:
     cam_id = str(camera.id)
     rtsp_uri = camera.stream_main_uri or camera.stream_sub_uri
+    prev_status = (camera.status or "unknown").lower()
+
+    async def _notify_if_changed(new_status: str, error_msg: str | None = None):
+        if new_status != prev_status and prev_status != "online":
+            try:
+                from .notification_service import send_camera_alert
+                await send_camera_alert(
+                    camera_id=cam_id,
+                    camera_name=camera.name or cam_id,
+                    status=new_status,
+                    error_message=error_msg,
+                )
+            except Exception:
+                pass
+        elif new_status == "online" and prev_status != "online":
+            try:
+                from .notification_service import send_camera_alert
+                await send_camera_alert(
+                    camera_id=cam_id,
+                    camera_name=camera.name or cam_id,
+                    status=new_status,
+                )
+            except Exception:
+                pass
+
     try:
         probe_result = await probe_ip(
             camera.ip_address or "", port=554, timeout=3.0
         )
         if not probe_result.get("reachable") or 554 not in probe_result.get("open_ports", []):
+            err = "Camera unreachable on port 554"
             async with async_session_factory() as session:
                 await session.execute(
                     update(Camera)
                         .where(Camera.id == camera.id)
-                        .values(status="offline", connection_error="Camera unreachable on port 554")
+                        .values(status="offline", connection_error=err)
                 )
                 await session.commit()
+            await _notify_if_changed("offline", err)
             return {"status": "offline", "error_code": "unreachable"}
 
         if not rtsp_uri:
+            err = "No stream URI configured"
             async with async_session_factory() as session:
                 await session.execute(
                     update(Camera)
                         .where(Camera.id == camera.id)
-                        .values(status="offline", connection_error="No stream URI configured")
+                        .values(status="offline", connection_error=err)
                 )
                 await session.commit()
+            await _notify_if_changed("offline", err)
             return {"status": "offline", "error_code": "no_stream_uri"}
 
         from ..services.camera_rtsp_check import check_rtsp_stream
@@ -64,6 +93,7 @@ async def _check_single(camera: Camera) -> dict[str, Any]:
                         .values(status="degraded", connection_error=error_msg[:500])
                 )
                 await session.commit()
+                await _notify_if_changed("degraded", error_msg)
                 return {"status": "degraded", "error_code": error_code}
 
             await session.execute(
@@ -72,6 +102,7 @@ async def _check_single(camera: Camera) -> dict[str, Any]:
                     .values(status="online", connection_error=None)
             )
             await session.commit()
+            await _notify_if_changed("online")
             return {"status": "online"}
 
     except Exception as exc:
