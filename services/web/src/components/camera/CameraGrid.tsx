@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCameras, useCameraMutations } from "../../hooks/useCameras";
 import { useUiPreference } from "../../hooks/useUiPreference";
+import { useEvents } from "../../hooks/useEvents";
 import { Camera } from "../../types/camera";
-import { LayoutGrid, Play, MoreVertical, Wifi, Pencil, Trash2, MonitorPlay, MapPin } from "lucide-react";
+import { LayoutGrid, Play, MoreVertical, Wifi, Pencil, Trash2, MonitorPlay } from "lucide-react";
 import MiniLivePreview from "./MiniLivePreview";
 import EmptyState from "../ui/EmptyState";
 
@@ -30,13 +31,13 @@ const gridColsClass: Record<number, string> = {
   4: "grid-cols-4",
 };
 
-function CameraTile({ camera, index }: { camera: Camera; index: number }) {
+function CameraTile({ camera, index, hasMotion }: { camera: Camera; index: number; hasMotion: boolean }) {
   const navigate = useNavigate();
   const { deleteCamera, testCamera } = useCameraMutations();
   const [menuOpen, setMenuOpen] = useState(false);
   const [testing, setTesting] = useState(false);
   const dot = statusColors[camera.status] || statusColors.unknown;
-  const border = statusBorder[camera.status] || statusBorder.unknown;
+  const border = hasMotion ? "border-red-500" : (statusBorder[camera.status] || statusBorder.unknown);
   const isLive = camera.status === "online";
 
   const handleTest = async () => {
@@ -55,7 +56,7 @@ function CameraTile({ camera, index }: { camera: Camera; index: number }) {
   return (
     <div
       title={camera.connection_error || undefined}
-      className={`aspect-video bg-gray-800 rounded border-2 ${border} relative group overflow-hidden cursor-pointer transition-colors duration-200`}
+      className={`aspect-video bg-gray-800 rounded border-2 ${border} ${hasMotion ? "animate-motion-flash" : ""} relative group overflow-hidden cursor-pointer transition-colors duration-200`}
     >
       <div onClick={() => navigate(`/live/${camera.id}`)} className="absolute inset-0">
         {isLive && <MiniLivePreview cameraId={camera.id} />}
@@ -139,8 +140,21 @@ function CameraTile({ camera, index }: { camera: Camera; index: number }) {
 
 export default function CameraGrid() {
   const { data: cameras, isLoading } = useCameras();
+  const { data: events = [] } = useEvents();
   const [columns, setColumns] = useUiPreference<number>("dashboard_columns", 2);
   const cols = gridColsClass[columns] ? columns : 2;
+
+  const motionCameraIds = useMemo(() => {
+    const now = Date.now();
+    const ids = new Set<string>();
+    for (const ev of events) {
+      if (ev.event_type === "motion") {
+        const age = now - new Date(ev.created_at).getTime();
+        if (age < 10_000) ids.add(ev.camera_id);
+      }
+    }
+    return ids;
+  }, [events]);
 
   if (isLoading) {
     return (
@@ -183,7 +197,7 @@ export default function CameraGrid() {
       </div>
       <div className={`grid ${gridColsClass[cols]} gap-4`}>
         {cameras.map((camera, i) => (
-          <CameraTile key={camera.id} camera={camera} index={i} />
+          <CameraTile key={camera.id} camera={camera} index={i} hasMotion={motionCameraIds.has(camera.id)} />
         ))}
       </div>
     </div>

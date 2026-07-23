@@ -55,6 +55,21 @@ body {
   scrollbar-color: var(--color-surface-3) var(--color-surface-1);
 }
 
+/* ── Motion detection flash ── */
+@keyframes motion-flash {
+  0%, 100% {
+    border-color: rgb(239 68 68); /* red-500 */
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+  }
+  50% {
+    border-color: rgba(239, 68, 68, 0.15);
+    box-shadow: 0 0 2px rgba(239, 68, 68, 0.1);
+  }
+}
+.animate-motion-flash {
+  animation: motion-flash 0.8s ease-in-out infinite;
+}
+
 /* ── Page transitions ── */
 @keyframes page-fade-in {
   from {
