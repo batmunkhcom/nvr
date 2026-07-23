@@ -73,12 +73,11 @@ describe("CameraGrid", () => {
     });
   });
 
-  it("shows name placeholder instead of preview for offline cameras", async () => {
-    mockApi({}, [{ ...onlineCamera, status: "offline" }]);
+  it("shows name placeholder instead of preview for cameras without stream URI", async () => {
+    mockApi({}, [{ ...onlineCamera, stream_main_uri: "" }]);
     renderGrid();
 
     await waitFor(() => {
-      // name appears in both placeholder and top badge
       expect(screen.getAllByText("Front Door").length).toBeGreaterThanOrEqual(1);
     });
     expect(screen.getByText("F")).toBeInTheDocument();

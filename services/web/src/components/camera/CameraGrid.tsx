@@ -55,7 +55,7 @@ function CameraTile({
   const [testing, setTesting] = useState(false);
   const dot = statusColors[camera.status] || statusColors.unknown;
   const border = hasMotion ? "border-red-500" : (statusBorder[camera.status] || statusBorder.unknown);
-  const isLive = camera.status === "online";
+  const hasStream = !!(camera.stream_main_uri || camera.stream_sub_uri);
 
   const handleTest = async () => {
     setMenuOpen(false);
@@ -83,8 +83,8 @@ function CameraTile({
       className={`aspect-video bg-gray-800 rounded border-2 ${border} ${hasMotion ? "animate-motion-flash" : ""} relative group overflow-hidden cursor-pointer transition-all duration-200 ${isDragging ? "opacity-30 scale-95" : ""}`}
     >
       <div onClick={() => navigate(`/live/${camera.id}`)} className="absolute inset-0">
-        {isLive && <MiniLivePreview cameraId={camera.id} />}
-        {!isLive && (
+        {hasStream && <MiniLivePreview cameraId={camera.id} />}
+        {!hasStream && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
             <span className="text-gray-500 text-4xl font-light">{camera.name.charAt(0).toUpperCase()}</span>
             <span className="text-gray-600 text-xs">{camera.name}</span>
@@ -99,7 +99,7 @@ function CameraTile({
       <div className="absolute top-2 left-2 flex items-center gap-1.5 max-w-[75%]">
         <span
           title={camera.connection_error || `Status: ${camera.status}`}
-          className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${dot} ${isLive ? "animate-pulse" : ""}`}
+          className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${dot} ${camera.status === "online" ? "animate-pulse" : ""}`}
         />
         <span className="text-xs text-gray-200 truncate">{camera.name}</span>
         <span className="text-[10px] text-gray-500 flex-shrink-0">(cam{index + 1})</span>
@@ -149,7 +149,7 @@ function CameraTile({
         )}
       </div>
 
-      {isLive && !menuOpen && (
+      {hasStream && !menuOpen && (
         <div className="absolute top-2 right-8 opacity-0 group-hover:opacity-100 transition-opacity">
           <span className="flex items-center gap-1 px-2 py-0.5 bg-green-700 rounded text-xs text-white">
             <Play size={10} /> Live
