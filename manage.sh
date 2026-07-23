@@ -48,6 +48,7 @@ Usage: ./manage.sh <command> [options]
 ══ MAIN ══
   start             Start everything (infra + API + Web + MediaMTX)
   stop              Stop everything
+  restart           Stop everything then start fresh
   status            Show full system status
 
 ══ INFRASTRUCTURE ══
@@ -577,6 +578,15 @@ stop_cmd() {
   echo ""
 }
 
+restart_cmd() {
+  echo ""
+  echo -e "${CYAN}══════ Restarting NVR System ══════${NC}"
+  echo ""
+  stop_cmd
+  sleep 2
+  start_cmd
+}
+
 # ────────────────────────────────────────
 #  MAIN
 # ────────────────────────────────────────
@@ -587,6 +597,7 @@ stop_cmd() {
 case "${1:-help}" in
   start)                                 start_cmd ;;
   stop)                                  stop_cmd ;;
+  restart)                               restart_cmd ;;
   help|--help|-h)                       help_cmd ;;
   infra-up)                              infra_up ;;
   infra-down)                            infra_down ;;
