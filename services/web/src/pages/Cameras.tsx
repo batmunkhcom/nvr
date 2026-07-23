@@ -1,17 +1,18 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowUp, ArrowDown, AlertTriangle, Wifi } from "lucide-react";
+import { ArrowUp, ArrowDown, AlertTriangle, Wifi, Loader2 } from "lucide-react";
 import { useCameras, useCameraMutations } from "../hooks/useCameras";
 import type { Camera, TestResult } from "../types/camera";
 import CameraAddDialog from "../components/camera/CameraAddDialog";
 import CameraEditDialog from "../components/camera/CameraEditDialog";
 import DiscoveryModal from "../components/camera/DiscoveryModal";
 import EmptyState from "../components/ui/EmptyState";
+import { useConfirm } from "../components/ui/ConfirmDialog";
 
 const statusColors: Record<string, string> = {
-  online: "bg-green-500",
-  offline: "bg-red-500",
-  degraded: "bg-yellow-500",
+  online: "bg-success",
+  offline: "bg-danger",
+  degraded: "bg-warning",
   unknown: "bg-gray-500",
 };
 
@@ -33,12 +34,14 @@ function errorLabel(errorCode: string | null | undefined, fallback: string): str
 export default function Cameras() {
   const { data: cameras, isLoading } = useCameras();
   const { deleteCamera, testCamera, reorderCameras } = useCameraMutations();
+  const { confirm } = useConfirm();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [showAdd, setShowAdd] = useState(false);
   const [editCam, setEditCam] = useState<Camera | null>(null);
   const [showDiscovery, setShowDiscovery] = useState(false);
   const [testingAll, setTestingAll] = useState(false);
+  const [testing, setTesting] = useState<Set<string>>(new Set());
   const [testResult, setTestResult] = useState<Record<string, TestResult>>({});
 
   // Handle ?edit={id} query param from dashboard tile menu
@@ -54,11 +57,14 @@ export default function Cameras() {
   }, [searchParams, cameras, setSearchParams]);
 
   const handleTest = async (id: string) => {
+    setTesting((prev) => new Set([...prev, id]));
     try {
       const result = await testCamera.mutateAsync(id);
       setTestResult((prev) => ({ ...prev, [id]: result }));
     } catch {
       // ignored
+    } finally {
+      setTesting((prev) => { const next = new Set(prev); next.delete(id); return next; });
     }
   };
 
@@ -80,7 +86,8 @@ export default function Cameras() {
   };
 
   const handleDelete = async (cam: Camera) => {
-    if (!confirm(`Delete "${cam.name}"? This cannot be undone.`)) return;
+    const ok = await confirm(`Delete "${cam.name}"? This cannot be undone.`);
+    if (!ok) return;
     deleteCamera.mutate(cam.id);
   };
 
@@ -122,7 +129,7 @@ export default function Cameras() {
             disabled={testingAll || !cameras?.length}
             className="flex items-center gap-1.5 px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded text-sm text-white"
           >
-            {testingAll ? "Testing..." : "Test All"}
+            {testingAll ? <><Loader2 size={14} className="animate-spin" /> Testing...</> : "Test All"}
           </button>
           <button
             onClick={() => setShowDiscovery(true)}
@@ -276,9 +283,10 @@ export default function Cameras() {
                 <button
                   onClick={() => handleTest(cam.id)}
                   title="Test Connection"
-                  className="px-2 py-1 text-xs text-gray-400 hover:bg-gray-800 rounded"
+                  disabled={testing.has(cam.id)}
+                  className="px-2 py-1 text-xs text-gray-400 hover:bg-gray-800 rounded disabled:opacity-50"
                 >
-                  Test
+                  {testing.has(cam.id) ? <Loader2 size={12} className="animate-spin inline" /> : "Test"}
                 </button>
                 <button
                   onClick={() => setEditCam(cam)}

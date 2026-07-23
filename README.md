@@ -2,6 +2,10 @@
 
 Centralized Network Video Recorder for managing multiple IP cameras (ONVIF, RTSP, Hikvision, Dahua, Axis, Reolink, etc.) with live monitoring, recording, AI object detection, and motion detection.
 
+> NVR is developed with **mBm AI Assistant** — an AI-powered engineering and operations assistant by [mBm TECHNOLOGY LLC](https://mbm.mn) that handles rapid coding, server management, deployments, and full-stack troubleshooting.
+>
+> Try it at: **[console.mbm.mn](https://console.mbm.mn)**
+
 ## Features
 
 - **Live Monitoring** — Real-time HLS streaming with sub-stream support for bandwidth-efficient dashboard previews

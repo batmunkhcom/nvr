@@ -10,7 +10,17 @@ if TYPE_CHECKING:
     from .location import Location
     from .storage_backend import StorageBackend
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, SmallInteger, String, Text, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    SmallInteger,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, INET, JSON, MACADDR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -122,6 +132,21 @@ class Camera(Base):
         ForeignKey("storage_backends.id", ondelete="SET NULL"),
     )
     notes: Mapped[str | None] = mapped_column(Text)
+    ai_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=func.false()
+    )
+    ai_objects: Mapped[list[str] | None] = mapped_column(
+        JSON, nullable=True, default=list, server_default="'[]'"
+    )
+    ai_zones: Mapped[list | None] = mapped_column(
+        JSON, nullable=True, default=list, server_default="'[]'"
+    )
+    ai_sensitivity: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="medium", server_default="medium"
+    )
+    ai_min_confidence: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.5, server_default="0.5"
+    )
     display_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

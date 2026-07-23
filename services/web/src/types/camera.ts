@@ -34,6 +34,11 @@ export interface Camera {
   storage_backend_name: string | null;
   notes: string | null;
   privacy_mode: string | null;
+  ai_enabled: boolean;
+  ai_objects: string[] | null;
+  ai_zones: { points: [number, number][] }[] | null;
+  ai_sensitivity: string;
+  ai_min_confidence: number;
   display_order: number;
   created_at: string;
   updated_at: string;
@@ -68,6 +73,10 @@ export interface CameraCreatePayload {
   location_id?: string | null;
   storage_backend_id?: string;
   notes?: string;
+  ai_enabled?: boolean;
+  ai_objects?: string[];
+  ai_sensitivity?: string;
+  ai_min_confidence?: number;
 }
 
 export interface CameraUpdatePayload {
@@ -88,6 +97,12 @@ export interface CameraUpdatePayload {
   storage_backend_id?: string;
   notes?: string;
   privacy_mode?: string;
+  ai_enabled?: boolean;
+  ai_objects?: string[];
+  ai_zones?: { points: [number, number][] }[] | null;
+  ai_sensitivity?: string;
+  ai_min_confidence?: number;
+  motion_source?: string;
 }
 
 export interface ProbeResult {

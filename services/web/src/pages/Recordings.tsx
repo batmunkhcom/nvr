@@ -6,8 +6,10 @@ import { Recording } from "../types/recording";
 import { Film, Play, Trash2, X, ChevronLeft, ChevronRight } from "lucide-react";
 import EmptyState from "../components/ui/EmptyState";
 import { useToast } from "../components/ui/Toast";
+import { useConfirm } from "../components/ui/ConfirmDialog";
 
 export default function Recordings() {
+  const { confirm } = useConfirm();
   const [selectedCameraId, setSelectedCameraId] = useState<string>("");
   const [selectedDate, setSelectedDate] = useState<string>(today());
   const [activePlaybackId, setActivePlaybackId] = useState<string | null>(null);
@@ -32,7 +34,8 @@ export default function Recordings() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("Delete this recording?")) return;
+    const ok = await confirm("Delete this recording?");
+    if (!ok) return;
     try {
       await deleteRecording.mutateAsync(id);
       toast("success", "Recording deleted");
@@ -50,7 +53,7 @@ export default function Recordings() {
   const totalPages = meta ? Math.ceil(meta.total / meta.per_page) : 1;
 
   return (
-    <div>
+    <div className="page-enter">
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold">Recordings</h1>
         <div className="flex gap-2">

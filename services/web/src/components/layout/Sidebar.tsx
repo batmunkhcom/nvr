@@ -1,14 +1,17 @@
 import { NavLink } from "react-router-dom";
 import {
-  LayoutDashboard, Video, Film, Bell, HardDrive, Settings,
+  LayoutDashboard, Video, Film, Bell, HardDrive,
+  MapPin, Clock, Users, Settings,
   ChevronsLeft, ChevronsRight,
 } from "lucide-react";
 import { useUiPreference } from "../../hooks/useUiPreference";
 import { useLocale } from "../../i18n/LocaleContext";
+import { useAuthStore } from "../../store/authStore";
 
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useUiPreference<boolean>("sidebar_collapsed", false);
   const { t } = useLocale();
+  const user = useAuthStore((s) => s.user);
 
   const navItems = [
     { to: "/dashboard", icon: LayoutDashboard, key: "nav.dashboard" },
@@ -16,6 +19,9 @@ export default function Sidebar() {
     { to: "/recordings", icon: Film, key: "nav.recordings" },
     { to: "/events", icon: Bell, key: "nav.events" },
     { to: "/storage", icon: HardDrive, key: "nav.storage" },
+    { to: "/locations", icon: MapPin, label: "Locations", admin: true },
+    { to: "/schedules", icon: Clock, label: "Schedules", admin: true },
+    { to: "/settings/users", icon: Users, label: "Users", admin: true },
     { to: "/settings", icon: Settings, key: "nav.settings" },
   ];
 
@@ -40,13 +46,14 @@ export default function Sidebar() {
         </button>
       </div>
       <nav className="flex-1 p-2 space-y-1">
-        {navItems.map(({ to, icon: Icon, key }) => {
-          const label = t(key);
+        {navItems.map(({ to, icon: Icon, key, label, admin }) => {
+          if (admin && user?.role !== "admin") return null;
+          const display = label || t(key || "");
           return (
           <NavLink
             key={to}
             to={to}
-            title={collapsed ? label : undefined}
+            title={collapsed ? display : undefined}
             className={({ isActive }) =>
               `flex items-center rounded text-sm ${
                 collapsed ? "justify-center px-0 py-2.5" : "gap-3 px-3 py-2"
@@ -56,7 +63,7 @@ export default function Sidebar() {
             }
           >
             <Icon size={18} className="flex-shrink-0" />
-            {!collapsed && label}
+            {!collapsed && display}
           </NavLink>
           );
         })}

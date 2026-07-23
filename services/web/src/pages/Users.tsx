@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useUsers, useUserMutations } from "../hooks/useUsers";
-import { UserPlus, Trash2, Shield, Save } from "lucide-react";
+import { UserPlus, Trash2, Shield, Save, UserCog } from "lucide-react";
 import { useToast } from "../components/ui/Toast";
+import { useConfirm } from "../components/ui/ConfirmDialog";
+import EmptyState from "../components/ui/EmptyState";
 import type { UserRecord } from "../types/user";
 
 export default function Users() {
@@ -10,6 +12,7 @@ export default function Users() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({ username: "", password: "", role: "viewer" });
   const { toast } = useToast();
+  const { confirm } = useConfirm();
 
   const { data, isLoading } = useUsers(page);
   const { create, update, remove } = useUserMutations();
@@ -58,7 +61,8 @@ export default function Users() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("Delete this user?")) return;
+    const ok = await confirm("Delete this user?");
+    if (!ok) return;
     try {
       await remove.mutateAsync(id);
       toast("success", "User deleted");
@@ -94,7 +98,11 @@ export default function Users() {
           ))}
         </div>
       ) : users.length === 0 ? (
-        <p className="text-sm text-gray-500 text-center py-8">No users found.</p>
+        <EmptyState
+          icon={<UserCog size={24} />}
+          title="No users found"
+          description="Add a user account to grant access to the system."
+        />
       ) : (
         <>
           <div className="space-y-1">

@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { HardDrive, Plus, Trash2, Edit3, Server } from "lucide-react";
+import { HardDrive, Plus, Trash2, Edit3, Server, Loader2 } from "lucide-react";
 import { useStorageUsage, useStorageBackends, useStorageMutations } from "../hooks/useRecordings";
 import { useToast } from "../components/ui/Toast";
+import { useConfirm } from "../components/ui/ConfirmDialog";
+import EmptyState from "../components/ui/EmptyState";
 import type { StorageBackend } from "../types/recording";
 
 const BACKEND_TYPES: Record<string, string> = {
@@ -54,10 +56,13 @@ export default function Storage() {
   const backends = useStorageBackends();
   const { create, update, remove } = useStorageMutations();
   const { toast } = useToast();
+  const { confirm } = useConfirm();
 
   const [showDialog, setShowDialog] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [form, setForm] = useState<BackendForm>(emptyForm);
+  const [formActive, setFormActive] = useState(true);
 
   const usage = storage.data;
   const backendList = backends.data || [];
@@ -65,12 +70,14 @@ export default function Storage() {
 
   const openAdd = () => {
     setEditingId(null);
+    setFormActive(true);
     setForm(emptyForm);
     setShowDialog(true);
   };
 
   const openEdit = (b: StorageBackend) => {
     setEditingId(b.id);
+    setFormActive(b.is_active !== false);
     setForm({
       name: b.name,
       backend_type: b.backend_type,
@@ -108,8 +115,9 @@ export default function Storage() {
           name: form.name.trim(),
           mount_point: form.mount_point || undefined,
           config: Object.keys(config).length > 0 ? config : undefined,
-          total_bytes: totalBytes || undefined,
+          total_bytes: totalBytes,
           priority: parseInt(form.priority) || 10,
+          is_active: formActive,
         });
         toast("success", "Storage backend updated");
       } else {
@@ -133,7 +141,9 @@ export default function Storage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("Remove this storage backend?")) return;
+    const ok = await confirm("Remove this storage backend?");
+    if (!ok) return;
+    setDeleting(id);
     try {
       await remove.mutateAsync(id);
       toast("success", "Storage backend removed");
@@ -142,6 +152,8 @@ export default function Storage() {
         (err as { response?: { data?: { detail?: string } } })?.response?.data
           ?.detail || "Failed to remove storage backend";
       toast("error", msg);
+    } finally {
+      setDeleting(null);
     }
   };
 
@@ -205,13 +217,11 @@ export default function Storage() {
           ))}
         </div>
       ) : backendList.length === 0 ? (
-        <div className="text-center py-12 text-gray-500">
-          <HardDrive size={32} className="mx-auto mb-3 opacity-50" />
-          <p className="text-sm">No storage backends configured</p>
-          <p className="text-xs mt-1 text-gray-600">
-            Add an S3 bucket, local path, or network share to store recordings.
-          </p>
-        </div>
+        <EmptyState
+          icon={<Server size={24} />}
+          title="No storage backends"
+          description="Add an S3 bucket, local path, or network share to store recordings."
+        />
       ) : (
         <div className="space-y-2">
           {backendList.map((b) => (
@@ -269,10 +279,15 @@ export default function Storage() {
                 </button>
                 <button
                   onClick={() => handleDelete(b.id)}
-                  className="p-1.5 rounded text-gray-500 hover:bg-red-900 hover:text-red-400"
+                  disabled={deleting === b.id}
+                  className="p-1.5 rounded text-gray-500 hover:bg-red-900 hover:text-red-400 disabled:opacity-50"
                   title="Delete"
                 >
-                  <Trash2 size={14} />
+                  {deleting === b.id ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={14} />
+                  )}
                 </button>
               </div>
             </div>
@@ -390,6 +405,18 @@ export default function Storage() {
                   />
                 </div>
               </div>
+
+              {editingId && (
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={formActive}
+                    onChange={(e) => setFormActive(e.target.checked)}
+                    className="rounded border-gray-600 bg-gray-800 text-blue-600"
+                  />
+                  <span className="text-sm text-gray-300">Active</span>
+                </label>
+              )}
             </div>
 
             <div className="flex justify-end gap-2 mt-6">

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useRecordingSchedules, useRecordingScheduleMutations } from "../../hooks/useRecordingSchedules";
 import { useCameras } from "../../hooks/useCameras";
 import { useToast } from "../ui/Toast";
+import { useConfirm } from "../ui/ConfirmDialog";
+import EmptyState from "../ui/EmptyState";
 import { Clock, Plus, Trash2, Save } from "lucide-react";
 import type { RecordingSchedule } from "../../types/recording";
 
@@ -22,6 +24,7 @@ export default function RecordingSchedulesSection() {
   const { data: cameras } = useCameras();
   const { create, update, remove } = useRecordingScheduleMutations();
   const { toast } = useToast();
+  const { confirm } = useConfirm();
 
   const openAdd = () => {
     setEditingId(null);
@@ -67,7 +70,8 @@ export default function RecordingSchedulesSection() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("Delete this schedule?")) return;
+    const ok = await confirm("Delete this schedule?");
+    if (!ok) return;
     try { await remove.mutateAsync(id); toast("success", "Deleted"); } catch { toast("error", "Failed"); }
   };
 
@@ -84,9 +88,11 @@ export default function RecordingSchedulesSection() {
       </div>
 
       {list.length === 0 ? (
-        <p className="text-sm text-gray-500 text-center py-6">
-          No recording schedules. Add one to control when cameras record.
-        </p>
+        <EmptyState
+          icon={<Clock size={24} />}
+          title="No recording schedules"
+          description="Add a schedule to control when cameras record."
+        />
       ) : (
         <div className="space-y-1">
           {list.map((s) => (

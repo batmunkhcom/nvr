@@ -1,9 +1,12 @@
 import { useState, type FormEvent } from "react";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, MapPin } from "lucide-react";
 import { useLocations, useLocationMutations } from "../../hooks/useLocations";
 import type { Location } from "../../types/camera";
+import { useConfirm } from "../ui/ConfirmDialog";
+import EmptyState from "../ui/EmptyState";
 
 export default function LocationsSection() {
+  const { confirm } = useConfirm();
   const { data: locations, isLoading } = useLocations();
   const { createLocation, updateLocation, deleteLocation } = useLocationMutations();
   const [newName, setNewName] = useState("");
@@ -59,7 +62,8 @@ export default function LocationsSection() {
   };
 
   const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Delete location "${name}"? Cameras using it will keep working.`)) return;
+    const ok = await confirm(`Delete location "${name}"? Cameras using it will keep working.`);
+    if (!ok) return;
     try {
       await deleteLocation.mutateAsync(id);
     } catch { /* error handled by hook */ }
@@ -109,9 +113,11 @@ export default function LocationsSection() {
       )}
 
       {!isLoading && !locations?.length && (
-        <div className="bg-gray-800/50 rounded border border-gray-700 p-6 text-center text-gray-500 text-sm">
-          No locations yet. Add one above to organize your cameras.
-        </div>
+        <EmptyState
+          icon={<MapPin size={24} />}
+          title="No locations yet"
+          description="Add a location above to organize your cameras."
+        />
       )}
 
       <div className="space-y-1.5">

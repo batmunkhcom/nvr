@@ -9,6 +9,7 @@ import Storage from "./pages/Storage";
 import Settings from "./pages/Settings";
 import AppShell from "./components/layout/AppShell";
 import { ToastProvider } from "./components/ui/Toast";
+import { ConfirmProvider } from "./components/ui/ConfirmDialog";
 import { LocaleProvider } from "./i18n/LocaleContext";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -17,7 +18,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
     <LocaleProvider>
       <ToastProvider>
-        {children}
+        <ConfirmProvider>
+          {children}
+        </ConfirmProvider>
       </ToastProvider>
     </LocaleProvider>
   );

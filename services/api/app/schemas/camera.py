@@ -21,6 +21,10 @@ class CameraCreate(BaseModel):
     location_id: str | None = None
     storage_backend_id: str | None = None
     notes: str | None = None
+    ai_enabled: bool = False
+    ai_objects: list[str] | None = None
+    ai_sensitivity: str = "medium"
+    ai_min_confidence: float = 0.5
 
 
 class CameraUpdate(BaseModel):
@@ -42,6 +46,11 @@ class CameraUpdate(BaseModel):
     notes: str | None = None
     display_order: int | None = None
     privacy_mode: str | None = None
+    ai_enabled: bool | None = None
+    ai_objects: list[str] | None = None
+    ai_zones: list | None = None
+    ai_sensitivity: str | None = None
+    ai_min_confidence: float | None = None
 
 
 class CameraResponse(BaseModel):
@@ -65,6 +74,11 @@ class CameraResponse(BaseModel):
     has_motion_detection: bool
     has_io_ports: bool
     motion_source: str | None = None
+    ai_enabled: bool = False
+    ai_objects: list[str] | None = None
+    ai_zones: list | None = None
+    ai_sensitivity: str = "medium"
+    ai_min_confidence: float = 0.5
     max_resolution: str | None = None
     recording_mode: str
     stream_transport: str
@@ -81,6 +95,11 @@ class CameraResponse(BaseModel):
     notes: str | None = None
     display_order: int = 0
     privacy_mode: str | None = None
+    ai_enabled: bool = False
+    ai_objects: list[str] | None = None
+    ai_zones: list | None = None
+    ai_sensitivity: str = "medium"
+    ai_min_confidence: float = 0.5
     created_at: str
     updated_at: str
 

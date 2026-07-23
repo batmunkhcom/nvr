@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 import httpx
 import structlog
@@ -14,6 +16,7 @@ from ..models.system_config import SystemConfig
 logger = structlog.get_logger()
 
 AI_PREFIX = "ai."
+OLLAMA_BASE = "http://10.10.20.83:11434"
 
 _AI_DEFAULTS: dict[str, str] = {
     "enabled": "false",
@@ -134,3 +137,103 @@ async def analyze_image(
     except Exception as exc:
         logger.error("ai_unexpected_error", error=str(exc))
         return {"success": False, "error": f"Unexpected error: {exc!s}", "response": None}
+
+
+async def ollama_chat(messages: list[dict], snapshot_b64: str | None = None) -> str:
+    """Chat with Ollama using native /api/chat endpoint."""
+    formatted: list[dict] = [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in messages]
+
+    if snapshot_b64:
+        formatted.append({
+            "role": "user",
+            "content": "Analyze the attached security camera snapshot in context of the conversation above.",
+            "images": [snapshot_b64],
+        })
+
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                f"{OLLAMA_BASE}/api/chat",
+                json={"model": "llama3.2-vision:latest", "messages": formatted, "stream": False},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("message", {}).get("content", "").strip()
+            return "Ollama responded with error: " + str(resp.status_code)
+    except Exception:
+        return "Cannot reach Ollama at " + OLLAMA_BASE
+
+
+async def ollama_summarize(camera_id: UUID, date_str: str) -> str:
+    """Summarize events for a camera on a given date using Ollama."""
+    try:
+        import json
+        from datetime import timedelta
+
+        async with async_session_factory() as db:
+            from ..models.camera import Camera
+            from ..models.event import Event
+
+            camera = (await db.execute(select(Camera).where(Camera.id == camera_id))).scalar_one_or_none()
+            if not camera:
+                return "Camera not found"
+
+            start_dt = datetime.fromisoformat(date_str + "T00:00:00+00:00")
+            end_dt = start_dt + timedelta(days=1)
+
+            events_result = await db.execute(
+                select(Event)
+                .where(
+                    Event.camera_id == camera_id,
+                    Event.start_time >= start_dt,
+                    Event.start_time < end_dt,
+                )
+                .order_by(Event.start_time.asc())
+                .limit(100)
+            )
+            events = events_result.scalars().all()
+
+            if not events:
+                return f"No events found for {camera.name} on {date_str}"
+
+            events_data = [
+                {
+                    "time": e.start_time.isoformat() if e.start_time else "",
+                    "type": e.event_type,
+                    "severity": e.severity,
+                    "metadata": e.event_metadata,
+                }
+                for e in events
+            ]
+
+    except Exception:
+        return "Failed to load events"
+
+    prompt = (
+        f"Camera '{camera.name}' recorded {len(events_data)} security events on {date_str}.\n\n"
+        f"Events:\n{json.dumps(events_data[:50], indent=2, default=str)}\n\n"
+        "Provide a brief 3-5 sentence summary: notable patterns, peak activity times, objects detected, "
+        "and anything unusual that warrants attention. Be concise."
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=90) as client:
+            resp = await client.post(
+                f"{OLLAMA_BASE}/api/generate",
+                json={"model": "llama3.2-vision:latest", "prompt": prompt, "stream": False},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("response", "").strip()
+            return "Summary generation failed"
+    except Exception:
+        return "Cannot reach Ollama"
+
+
+async def ollama_health() -> bool:
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{OLLAMA_BASE}/api/tags")
+            return resp.status_code == 200
+    except Exception:
+        return False

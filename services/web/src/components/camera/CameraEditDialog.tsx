@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useCameraMutations } from "../../hooks/useCameras";
 import type { Camera } from "../../types/camera";
 import LocationSelect from "./LocationSelect";
+import StorageBackendSelect from "./StorageBackendSelect";
 
 interface Props {
   open: boolean;
@@ -20,7 +21,12 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
   const [recordingMode, setRecordingMode] = useState("continuous");
   const [isActive, setIsActive] = useState(true);
   const [locationId, setLocationId] = useState("");
+  const [storageBackendId, setStorageBackendId] = useState("");
   const [notes, setNotes] = useState("");
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [motionSource, setMotionSource] = useState("server");
+  const [aiSensitivity, setAiSensitivity] = useState("medium");
+  const [aiConfidence, setAiConfidence] = useState("0.5");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -35,7 +41,12 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
       setRecordingMode(camera.recording_mode || "continuous");
       setIsActive(camera.status !== "offline");
       setLocationId(camera.location_id || "");
+      setStorageBackendId(camera.storage_backend_id || "");
       setNotes(camera.notes || "");
+      setAiEnabled(camera.ai_enabled || false);
+      setMotionSource(camera.motion_source || "server");
+      setAiSensitivity(camera.ai_sensitivity || "medium");
+      setAiConfidence(String(camera.ai_min_confidence ?? 0.5));
     }
   }, [camera]);
 
@@ -58,7 +69,12 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
         recording_mode: recordingMode,
         is_active: isActive,
         location_id: locationId || null,
+        storage_backend_id: storageBackendId || undefined,
         notes: notes || undefined,
+        ai_enabled: aiEnabled,
+        motion_source: motionSource,
+        ai_sensitivity: aiSensitivity,
+        ai_min_confidence: parseFloat(aiConfidence) || 0.5,
       });
       onClose();
     } catch (err: unknown) {
@@ -173,6 +189,63 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
             </div>
           </div>
           <LocationSelect value={locationId} onChange={setLocationId} />
+          <StorageBackendSelect value={storageBackendId} onChange={setStorageBackendId} />
+
+          <div className="border-t border-gray-700 pt-3">
+            <h3 className="text-sm font-medium text-blue-400 mb-3">AI Detection</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="flex items-center gap-2 pt-1">
+                  <input
+                    type="checkbox"
+                    checked={aiEnabled}
+                    onChange={(e) => setAiEnabled(e.target.checked)}
+                    className="rounded border-gray-600 bg-gray-800 text-blue-600"
+                  />
+                  <span className="text-sm text-gray-300">Enable AI</span>
+                </label>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">AI Source</label>
+                <select
+                  value={motionSource}
+                  onChange={(e) => setMotionSource(e.target.value)}
+                  className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-gray-100 text-sm outline-none"
+                >
+                  <option value="server">NVR Engine (YOLO)</option>
+                  <option value="camera">Camera Built-in (ONVIF)</option>
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 mt-2">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Sensitivity</label>
+                <select
+                  value={aiSensitivity}
+                  onChange={(e) => setAiSensitivity(e.target.value)}
+                  className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-gray-100 text-sm outline-none"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Min Confidence</label>
+                <select
+                  value={aiConfidence}
+                  onChange={(e) => setAiConfidence(e.target.value)}
+                  className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-gray-100 text-sm outline-none"
+                >
+                  <option value="0.3">30%</option>
+                  <option value="0.5">50%</option>
+                  <option value="0.7">70%</option>
+                  <option value="0.9">90%</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
           <div className="flex gap-2 pt-2">
             <button
               type="submit"

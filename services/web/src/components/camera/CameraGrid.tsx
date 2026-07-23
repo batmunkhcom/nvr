@@ -1,17 +1,18 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, type DragEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCameras, useCameraMutations } from "../../hooks/useCameras";
 import { useUiPreference } from "../../hooks/useUiPreference";
 import { useEvents } from "../../hooks/useEvents";
 import { Camera } from "../../types/camera";
-import { LayoutGrid, Play, MoreVertical, Wifi, Pencil, Trash2, MonitorPlay } from "lucide-react";
+import { LayoutGrid, Play, MoreVertical, Wifi, Pencil, Trash2, MonitorPlay, GripVertical } from "lucide-react";
 import MiniLivePreview from "./MiniLivePreview";
 import EmptyState from "../ui/EmptyState";
+import { useConfirm } from "../ui/ConfirmDialog";
 
 const statusColors: Record<string, string> = {
-  online: "bg-green-500",
-  offline: "bg-red-500",
-  degraded: "bg-yellow-500",
+  online: "bg-success",
+  offline: "bg-danger",
+  degraded: "bg-warning",
   unknown: "bg-gray-500",
 };
 
@@ -31,7 +32,23 @@ const gridColsClass: Record<number, string> = {
   4: "grid-cols-4",
 };
 
-function CameraTile({ camera, index, hasMotion }: { camera: Camera; index: number; hasMotion: boolean }) {
+function CameraTile({
+  camera,
+  index,
+  hasMotion,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  isDragging,
+}: {
+  camera: Camera;
+  index: number;
+  hasMotion: boolean;
+  onDragStart: (idx: number) => void;
+  onDragOver: (e: DragEvent, idx: number) => void;
+  onDrop: (e: DragEvent, idx: number) => void;
+  isDragging: boolean;
+}) {
   const navigate = useNavigate();
   const { deleteCamera, testCamera } = useCameraMutations();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -47,16 +64,23 @@ function CameraTile({ camera, index, hasMotion }: { camera: Camera; index: numbe
     setTesting(false);
   };
 
-  const handleDelete = () => {
+  const { confirm } = useConfirm();
+
+  const handleDelete = async () => {
     setMenuOpen(false);
-    if (!confirm(`Delete "${camera.name}"?`)) return;
+    const ok = await confirm(`Delete "${camera.name}"?`);
+    if (!ok) return;
     deleteCamera.mutate(camera.id);
   };
 
   return (
     <div
       title={camera.connection_error || undefined}
-      className={`aspect-video bg-gray-800 rounded border-2 ${border} ${hasMotion ? "animate-motion-flash" : ""} relative group overflow-hidden cursor-pointer transition-colors duration-200`}
+      draggable
+      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; onDragStart(index); }}
+      onDragOver={(e) => onDragOver(e, index)}
+      onDrop={(e) => onDrop(e, index)}
+      className={`aspect-video bg-gray-800 rounded border-2 ${border} ${hasMotion ? "animate-motion-flash" : ""} relative group overflow-hidden cursor-pointer transition-all duration-200 ${isDragging ? "opacity-30 scale-95" : ""}`}
     >
       <div onClick={() => navigate(`/live/${camera.id}`)} className="absolute inset-0">
         {isLive && <MiniLivePreview cameraId={camera.id} />}
@@ -66,6 +90,10 @@ function CameraTile({ camera, index, hasMotion }: { camera: Camera; index: numbe
             <span className="text-gray-600 text-xs">{camera.name}</span>
           </div>
         )}
+      </div>
+
+      <div className="absolute top-0.5 left-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <GripVertical size={10} className="text-gray-600" />
       </div>
 
       <div className="absolute top-2 left-2 flex items-center gap-1.5 max-w-[75%]">
@@ -82,7 +110,6 @@ function CameraTile({ camera, index, hasMotion }: { camera: Camera; index: numbe
         )}
       </div>
 
-      {/* 3-dot menu */}
       <div className="absolute top-2 right-2 z-20" onClick={(e) => e.stopPropagation()}>
         <button
           onClick={() => setMenuOpen(!menuOpen)}
@@ -140,9 +167,11 @@ function CameraTile({ camera, index, hasMotion }: { camera: Camera; index: numbe
 
 export default function CameraGrid() {
   const { data: cameras, isLoading } = useCameras();
+  const { reorderCameras } = useCameraMutations();
   const { data: events = [] } = useEvents();
   const [columns, setColumns] = useUiPreference<number>("dashboard_columns", 2);
   const cols = gridColsClass[columns] ? columns : 2;
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
 
   const motionCameraIds = useMemo(() => {
     const now = Date.now();
@@ -155,6 +184,35 @@ export default function CameraGrid() {
     }
     return ids;
   }, [events]);
+
+  const handleDragStart = useCallback((idx: number) => {
+    setDragIndex(idx);
+  }, []);
+
+  const handleDragOver = useCallback((e: DragEvent, idx: number) => {
+    e.preventDefault();
+    if (dragIndex === null || dragIndex === idx) return;
+  }, [dragIndex]);
+
+  const handleDrop = useCallback((_e: DragEvent, targetIdx: number) => {
+    if (dragIndex === null || dragIndex === targetIdx) {
+      setDragIndex(null);
+      return;
+    }
+    if (!cameras) return;
+
+    const items = [...cameras];
+    const [moved] = items.splice(dragIndex, 1);
+    items.splice(targetIdx, 0, moved);
+
+    const reordered = items.map((c, i) => ({ id: c.id, display_order: i }));
+    reorderCameras.mutate(reordered);
+    setDragIndex(null);
+  }, [dragIndex, cameras, reorderCameras]);
+
+  const handleDragEnd = useCallback(() => {
+    setDragIndex(null);
+  }, []);
 
   if (isLoading) {
     return (
@@ -177,27 +235,39 @@ export default function CameraGrid() {
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-end gap-1 mb-3">
-        <LayoutGrid size={14} className="text-gray-500 mr-1" />
-        {COLUMN_OPTIONS.map((n) => (
-          <button
-            key={n}
-            onClick={() => setColumns(n)}
-            title={`${n} column${n > 1 ? "s" : ""}`}
-            className={`w-7 h-7 rounded text-xs font-medium transition-colors ${
-              cols === n
-                ? "bg-blue-600 text-white"
-                : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-            }`}
-          >
-            {n}
-          </button>
-        ))}
+    <div onDragEnd={handleDragEnd}>
+      <div className="flex items-center justify-between gap-1 mb-3">
+        <span className="text-[10px] text-gray-600">Drag to reorder</span>
+        <div className="flex items-center gap-1">
+          <LayoutGrid size={14} className="text-gray-500 mr-1" />
+          {COLUMN_OPTIONS.map((n) => (
+            <button
+              key={n}
+              onClick={() => setColumns(n)}
+              title={`${n} column${n > 1 ? "s" : ""}`}
+              className={`w-7 h-7 rounded text-xs font-medium transition-colors ${
+                cols === n
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+              }`}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
       </div>
       <div className={`grid ${gridColsClass[cols]} gap-4`}>
         {cameras.map((camera, i) => (
-          <CameraTile key={camera.id} camera={camera} index={i} hasMotion={motionCameraIds.has(camera.id)} />
+          <CameraTile
+            key={camera.id}
+            camera={camera}
+            index={i}
+            hasMotion={motionCameraIds.has(camera.id)}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            isDragging={dragIndex === i}
+          />
         ))}
       </div>
     </div>
