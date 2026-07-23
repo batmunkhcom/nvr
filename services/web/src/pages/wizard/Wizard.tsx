@@ -24,7 +24,7 @@ export default function WizardPage() {
   };
 
   return (
-    <div className="p-4 max-w-4xl mx-auto">
+    <div className="page-enter p-4 max-w-4xl mx-auto">
       {step > 0 && (
         <div className="flex items-center gap-2 mb-6">
           {STEPS.map((label, i) => (

@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Video, Film, Bell, HardDrive,
   MapPin, Clock, Users, Settings,
   ChevronsLeft, ChevronsRight,
-  BookOpen, ExternalLink, Code, MessageSquare, LogOut,
+  BookOpen, ExternalLink, Code, MessageSquare,
 } from "lucide-react";
 import { useUiPreference } from "../../hooks/useUiPreference";
 import { useLocale } from "../../i18n/LocaleContext";
@@ -13,7 +13,6 @@ export default function Sidebar() {
   const [collapsed, setCollapsed] = useUiPreference<boolean>("sidebar_collapsed", false);
   const { t } = useLocale();
   const user = useAuthStore((s) => s.user);
-  const logout = useAuthStore((s) => s.logout);
 
   const navItems = [
     { to: "/dashboard", icon: LayoutDashboard, key: "nav.dashboard" },
@@ -105,12 +104,6 @@ export default function Sidebar() {
           >
             <MessageSquare size={11} /> Feedback
           </a>
-          <button
-            onClick={logout}
-            className="flex items-center gap-1.5 px-2 py-1 hover:text-red-400 rounded transition-colors w-full text-left"
-          >
-            <LogOut size={11} /> Logout
-          </button>
           <div className="px-2 pt-1 text-gray-500 leading-tight">
             mBm NVR System v0.2<br />
             <span className="text-gray-600">mBm TECHNOLOGY since &copy; 2023</span>

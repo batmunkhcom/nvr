@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -16,7 +17,7 @@ from ..models.system_config import SystemConfig
 logger = structlog.get_logger()
 
 AI_PREFIX = "ai."
-OLLAMA_BASE = "http://10.10.20.83:11434"
+OLLAMA_BASE = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 _AI_DEFAULTS: dict[str, str] = {
     "enabled": "false",

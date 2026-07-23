@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from io import BytesIO
 from typing import TYPE_CHECKING
 
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger()
 
-OLLAMA_BASE = "http://10.10.20.83:11434"
+OLLAMA_BASE = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 DEFAULT_MODEL = "llama3.2-vision:latest"
 
 
