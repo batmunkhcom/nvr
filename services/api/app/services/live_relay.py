@@ -55,13 +55,18 @@ async def start_relay(
 async def _spawn_ffmpeg(
     rtsp_uri: str, rtsp_transport: str, cid: str
 ) -> asyncio.subprocess.Process | None:
+    # Always transcode to H264 for universal browser compatibility.
+    # -preset ultrafast keeps CPU overhead minimal for live monitoring.
+    codec_args = ["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency"]
+
     try:
         return await asyncio.create_subprocess_exec(
             _ffmpeg_path,
             "-hide_banner", "-loglevel", "error",
             "-rtsp_transport", rtsp_transport,
             "-i", rtsp_uri,
-            "-c:v", "copy", "-an",
+            *codec_args,
+            "-an",
             "-f", "rtsp",
             "-rtsp_transport", "tcp",
             f"{MEDIAMTX_RTSP}/{cid}",
@@ -90,6 +95,19 @@ async def relay_status(relay_key: str | uuid.UUID) -> dict[str, Any]:
     cid = str(relay_key)
     if cid in STREAM_DICT and STREAM_DICT[cid].get("running"):
         return {"running": True, "hls_url": f"/hls/{cid}/index.m3u8"}
+
+    # STREAM_DICT may be stale — check MediaMTX if the path is actually alive
+    import httpx
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"http://127.0.0.1:9997/v3/paths/get/{cid}", timeout=2)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("ready"):
+                    return {"running": True, "hls_url": f"/hls/{cid}/index.m3u8"}
+    except Exception as exc:
+        logger.warning("relay_status_mediamtx_failed", camera_id=cid, error=str(exc))
+
     return {"running": False, "hls_url": None}
 
 
