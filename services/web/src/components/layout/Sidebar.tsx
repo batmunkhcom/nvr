@@ -3,6 +3,7 @@ import {
   LayoutDashboard, Video, Film, Bell, HardDrive,
   MapPin, Clock, Users, Settings,
   ChevronsLeft, ChevronsRight,
+  BookOpen, ExternalLink,
 } from "lucide-react";
 import { useUiPreference } from "../../hooks/useUiPreference";
 import { useLocale } from "../../i18n/LocaleContext";
@@ -36,7 +37,7 @@ export default function Sidebar() {
           collapsed ? "justify-center" : "justify-between"
         }`}
       >
-        {!collapsed && <span className="text-lg font-bold text-blue-400">NVR System</span>}
+        {!collapsed && <span className="text-lg font-bold text-blue-400">mBm NVR</span>}
         <button
           onClick={() => setCollapsed(!collapsed)}
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -68,6 +69,30 @@ export default function Sidebar() {
           );
         })}
       </nav>
+
+      {!collapsed && (
+        <div className="p-2 border-t border-gray-800 text-[10px] text-gray-600 space-y-0.5">
+          <a
+            href="https://github.com/batmunkhcom/nvr"
+            target="_blank"
+            rel="noopener"
+            className="flex items-center gap-1.5 px-2 py-1 hover:text-gray-400 rounded"
+          >
+            <BookOpen size={11} /> About / Docs
+          </a>
+          <a
+            href="/docs"
+            target="_blank"
+            rel="noopener"
+            className="flex items-center gap-1.5 px-2 py-1 hover:text-gray-400 rounded"
+          >
+            <ExternalLink size={11} /> API Docs
+          </a>
+          <div className="px-2 py-1 text-gray-700">
+            mBm TECHNOLOGY LLC &copy; 2025
+          </div>
+        </div>
+      )}
     </aside>
   );
 }

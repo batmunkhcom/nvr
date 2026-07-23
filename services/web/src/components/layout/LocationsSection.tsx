@@ -5,15 +5,22 @@ import type { Location } from "../../types/camera";
 import { useConfirm } from "../ui/ConfirmDialog";
 import EmptyState from "../ui/EmptyState";
 
+const PRESET_COLORS = [
+  "#3b82f6", "#ef4444", "#22c55e", "#f59e0b", "#8b5cf6",
+  "#ec4899", "#06b6d4", "#f97316", "#14b8a6", "#6366f1",
+];
+
 export default function LocationsSection() {
   const { confirm } = useConfirm();
   const { data: locations, isLoading } = useLocations();
   const { createLocation, updateLocation, deleteLocation } = useLocationMutations();
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
+  const [newColor, setNewColor] = useState(PRESET_COLORS[0]);
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
+  const [editColor, setEditColor] = useState(PRESET_COLORS[0]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -26,9 +33,11 @@ export default function LocationsSection() {
       await createLocation.mutateAsync({
         name: newName.trim(),
         description: newDesc.trim() || undefined,
+        color: newColor,
       });
       setNewName("");
       setNewDesc("");
+      setNewColor(PRESET_COLORS[0]);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to add location");
     } finally {
@@ -36,10 +45,11 @@ export default function LocationsSection() {
     }
   };
 
-  const startEdit = (id: string, name: string, desc: string | null) => {
+  const startEdit = (id: string, name: string, desc: string | null, color: string) => {
     setEditId(id);
     setEditName(name);
     setEditDesc(desc || "");
+    setEditColor(color || PRESET_COLORS[0]);
     setError("");
   };
 
@@ -52,6 +62,7 @@ export default function LocationsSection() {
         id: editId,
         name: editName.trim(),
         description: editDesc.trim() || undefined,
+        color: editColor,
       });
       setEditId(null);
     } catch (err: unknown) {
@@ -73,22 +84,34 @@ export default function LocationsSection() {
     <div>
       <h2 className="text-lg font-semibold mb-3">Locations</h2>
 
-      <form onSubmit={handleAdd} className="flex gap-2 mb-4">
+      <form onSubmit={handleAdd} className="flex gap-2 mb-4 flex-wrap">
         <input
           type="text"
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           placeholder="Location name (e.g. Front Gate)"
           required
-          className="flex-1 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-gray-100 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+          className="flex-1 min-w-[160px] px-3 py-2 bg-gray-800 border border-gray-700 rounded text-gray-100 text-sm focus:border-blue-500 outline-none"
         />
         <input
           type="text"
           value={newDesc}
           onChange={(e) => setNewDesc(e.target.value)}
           placeholder="Description (optional)"
-          className="w-48 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-gray-100 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+          className="w-40 px-3 py-2 bg-gray-800 border border-gray-700 rounded text-gray-100 text-sm outline-none"
         />
+        <div className="flex items-center gap-1">
+          {PRESET_COLORS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setNewColor(c)}
+              className={`w-6 h-6 rounded-full border-2 transition-transform ${newColor === c ? "border-white scale-125" : "border-transparent hover:scale-110"}`}
+              style={{ backgroundColor: c }}
+              title={c}
+            />
+          ))}
+        </div>
         <button
           type="submit"
           disabled={saving || !newName.trim()}
@@ -138,6 +161,17 @@ export default function LocationsSection() {
                 placeholder="Description"
                 className="w-40 px-2 py-1 bg-gray-900 border border-gray-600 rounded text-sm text-gray-300 outline-none"
               />
+              <div className="flex items-center gap-1">
+                {PRESET_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setEditColor(c)}
+                    className={`w-5 h-5 rounded-full border-2 transition-transform ${editColor === c ? "border-white scale-125" : "border-transparent hover:scale-110"}`}
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
               <button
                 onClick={handleSaveEdit}
                 disabled={saving || !editName.trim()}
@@ -158,6 +192,10 @@ export default function LocationsSection() {
               className="flex items-center justify-between bg-gray-900 border border-gray-800 hover:border-gray-700 rounded px-3 py-2"
             >
               <div className="flex items-center gap-3">
+                <span
+                  className="w-3 h-3 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: loc.color || "#3b82f6" }}
+                />
                 <span className="text-sm text-white font-medium">{loc.name}</span>
                 {loc.description && (
                   <span className="text-xs text-gray-500">{loc.description}</span>
@@ -168,7 +206,7 @@ export default function LocationsSection() {
               </div>
               <div className="flex items-center gap-1">
                 <button
-                  onClick={() => startEdit(loc.id, loc.name, loc.description)}
+                  onClick={() => startEdit(loc.id, loc.name, loc.description, loc.color || "#3b82f6")}
                   title="Edit"
                   className="p-1 text-gray-500 hover:text-blue-400 rounded"
                 >

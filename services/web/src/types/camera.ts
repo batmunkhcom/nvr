@@ -53,6 +53,7 @@ export interface Location {
   id: string;
   name: string;
   description: string | null;
+  color: string;
   camera_count: number;
   created_at: string;
 }

@@ -1,4 +1,4 @@
-# NVR System
+# mBm NVR System
 
 Centralized Network Video Recorder for managing multiple IP cameras (ONVIF, RTSP, Hikvision, Dahua, Axis, Reolink, etc.) with live monitoring, recording, AI object detection, and motion detection.
 

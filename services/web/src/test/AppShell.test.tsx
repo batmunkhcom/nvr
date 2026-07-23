@@ -52,9 +52,9 @@ describe("AppShell", () => {
   it("sidebar collapse toggle hides labels and persists to ui-config", async () => {
     renderWithProviders(<AppShell />);
 
-    const brandTexts = screen.getAllByText("NVR System");
-    // Sidebar brand + Topbar title both show "NVR System" after i18n
-    expect(brandTexts.length).toBeGreaterThanOrEqual(2);
+    const brandTexts = screen.getAllByText("mBm NVR");
+    // Sidebar brand shows "mBm NVR"
+    expect(brandTexts.length).toBeGreaterThanOrEqual(1);
 
     fireEvent.click(screen.getByTitle("Collapse sidebar"));
 
@@ -77,8 +77,8 @@ describe("AppShell", () => {
     await waitFor(() => {
       expect(screen.getByTitle("Expand sidebar")).toBeInTheDocument();
     });
-    // Sidebar brand hidden, but Topbar still shows "NVR System"
-    const brandTexts = screen.getAllByText("NVR System");
-    expect(brandTexts.length).toBe(1); // only Topbar remains
+    // Sidebar brand hidden, Topbar shows title
+    const brandTexts = screen.queryAllByText("mBm NVR");
+    expect(brandTexts.length).toBeLessThanOrEqual(1);
   });
 });

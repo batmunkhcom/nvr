@@ -21,7 +21,7 @@ export function useLocationMutations() {
   };
 
   const createLocation = useMutation({
-    mutationFn: (payload: { name: string; description?: string }) =>
+    mutationFn: (payload: { name: string; description?: string; color?: string }) =>
       apiClient.post("/locations", payload),
     onSuccess: invalidate,
   });
@@ -30,7 +30,7 @@ export function useLocationMutations() {
     mutationFn: ({
       id,
       ...payload
-    }: { id: string; name?: string; description?: string }) =>
+    }: { id: string; name?: string; description?: string; color?: string }) =>
       apiClient.patch(`/locations/${id}`, payload),
     onSuccess: invalidate,
   });

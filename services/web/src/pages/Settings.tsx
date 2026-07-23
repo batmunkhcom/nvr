@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { Settings as SettingsIcon, Info } from "lucide-react";
+import { Settings as SettingsIcon, Info, Download, Server } from "lucide-react";
 import ConfigSection from "../components/config/ConfigSection";
 import SystemInfoPanel from "../components/config/SystemInfoPanel";
+import BackupSection from "../components/config/BackupSection";
 
 const SECTIONS = [
-  { key: "config", label: "Configuration", icon: SettingsIcon, desc: "System-wide settings, camera defaults, and AI preferences" },
+  { key: "config", label: "Configuration", icon: SettingsIcon, desc: "UI, Camera, AI, Recording & Notification preferences" },
   { key: "info", label: "System Info", icon: Info, desc: "Version, uptime, and health status" },
+  { key: "backup", label: "Backup & Restore", icon: Download, desc: "Export/import all configuration and data" },
 ];
 
 export default function Settings() {
@@ -43,6 +45,7 @@ export default function Settings() {
       <div className="flex-1 min-w-0 bg-gray-900 rounded-xl border border-gray-800 p-6">
         {active === "config" && <ConfigSection />}
         {active === "info" && <SystemInfoPanel />}
+        {active === "backup" && <BackupSection />}
       </div>
     </div>
   );

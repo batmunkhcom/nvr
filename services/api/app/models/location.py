@@ -23,6 +23,9 @@ class Location(Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
     description: Mapped[str | None] = mapped_column(Text)
+    color: Mapped[str] = mapped_column(
+        String(7), nullable=False, default="#3b82f6", server_default="#3b82f6"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),

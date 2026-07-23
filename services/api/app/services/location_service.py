@@ -19,6 +19,7 @@ def location_to_dict(loc: Location, camera_count: int = 0) -> dict:
         "id": str(loc.id),
         "name": loc.name,
         "description": loc.description,
+        "color": loc.color if hasattr(loc, "color") else "#3b82f6",
         "camera_count": camera_count,
         "created_at": loc.created_at.isoformat() if loc.created_at else None,
     }
@@ -52,7 +53,7 @@ async def create_location(body: LocationCreate, db: AsyncSession) -> Location:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Location with this name already exists"
         )
-    loc = Location(name=body.name.strip(), description=body.description)
+    loc = Location(name=body.name.strip(), description=body.description, color=body.color)
     db.add(loc)
     await db.flush()
     logger.info("location_created", location_id=str(loc.id), name=loc.name)
@@ -76,6 +77,8 @@ async def update_location(
         loc.name = name
     if body.description is not None:
         loc.description = body.description
+    if body.color is not None:
+        loc.color = body.color
     await db.flush()
     logger.info("location_updated", location_id=str(loc.id))
     return loc

@@ -12,8 +12,8 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["favicon.svg", "apple-touch-icon.png"],
       manifest: {
-        name: "NVR Surveillance System",
-        short_name: "NVR",
+        name: "mBm NVR Surveillance",
+        short_name: "mBm NVR",
         description: "Network Video Recorder — monitor and manage IP cameras",
         theme_color: "#1a1a2e",
         background_color: "#0f0f1a",

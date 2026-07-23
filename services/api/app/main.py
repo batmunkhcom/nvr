@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="NVR System API",
+    title="mBm NVR System API",
     version="0.1.0",
     description="Network Video Recorder System — API Gateway",
     lifespan=lifespan,
