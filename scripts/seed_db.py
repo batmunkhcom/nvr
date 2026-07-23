@@ -11,7 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 DEFAULT_CONFIG_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "config", "default.yml"
 )
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://nvr_user:password@localhost:5432/nvr")
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    f"postgresql+asyncpg://{os.getenv('POSTGRES_USER', 'nvr_user')}:{os.getenv('POSTGRES_PASSWORD', 'nvr')}@{os.getenv('POSTGRES_HOST', 'localhost')}:{os.getenv('POSTGRES_PORT', '5432')}/{os.getenv('POSTGRES_DB', 'nvr')}",
+)
 
 
 async def seed_config(config_path: str = DEFAULT_CONFIG_PATH) -> None:
