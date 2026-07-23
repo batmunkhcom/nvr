@@ -2,11 +2,12 @@
 
 Centralized Network Video Recorder for managing multiple IP cameras (ONVIF, RTSP, Hikvision, Dahua, Axis, Reolink, etc.) with live monitoring, recording, AI object detection, and motion detection.
 
-> NVR is developed with **mBm AI Assistant** — an AI-powered engineering and operations assistant by [mBm TECHNOLOGY LLC](https://mbm.mn) that handles rapid coding, server management, deployments, and full-stack troubleshooting.
->
-> Powered by **DeepSeek V4 Pro** model.
+mBm NVR is developed with **mBm AI Assistant** — an AI-powered engineering and operations assistant by [mBm TECHNOLOGY LLC](https://mbm.mn) that handles rapid coding, server management, deployments, and full-stack troubleshooting.
 >
 > Try it at: **[console.mbm.mn](https://console.mbm.mn)**
+>
+> used model: Deepseek V4 Pro
+> 
 
 ## Features
 
