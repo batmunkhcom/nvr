@@ -259,7 +259,9 @@ def _derive_sub_stream_uri(main_uri: str | None) -> str | None:
 
 
 def _camera_to_response(camera: Camera) -> dict:
-    return {
+    import contextlib
+
+    result = {
         "id": str(camera.id),
         "name": camera.name,
         "ip_address": str(camera.ip_address) if camera.ip_address else None,
@@ -290,10 +292,17 @@ def _camera_to_response(camera: Camera) -> dict:
         "tags": camera.tags,
         "location": camera.location,
         "location_id": str(camera.location_id) if camera.location_id else None,
-        "location_name": camera.location_ref.name if camera.location_ref else None,
+        "location_name": None,
         "notes": camera.notes,
         "display_order": camera.display_order if camera.display_order is not None else 0,
         "privacy_mode": camera.privacy_mode,
         "created_at": camera.created_at.isoformat() if camera.created_at else None,
         "updated_at": camera.updated_at.isoformat() if camera.updated_at else None,
     }
+
+    if camera.location_id:
+        with contextlib.suppress(Exception):
+            if camera.location_ref:
+                result["location_name"] = camera.location_ref.name
+
+    return result
