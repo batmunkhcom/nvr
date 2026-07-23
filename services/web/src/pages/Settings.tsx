@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Settings as SettingsIcon, MapPin, Info, UserCog } from "lucide-react";
+import { Settings as SettingsIcon, MapPin, Info, UserCog, Clock } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import LocationsSection from "../components/layout/LocationsSection";
 import ConfigSection from "../components/config/ConfigSection";
+import RecordingSchedulesSection from "../components/config/RecordingSchedulesSection";
 import apiClient from "../api/client";
 import { useQuery } from "@tanstack/react-query";
 
@@ -47,6 +48,7 @@ function SystemInfo() {
 const TABS = [
   { key: "config", label: "Configuration", icon: SettingsIcon },
   { key: "locations", label: "Locations", icon: MapPin },
+  { key: "schedules", label: "Schedules", icon: Clock },
   { key: "users", label: "Users", icon: UserCog },
   { key: "info", label: "System Info", icon: Info },
 ];
@@ -92,6 +94,7 @@ export default function Settings() {
       <div className="bg-gray-900 rounded-b rounded-r border border-gray-800 p-6">
         {tab === "config" && <ConfigSection />}
         {tab === "locations" && <LocationsSection />}
+        {tab === "schedules" && <RecordingSchedulesSection />}
         {tab === "info" && <SystemInfo />}
       </div>
     </div>

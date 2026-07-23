@@ -10,21 +10,27 @@ interface Props {
 export default function ExportDialog({ recordingId, recordingName, onClose }: Props) {
   const [format, setFormat] = useState("mp4");
   const [exporting, setExporting] = useState(false);
-  const [progress, setProgress] = useState(0);
 
   const handleExport = async () => {
     setExporting(true);
-    setProgress(0);
-    const interval = setInterval(() => {
-      setProgress((p) => {
-        if (p >= 100) {
-          clearInterval(interval);
-          setExporting(false);
-          return 100;
-        }
-        return p + 10;
+    try {
+      const token = localStorage.getItem("access_token");
+      const url = `/api/v1/recordings/${recordingId}/stream?download=true`;
+      const resp = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
       });
-    }, 300);
+      if (!resp.ok) throw new Error("Download failed");
+      const blob = await resp.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `${recordingName}.${format}`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      onClose();
+    } catch {
+      // silently fail — browser will show download or error
+    }
+    setExporting(false);
   };
 
   return (
@@ -40,7 +46,7 @@ export default function ExportDialog({ recordingId, recordingName, onClose }: Pr
           </button>
         </div>
 
-        <p className="text-sm text-gray-400 mb-4">{recordingName}</p>
+        <p className="text-sm text-gray-400 mb-4 truncate">{recordingName}</p>
 
         <div className="space-y-3 mb-4">
           <div>
@@ -52,23 +58,9 @@ export default function ExportDialog({ recordingId, recordingName, onClose }: Pr
               disabled={exporting}
             >
               <option value="mp4">MP4 (H.264)</option>
-              <option value="mkv">MKV (Lossless)</option>
-              <option value="avi">AVI</option>
             </select>
           </div>
         </div>
-
-        {exporting && (
-          <div className="mb-4">
-            <div className="w-full bg-gray-800 rounded-full h-2">
-              <div
-                className="bg-blue-500 h-2 rounded-full transition-all duration-300"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            <p className="text-xs text-gray-500 mt-1">{progress}% complete</p>
-          </div>
-        )}
 
         <div className="flex gap-2 justify-end">
           <button
@@ -83,7 +75,7 @@ export default function ExportDialog({ recordingId, recordingName, onClose }: Pr
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded text-sm text-white"
           >
             {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-            {exporting ? "Exporting..." : "Export"}
+            {exporting ? "Downloading..." : "Download"}
           </button>
         </div>
       </div>

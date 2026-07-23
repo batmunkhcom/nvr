@@ -45,3 +45,16 @@ export interface StorageUsage {
   free_bytes: number;
   backends: StorageBackend[];
 }
+
+export interface RecordingSchedule {
+  id: string;
+  camera_id: string;
+  schedule_name: string;
+  schedule_type: string;
+  days_of_week: number[];
+  time_start: string;
+  time_end: string;
+  pre_record_seconds: number;
+  post_record_seconds: number;
+  is_active: boolean;
+}
