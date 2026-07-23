@@ -92,19 +92,46 @@ export default function LiveView() {
   }, [camera]);
 
   useEffect(() => {
-    if (hlsUrl && videoRef.current && Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: false });
-      hls.loadSource(hlsUrl);
-      hls.attachMedia(videoRef.current);
-      hls.on(Hls.Events.ERROR, (_e, data) => {
-        if (data.fatal) {
-          setPlaying(false);
-          setStatus("error");
-          setErrorMsg("Stream playback failed — camera may be offline");
-        }
-      });
-      return () => { hls.destroy(); };
+    if (!hlsUrl || !videoRef.current) return;
+
+    let cancelled = false;
+    const hls = new Hls({ enableWorker: false });
+
+    const waitForPlaylist = async () => {
+      for (let i = 0; i < 30; i++) {
+        if (cancelled) return;
+        try {
+          const r = await fetch(hlsUrl);
+          if (r.ok) {
+            if (!cancelled && Hls.isSupported()) {
+              hls.loadSource(hlsUrl);
+              hls.attachMedia(videoRef.current!);
+              hls.on(Hls.Events.ERROR, (_e, data) => {
+                if (data.fatal) {
+                  setPlaying(false);
+                  setStatus("error");
+                  setErrorMsg("Stream playback failed — camera may be offline");
+                  hls.destroy();
+                }
+              });
+            }
+            return;
+          }
+        } catch { /* retry */ }
+        await wait(1000);
+      }
+      if (!cancelled) {
+        setPlaying(false);
+        setStatus("error");
+        setErrorMsg("Stream not available — check camera connection");
+      }
+    };
+
+    if (Hls.isSupported()) {
+      waitForPlaylist();
     }
+
+    return () => { cancelled = true; hls.destroy(); };
   }, [hlsUrl]);
 
   useEffect(() => {

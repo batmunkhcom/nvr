@@ -18,8 +18,8 @@ _BG_TASKS: set[asyncio.Task[Any]] = set()
 _ffmpeg_path = os.environ.get("FFMPEG_PATH", "ffmpeg")
 MEDIAMTX_RTSP = os.environ.get("MEDIAMTX_RTSP", "rtsp://127.0.0.1:8554")
 
-MAX_RESTARTS = 5
-BASE_BACKOFF = 5
+MAX_RESTARTS = 10
+BASE_BACKOFF = 3
 
 
 async def start_relay(
