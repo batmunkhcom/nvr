@@ -1,8 +1,13 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import AppShell from "../components/layout/AppShell";
+import apiClient from "../api/client";
+
+vi.mock("../api/client", () => ({
+  default: { get: vi.fn(), patch: vi.fn(), post: vi.fn() },
+}));
 
 function renderWithProviders(component: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -14,6 +19,15 @@ function renderWithProviders(component: React.ReactElement) {
 }
 
 describe("AppShell", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(apiClient.get).mockImplementation((url: string) => {
+      if (url === "/system/ui-config") return Promise.resolve({ data: { data: {} } });
+      return Promise.resolve({ data: { data: [] } });
+    });
+    vi.mocked(apiClient.patch).mockResolvedValue({ data: { data: {} } });
+  });
+
   it("renders sidebar navigation links", () => {
     renderWithProviders(<AppShell />);
     const dashboardLinks = screen.getAllByText("Dashboard");
@@ -30,5 +44,36 @@ describe("AppShell", () => {
     renderWithProviders(<AppShell />);
     const dashboardLinks = screen.getAllByText("Dashboard");
     expect(dashboardLinks.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("sidebar collapse toggle hides labels and persists to ui-config", async () => {
+    renderWithProviders(<AppShell />);
+
+    // expanded by default — label visible
+    expect(screen.getByText("NVR System")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle("Collapse sidebar"));
+
+    // persisted via API, not localStorage (AGENTS.md Rule 6)
+    await waitFor(() => {
+      expect(apiClient.patch).toHaveBeenCalledWith("/system/ui-config", {
+        key: "ui.sidebar_collapsed",
+        value: true,
+      });
+    });
+  });
+
+  it("collapsed sidebar hides brand and shows expand button", async () => {
+    vi.mocked(apiClient.get).mockImplementation((url: string) => {
+      if (url === "/system/ui-config")
+        return Promise.resolve({ data: { data: { "ui.sidebar_collapsed": true } } });
+      return Promise.resolve({ data: { data: [] } });
+    });
+    renderWithProviders(<AppShell />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle("Expand sidebar")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("NVR System")).not.toBeInTheDocument();
   });
 });

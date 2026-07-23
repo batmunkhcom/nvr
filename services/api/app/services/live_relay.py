@@ -20,6 +20,7 @@ MEDIAMTX_RTSP = os.environ.get("MEDIAMTX_RTSP", "rtsp://127.0.0.1:8554")
 
 MAX_RESTARTS = 10
 BASE_BACKOFF = 3
+MAX_BACKOFF = 600  # Rule 17: circuit breaker caps exponential backoff at 10 min
 
 
 async def start_relay(
@@ -97,18 +98,24 @@ async def relay_status(relay_key: str | uuid.UUID) -> dict[str, Any]:
         return {"running": True, "hls_url": f"/hls/{cid}/index.m3u8"}
 
     # STREAM_DICT may be stale — check MediaMTX if the path is actually alive
+    if await _check_mediamtx_path(cid):
+        return {"running": True, "hls_url": f"/hls/{cid}/index.m3u8"}
+
+    return {"running": False, "hls_url": None}
+
+
+async def _check_mediamtx_path(cid: str) -> bool:
+    """Ask MediaMTX control API whether the relay path is alive."""
     import httpx
+
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(f"http://127.0.0.1:9997/v3/paths/get/{cid}", timeout=2)
             if resp.status_code == 200:
-                data = resp.json()
-                if data.get("ready"):
-                    return {"running": True, "hls_url": f"/hls/{cid}/index.m3u8"}
+                return bool(resp.json().get("ready"))
     except Exception as exc:
         logger.warning("relay_status_mediamtx_failed", camera_id=cid, error=str(exc))
-
-    return {"running": False, "hls_url": None}
+    return False
 
 
 async def _monitor(camera_id: str, proc: asyncio.subprocess.Process):
@@ -133,7 +140,7 @@ async def _monitor(camera_id: str, proc: asyncio.subprocess.Process):
 
         restart_count = info.get("restart_count", 0)
         if restart_count < MAX_RESTARTS:
-            backoff = min(BASE_BACKOFF * (2 ** restart_count), 60)
+            backoff = min(BASE_BACKOFF * (2 ** restart_count), MAX_BACKOFF)
             logger.info(
                 "relay_restarting",
                 camera_id=camera_id,
@@ -163,8 +170,32 @@ async def _monitor(camera_id: str, proc: asyncio.subprocess.Process):
             exit_code=exited,
             restarts=restart_count,
         )
+        await _mark_camera_degraded(camera_id, f"relay gave up (exit {exited})")
     except Exception:
         pass
+
+
+async def _mark_camera_degraded(camera_id: str, reason: str) -> None:
+    """Set camera status to degraded when the relay permanently fails."""
+    try:
+        import uuid as _uuid
+
+        from sqlalchemy import update
+
+        from ..core.database import async_session_factory
+        from ..models.camera import Camera
+
+        cam_uuid = _uuid.UUID(camera_id.split("_")[0])  # strip _sub suffix
+        async with async_session_factory() as session:
+            await session.execute(
+                update(Camera)
+                .where(Camera.id == cam_uuid)
+                .values(status="degraded", connection_error=reason)
+            )
+            await session.commit()
+        logger.info("relay_marked_degraded", camera_id=camera_id)
+    except Exception as exc:
+        logger.warning("relay_mark_degraded_failed", camera_id=camera_id, error=str(exc))
 
 
 def _kill_ffmpeg(proc: asyncio.subprocess.Process):
