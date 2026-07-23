@@ -7,6 +7,7 @@ import Recordings from "../../pages/Recordings";
 import Events from "../../pages/Events";
 import Storage from "../../pages/Storage";
 import Settings from "../../pages/Settings";
+import Users from "../../pages/Users";
 import WizardPage from "../../pages/wizard/Wizard";
 import LiveView from "../../pages/LiveViewPage";
 
@@ -27,7 +28,7 @@ export default function AppShell() {
             <Route path="/events" element={<Events />} />
             <Route path="/storage" element={<Storage />} />
             <Route path="/settings" element={<Settings />} />
-            <Route path="/settings/users" element={<Settings />} />
+            <Route path="/settings/users" element={<Users />} />
           </Routes>
         </main>
       </div>

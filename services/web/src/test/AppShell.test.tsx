@@ -33,13 +33,13 @@ describe("AppShell", () => {
 
   it("renders sidebar navigation links", () => {
     renderWithProviders(<AppShell />);
-    const dashboardLinks = screen.getAllByText("Dashboard");
-    expect(dashboardLinks.length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("Cameras")).toBeInTheDocument();
-    expect(screen.getByText("Recordings")).toBeInTheDocument();
-    expect(screen.getByText("Events")).toBeInTheDocument();
-    expect(screen.getByText("Storage")).toBeInTheDocument();
-    expect(screen.getByText("Settings")).toBeInTheDocument();
+    // Dashboard cards also show these labels, so use getAllByText
+    expect(screen.getAllByText("Dashboard").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Cameras").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Recordings").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Events").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Storage").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Settings").length).toBeGreaterThanOrEqual(1);
   });
 
   it("redirects / to /dashboard", () => {

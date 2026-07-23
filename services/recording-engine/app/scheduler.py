@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import UTC, datetime
 
 import structlog
@@ -46,13 +45,13 @@ class RecordingScheduler:
         except (ValueError, AttributeError):
             return True
 
-    def should_switch(self, camera_id: str, was_active: bool, schedule: dict) -> bool | None:
+    async def should_switch(self, camera_id: str, was_active: bool, schedule: dict) -> bool | None:
         """Determine if recording state should change.
 
         Returns:
             True to start, False to stop, None to keep current state.
         """
-        should_be = asyncio.run(self.evaluate(camera_id, schedule))
+        should_be = await self.evaluate(camera_id, schedule)
         if should_be and not was_active:
             return True
         if not should_be and was_active:

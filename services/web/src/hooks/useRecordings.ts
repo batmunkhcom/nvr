@@ -97,3 +97,14 @@ export function useStorageMutations() {
 
   return { create, update, remove };
 }
+
+export function useDeleteRecording() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiClient.delete(`/recordings/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["recordings"] });
+      qc.invalidateQueries({ queryKey: ["timeline"] });
+    },
+  });
+}

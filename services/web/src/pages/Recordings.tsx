@@ -1,32 +1,53 @@
 import { useState } from "react";
-import { useRecordings, useTimeline, useRecordingStreamUrl } from "../hooks/useRecordings";
+import { useRecordings, useTimeline, useRecordingStreamUrl, useDeleteRecording } from "../hooks/useRecordings";
 import { useCameras } from "../hooks/useCameras";
 import { TimelinePlayer, RecordingPlayer } from "../components/recording";
 import { Recording } from "../types/recording";
-import { Film, Play, Trash2, X } from "lucide-react";
+import { Film, Play, Trash2, X, ChevronLeft, ChevronRight } from "lucide-react";
 import EmptyState from "../components/ui/EmptyState";
+import { useToast } from "../components/ui/Toast";
 
 export default function Recordings() {
   const [selectedCameraId, setSelectedCameraId] = useState<string>("");
   const [selectedDate, setSelectedDate] = useState<string>(today());
   const [activePlaybackId, setActivePlaybackId] = useState<string | null>(null);
   const [activePlaybackTime, setActivePlaybackTime] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const { toast } = useToast();
 
-  const { data: recordings } = useRecordings(
-    selectedCameraId ? { camera_id: selectedCameraId } : undefined
-  );
+  const filters: Record<string, string> = { page: String(page), per_page: "25" };
+  if (selectedCameraId) filters.camera_id = selectedCameraId;
+
+  const { data: recordings } = useRecordings(filters);
   const { data: cameras } = useCameras();
   const { data: segments = [] } = useTimeline(selectedCameraId, selectedDate);
   const streamUrl = useRecordingStreamUrl(activePlaybackId || "");
+  const deleteRecording = useDeleteRecording();
 
-  const handleSeek = (time: string) => {
-    setActivePlaybackTime(time);
-  };
+  const handleSeek = (time: string) => setActivePlaybackTime(time);
 
   const handlePlayRecording = (recording: Recording) => {
     setActivePlaybackId(recording.id);
     setActivePlaybackTime(null);
   };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm("Delete this recording?")) return;
+    try {
+      await deleteRecording.mutateAsync(id);
+      toast("success", "Recording deleted");
+    } catch {
+      toast("error", "Failed to delete recording");
+    }
+  };
+
+  const handleCameraChange = (id: string) => {
+    setSelectedCameraId(id);
+    setPage(1);
+  };
+
+  const meta = recordings?.metadata;
+  const totalPages = meta ? Math.ceil(meta.total / meta.per_page) : 1;
 
   return (
     <div>
@@ -35,7 +56,7 @@ export default function Recordings() {
         <div className="flex gap-2">
           <select
             value={selectedCameraId}
-            onChange={(e) => setSelectedCameraId(e.target.value)}
+            onChange={(e) => handleCameraChange(e.target.value)}
             className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-sm text-gray-300"
           >
             <option value="">All Cameras</option>
@@ -86,48 +107,86 @@ export default function Recordings() {
           description="Select a camera and date to browse recorded segments."
         />
       ) : (
-        <div className="space-y-2">
-          {recordings.data.map((rec: Recording) => (
-            <div
-              key={rec.id}
-              className="flex items-center gap-4 p-3 bg-gray-900 rounded border border-gray-800 hover:border-gray-700"
-            >
-              <div className="w-24 h-14 bg-gray-800 rounded flex items-center justify-center shrink-0">
-                <Film size={20} className="text-gray-600" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm truncate">
-                  {new Date(rec.start_time).toLocaleDateString()} {new Date(rec.start_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                  {" – "}
-                  {rec.end_time ? new Date(rec.end_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "ongoing"}
-                </p>
-                <p className="text-xs text-gray-500">
-                  {(rec.duration_seconds / 60).toFixed(0)} min &middot; {(rec.file_size_bytes / 1024 / 1024).toFixed(1)} MB &middot; {rec.codec || "h264"}
-                  {rec.has_audio && " &middot; audio"}
-                </p>
-              </div>
-              <span className={`text-xs px-2 py-1 rounded ${
-                rec.recording_type === "event" ? "bg-red-900 text-red-400" :
-                rec.recording_type === "motion" ? "bg-yellow-900 text-yellow-400" :
-                "bg-green-900 text-green-400"
-              }`}>
-                {rec.recording_type}
-              </span>
-              <div className="flex gap-1">
-                <button
-                  onClick={() => handlePlayRecording(rec)}
-                  className="p-1.5 bg-blue-600 hover:bg-blue-700 rounded text-white"
-                  title="Play"
+        <>
+          <div className="space-y-2">
+            {recordings.data.map((rec: Recording) => (
+              <div
+                key={rec.id}
+                className="flex items-center gap-4 p-3 bg-gray-900 rounded border border-gray-800 hover:border-gray-700"
+              >
+                <div className="w-24 h-14 bg-gray-800 rounded flex items-center justify-center shrink-0">
+                  <Film size={20} className="text-gray-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm truncate">
+                    {new Date(rec.start_time).toLocaleDateString()}{" "}
+                    {new Date(rec.start_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    {" – "}
+                    {rec.end_time
+                      ? new Date(rec.end_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                      : "ongoing"}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {(rec.duration_seconds / 60).toFixed(0)} min &middot;{" "}
+                    {(rec.file_size_bytes / 1024 / 1024).toFixed(1)} MB &middot;{" "}
+                    {rec.codec || "h264"}
+                    {rec.has_audio && " &middot; audio"}
+                  </p>
+                </div>
+                <span
+                  className={`text-xs px-2 py-1 rounded ${
+                    rec.recording_type === "event"
+                      ? "bg-red-900 text-red-400"
+                      : rec.recording_type === "motion"
+                        ? "bg-yellow-900 text-yellow-400"
+                        : "bg-green-900 text-green-400"
+                  }`}
                 >
-                  <Play size={14} />
-                </button>
-                <button className="p-1.5 bg-gray-800 hover:bg-red-600 rounded text-gray-400 hover:text-white" title="Delete">
-                  <Trash2 size={14} />
-                </button>
+                  {rec.recording_type}
+                </span>
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => handlePlayRecording(rec)}
+                    className="p-1.5 bg-blue-600 hover:bg-blue-700 rounded text-white"
+                    title="Play"
+                  >
+                    <Play size={14} />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(rec.id)}
+                    disabled={deleteRecording.isPending}
+                    className="p-1.5 bg-gray-800 hover:bg-red-600 rounded text-gray-400 hover:text-white disabled:opacity-50"
+                    title="Delete"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
+            ))}
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-3 mt-4 pt-3 border-t border-gray-800">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="p-1.5 bg-gray-800 hover:bg-gray-700 disabled:opacity-30 rounded text-gray-400"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <span className="text-sm text-gray-400">
+                Page {page} of {totalPages}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="p-1.5 bg-gray-800 hover:bg-gray-700 disabled:opacity-30 rounded text-gray-400"
+              >
+                <ChevronRight size={16} />
+              </button>
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
     </div>
   );
