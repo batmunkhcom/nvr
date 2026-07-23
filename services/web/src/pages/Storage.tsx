@@ -124,8 +124,11 @@ export default function Storage() {
         toast("success", "Storage backend added");
       }
       setShowDialog(false);
-    } catch {
-      toast("error", "Failed to save storage backend");
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail || "Failed to save storage backend";
+      toast("error", msg);
     }
   };
 
@@ -134,8 +137,11 @@ export default function Storage() {
     try {
       await remove.mutateAsync(id);
       toast("success", "Storage backend removed");
-    } catch {
-      toast("error", "Failed to remove storage backend");
+    } catch (err: unknown) {
+      const msg =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data
+          ?.detail || "Failed to remove storage backend";
+      toast("error", msg);
     }
   };
 
