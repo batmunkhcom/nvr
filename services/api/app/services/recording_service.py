@@ -82,6 +82,82 @@ async def get_storage_backend(backend_id: uuid.UUID, db: AsyncSession) -> Storag
     return backend
 
 
+async def create_storage_backend(
+    db: AsyncSession,
+    name: str,
+    backend_type: str,
+    mount_point: str | None = None,
+    config: dict | None = None,
+    total_bytes: int = 0,
+    available_bytes: int = 0,
+    priority: int = 10,
+) -> StorageBackend:
+    existing = await db.execute(select(StorageBackend).where(StorageBackend.name == name))
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Storage backend with this name already exists",
+        )
+    if backend_type not in ("local", "nfs", "smb", "s3"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="backend_type must be one of: local, nfs, smb, s3",
+        )
+
+    backend = StorageBackend(
+        name=name,
+        backend_type=backend_type,
+        mount_point=mount_point,
+        config=config or {},
+        total_bytes=total_bytes,
+        available_bytes=available_bytes or total_bytes,
+        priority=priority,
+    )
+    db.add(backend)
+    await db.flush()
+    logger.info("storage_backend_created", backend_id=str(backend.id), name=name)
+    return backend
+
+
+async def update_storage_backend(
+    backend_id: uuid.UUID,
+    db: AsyncSession,
+    name: str | None = None,
+    mount_point: str | None = None,
+    config: dict | None = None,
+    total_bytes: int | None = None,
+    available_bytes: int | None = None,
+    priority: int | None = None,
+    is_active: bool | None = None,
+) -> StorageBackend:
+    backend = await get_storage_backend(backend_id, db)
+    if name is not None:
+        backend.name = name
+    if mount_point is not None:
+        backend.mount_point = mount_point
+    if config is not None:
+        backend.config = config
+    if total_bytes is not None:
+        backend.total_bytes = total_bytes
+    if available_bytes is not None:
+        backend.available_bytes = available_bytes
+    if priority is not None:
+        backend.priority = priority
+    if is_active is not None:
+        backend.is_active = is_active
+    backend.updated_at = datetime.now(UTC)
+    await db.flush()
+    logger.info("storage_backend_updated", backend_id=str(backend_id))
+    return backend
+
+
+async def delete_storage_backend(backend_id: uuid.UUID, db: AsyncSession) -> None:
+    backend = await get_storage_backend(backend_id, db)
+    await db.delete(backend)
+    await db.flush()
+    logger.info("storage_backend_deleted", backend_id=str(backend_id))
+
+
 def _recording_to_dict(r: Recording) -> dict:
     return {
         "id": str(r.id),
@@ -105,6 +181,8 @@ def _backend_to_dict(b: StorageBackend) -> dict:
         "id": str(b.id),
         "name": b.name,
         "backend_type": b.backend_type,
+        "mount_point": b.mount_point,
+        "config": b.config,
         "total_bytes": b.total_bytes,
         "available_bytes": b.available_bytes,
         "priority": b.priority,

@@ -1,6 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import apiClient from "../api/client";
-import { Recording, TimelineSegment, StorageUsage } from "../types/recording";
+import { Recording, TimelineSegment, StorageBackend, StorageUsage } from "../types/recording";
 
 export function useRecordings(filters?: Record<string, string>) {
   return useQuery({
@@ -42,4 +42,58 @@ export function useStorageUsage() {
     },
     refetchInterval: 60_000,
   });
+}
+
+export function useStorageBackends() {
+  return useQuery({
+    queryKey: ["storage", "backends"],
+    queryFn: async () => {
+      const res = await apiClient.get("/storage/backends");
+      return (res.data?.data || []) as StorageBackend[];
+    },
+  });
+}
+
+export function useStorageMutations() {
+  const qc = useQueryClient();
+  const inval = () => {
+    qc.invalidateQueries({ queryKey: ["storage"] });
+  };
+
+  const create = useMutation({
+    mutationFn: (body: {
+      name: string;
+      backend_type: string;
+      mount_point?: string;
+      config?: Record<string, unknown>;
+      total_bytes?: number;
+      available_bytes?: number;
+      priority?: number;
+    }) => apiClient.post("/storage/backends", body),
+    onSuccess: inval,
+  });
+
+  const update = useMutation({
+    mutationFn: ({
+      id,
+      ...body
+    }: {
+      id: string;
+      name?: string;
+      mount_point?: string;
+      config?: Record<string, unknown>;
+      total_bytes?: number;
+      available_bytes?: number;
+      priority?: number;
+      is_active?: boolean;
+    }) => apiClient.patch(`/storage/backends/${id}`, body),
+    onSuccess: inval,
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => apiClient.delete(`/storage/backends/${id}`),
+    onSuccess: inval,
+  });
+
+  return { create, update, remove };
 }

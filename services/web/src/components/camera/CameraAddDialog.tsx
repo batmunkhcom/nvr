@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useCameraMutations, useCameraProbe } from "../../hooks/useCameras";
 import type { ProbeResult } from "../../types/camera";
 import LocationSelect from "./LocationSelect";
+import StorageBackendSelect from "./StorageBackendSelect";
 
 interface Props {
   open: boolean;
@@ -20,6 +21,7 @@ export default function CameraAddDialog({ open, onClose }: Props) {
   const [streamMain, setStreamMain] = useState("");
   const [streamSub, setStreamSub] = useState("");
   const [locationId, setLocationId] = useState("");
+  const [storageBackendId, setStorageBackendId] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -61,6 +63,7 @@ export default function CameraAddDialog({ open, onClose }: Props) {
         recording_mode: "continuous",
         stream_transport: "tcp",
         location_id: locationId || undefined,
+        storage_backend_id: storageBackendId || undefined,
         notes: notes || undefined,
       });
       onClose();
@@ -178,6 +181,7 @@ export default function CameraAddDialog({ open, onClose }: Props) {
             placeholder="rtsp://192.168.1.100:554/Streaming/Channels/102"
           />
           <LocationSelect value={locationId} onChange={setLocationId} />
+          <StorageBackendSelect value={storageBackendId} onChange={setStorageBackendId} />
           <div className="flex gap-2 pt-2">
             <button
               type="submit"

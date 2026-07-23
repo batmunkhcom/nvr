@@ -19,6 +19,7 @@ class CameraCreate(BaseModel):
     tags: list[str] | None = None
     location: str | None = None
     location_id: str | None = None
+    storage_backend_id: str | None = None
     notes: str | None = None
 
 
@@ -37,6 +38,7 @@ class CameraUpdate(BaseModel):
     tags: list[str] | None = None
     location: str | None = None
     location_id: str | None = None
+    storage_backend_id: str | None = None
     notes: str | None = None
     display_order: int | None = None
     privacy_mode: str | None = None
@@ -74,6 +76,8 @@ class CameraResponse(BaseModel):
     location: str | None = None
     location_id: str | None = None
     location_name: str | None = None
+    storage_backend_id: str | None = None
+    storage_backend_name: str | None = None
     notes: str | None = None
     display_order: int = 0
     privacy_mode: str | None = None

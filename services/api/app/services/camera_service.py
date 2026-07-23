@@ -88,6 +88,7 @@ async def create_camera(body: CameraCreate, db: AsyncSession) -> Camera:
         encrypted_pw = encrypt_password_aes(body.password)
 
     location_id = await _resolve_location_id(body.location_id, db)
+    storage_backend_id = await _resolve_storage_backend_id(body.storage_backend_id, db)
 
     now = datetime.now(UTC)
     stream_sub_uri = body.stream_sub_uri or _derive_sub_stream_uri(body.stream_main_uri)
@@ -105,6 +106,7 @@ async def create_camera(body: CameraCreate, db: AsyncSession) -> Camera:
         tags=body.tags,
         location=body.location,
         location_id=location_id,
+        storage_backend_id=storage_backend_id,
         notes=body.notes,
         created_at=now,
         updated_at=now,
@@ -128,6 +130,10 @@ async def update_camera(camera_id: uuid.UUID, body: CameraUpdate, db: AsyncSessi
     update_data = body.model_dump(exclude_unset=True)
     if "location_id" in update_data:
         update_data["location_id"] = await _resolve_location_id(update_data["location_id"], db)
+    if "storage_backend_id" in update_data:
+        update_data["storage_backend_id"] = await _resolve_storage_backend_id(
+            update_data["storage_backend_id"], db
+        )
     for field, value in update_data.items():
         setattr(camera, field, value)
     camera.updated_at = datetime.now(UTC)
@@ -152,6 +158,25 @@ async def _resolve_location_id(raw: str | None, db: AsyncSession) -> uuid.UUID |
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Location not found")
     return location_id
+
+
+async def _resolve_storage_backend_id(raw: str | None, db: AsyncSession) -> uuid.UUID | None:
+    if not raw:
+        return None
+    try:
+        bid = uuid.UUID(raw)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid storage_backend_id"
+        ) from None
+    from ..models.storage_backend import StorageBackend
+
+    result = await db.execute(select(StorageBackend).where(StorageBackend.id == bid))
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Storage backend not found"
+        )
+    return bid
 
 
 async def delete_camera(camera_id: uuid.UUID, keep_recordings: bool, db: AsyncSession) -> None:
@@ -289,6 +314,8 @@ def _camera_to_response(camera: Camera) -> dict:
         "location": camera.location,
         "location_id": str(camera.location_id) if camera.location_id else None,
         "location_name": None,
+        "storage_backend_id": str(camera.storage_backend_id) if camera.storage_backend_id else None,
+        "storage_backend_name": None,
         "notes": camera.notes,
         "display_order": camera.display_order if camera.display_order is not None else 0,
         "privacy_mode": camera.privacy_mode,
@@ -300,5 +327,10 @@ def _camera_to_response(camera: Camera) -> dict:
         with contextlib.suppress(Exception):
             if camera.location_ref:
                 result["location_name"] = camera.location_ref.name
+
+    if camera.storage_backend_id:
+        with contextlib.suppress(Exception):
+            if camera.storage_backend:
+                result["storage_backend_name"] = camera.storage_backend.name
 
     return result

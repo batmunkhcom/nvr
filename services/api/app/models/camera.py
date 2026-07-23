@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .location import Location
+    from .storage_backend import StorageBackend
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, SmallInteger, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY, INET, JSON, MACADDR, UUID
@@ -116,6 +117,10 @@ class Camera(Base):
         UUID(as_uuid=True),
         ForeignKey("locations.id", ondelete="SET NULL"),
     )
+    storage_backend_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("storage_backends.id", ondelete="SET NULL"),
+    )
     notes: Mapped[str | None] = mapped_column(Text)
     display_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(
@@ -130,6 +135,10 @@ class Camera(Base):
     )
 
     location_ref: Mapped[Location | None] = relationship("Location", lazy="selectin")
+
+    storage_backend: Mapped[StorageBackend | None] = relationship(
+        "StorageBackend", lazy="selectin", foreign_keys=[storage_backend_id]
+    )
 
     stream_profiles: Mapped[list[StreamProfile]] = relationship(
         "StreamProfile", back_populates="camera", lazy="selectin"

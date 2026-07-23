@@ -30,6 +30,8 @@ export interface Camera {
   location: string | null;
   location_id: string | null;
   location_name: string | null;
+  storage_backend_id: string | null;
+  storage_backend_name: string | null;
   notes: string | null;
   privacy_mode: string | null;
   display_order: number;
@@ -64,6 +66,7 @@ export interface CameraCreatePayload {
   tags?: string[];
   location?: string;
   location_id?: string | null;
+  storage_backend_id?: string;
   notes?: string;
 }
 
@@ -82,6 +85,7 @@ export interface CameraUpdatePayload {
   tags?: string[];
   location?: string;
   location_id?: string | null;
+  storage_backend_id?: string;
   notes?: string;
   privacy_mode?: string;
 }

@@ -30,6 +30,7 @@ export interface StorageBackend {
   name: string;
   backend_type: string;
   mount_point: string | null;
+  config: Record<string, unknown>;
   total_bytes: number;
   available_bytes: number;
   priority: number;
