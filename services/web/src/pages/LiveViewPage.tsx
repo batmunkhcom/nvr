@@ -157,7 +157,7 @@ export default function LiveView() {
   };
 
   return (
-    <div className={fullscreen ? "fixed inset-0 z-50 bg-black" : ""}>
+    <div className={fullscreen ? "fixed inset-0 z-50 bg-black" : "page-enter"}>
       {!fullscreen && (
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">

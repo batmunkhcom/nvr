@@ -4,6 +4,7 @@ import { useCameras } from "../hooks/useCameras";
 import { TimelinePlayer, RecordingPlayer } from "../components/recording";
 import { Recording } from "../types/recording";
 import { Film, Play, Trash2, X } from "lucide-react";
+import EmptyState from "../components/ui/EmptyState";
 
 export default function Recordings() {
   const [selectedCameraId, setSelectedCameraId] = useState<string>("");
@@ -79,10 +80,11 @@ export default function Recordings() {
       )}
 
       {!recordings?.data?.length ? (
-        <div className="bg-gray-900 rounded border border-gray-800 p-6 text-center text-gray-500">
-          <Film size={32} className="mx-auto mb-2 text-gray-600" />
-          No recordings found.
-        </div>
+        <EmptyState
+          icon={<Film size={28} />}
+          title="No recordings found"
+          description="Select a camera and date to browse recorded segments."
+        />
       ) : (
         <div className="space-y-2">
           {recordings.data.map((rec: Recording) => (

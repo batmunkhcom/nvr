@@ -7,7 +7,7 @@ export default function Dashboard() {
   const total = cameras?.length ?? 0;
 
   return (
-    <div>
+    <div className="page-enter">
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold">Dashboard</h1>
         <div className="flex gap-4 text-sm text-gray-400">

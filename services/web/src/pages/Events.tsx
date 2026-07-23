@@ -1,5 +1,6 @@
 import { useEvents, useAcknowledgeEvent } from "../hooks/useEvents";
-import { Check, AlertTriangle, Info, XCircle } from "lucide-react";
+import { Check, AlertTriangle, Info, XCircle, Bell } from "lucide-react";
+import EmptyState from "../components/ui/EmptyState";
 
 const severityIcons: Record<string, typeof AlertTriangle> = {
   critical: XCircle,
@@ -19,7 +20,7 @@ export default function Events() {
 
   if (isLoading) {
     return (
-      <div>
+      <div className="page-enter">
         <h1 className="text-2xl font-bold mb-4">Events</h1>
         <div className="space-y-2">
           {[1, 2, 3].map((i) => (
@@ -32,17 +33,19 @@ export default function Events() {
 
   if (!events?.length) {
     return (
-      <div>
+      <div className="page-enter">
         <h1 className="text-2xl font-bold mb-4">Events</h1>
-        <div className="bg-gray-900 rounded border border-gray-800 p-6 text-center text-gray-500">
-          No events detected yet.
-        </div>
+        <EmptyState
+          icon={<Bell size={28} />}
+          title="No events detected yet"
+          description="Motion and AI-detected events will appear here. Enable AI detection in Settings to get started."
+        />
       </div>
     );
   }
 
   return (
-    <div>
+    <div className="page-enter">
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold">Events</h1>
         <span className="text-sm text-gray-400">{events.length} events</span>

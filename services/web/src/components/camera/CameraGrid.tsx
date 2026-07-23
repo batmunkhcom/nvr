@@ -3,14 +3,22 @@ import { useNavigate } from "react-router-dom";
 import { useCameras, useCameraMutations } from "../../hooks/useCameras";
 import { useUiPreference } from "../../hooks/useUiPreference";
 import { Camera } from "../../types/camera";
-import { LayoutGrid, Play, MoreVertical, Wifi, Pencil, Trash2, MonitorPlay } from "lucide-react";
+import { LayoutGrid, Play, MoreVertical, Wifi, Pencil, Trash2, MonitorPlay, MapPin } from "lucide-react";
 import MiniLivePreview from "./MiniLivePreview";
+import EmptyState from "../ui/EmptyState";
 
 const statusColors: Record<string, string> = {
   online: "bg-green-500",
   offline: "bg-red-500",
   degraded: "bg-yellow-500",
   unknown: "bg-gray-500",
+};
+
+const statusBorder: Record<string, string> = {
+  online: "border-green-800 group-hover:border-green-600",
+  offline: "border-red-900 group-hover:border-red-700",
+  degraded: "border-yellow-900 group-hover:border-yellow-600",
+  unknown: "border-gray-700 group-hover:border-gray-500",
 };
 
 const COLUMN_OPTIONS = [1, 2, 3, 4] as const;
@@ -28,6 +36,7 @@ function CameraTile({ camera, index }: { camera: Camera; index: number }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [testing, setTesting] = useState(false);
   const dot = statusColors[camera.status] || statusColors.unknown;
+  const border = statusBorder[camera.status] || statusBorder.unknown;
   const isLive = camera.status === "online";
 
   const handleTest = async () => {
@@ -45,7 +54,8 @@ function CameraTile({ camera, index }: { camera: Camera; index: number }) {
 
   return (
     <div
-      className="aspect-video bg-gray-800 rounded border border-gray-700 relative group overflow-hidden cursor-pointer hover:border-gray-500 transition-colors"
+      title={camera.connection_error || undefined}
+      className={`aspect-video bg-gray-800 rounded border-2 ${border} relative group overflow-hidden cursor-pointer transition-colors duration-200`}
     >
       <div onClick={() => navigate(`/live/${camera.id}`)} className="absolute inset-0">
         {isLive && <MiniLivePreview cameraId={camera.id} />}
@@ -58,9 +68,17 @@ function CameraTile({ camera, index }: { camera: Camera; index: number }) {
       </div>
 
       <div className="absolute top-2 left-2 flex items-center gap-1.5 max-w-[75%]">
-        <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${dot} ${isLive ? "animate-pulse" : ""}`} />
+        <span
+          title={camera.connection_error || `Status: ${camera.status}`}
+          className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${dot} ${isLive ? "animate-pulse" : ""}`}
+        />
         <span className="text-xs text-gray-200 truncate">{camera.name}</span>
         <span className="text-[10px] text-gray-500 flex-shrink-0">(cam{index + 1})</span>
+        {camera.location_name && (
+          <span className="text-[10px] bg-blue-900/50 text-blue-400 px-1.5 py-0.5 rounded truncate max-w-[80px]">
+            {camera.location_name}
+          </span>
+        )}
       </div>
 
       {/* 3-dot menu */}
@@ -136,9 +154,11 @@ export default function CameraGrid() {
 
   if (!cameras?.length) {
     return (
-      <div className="bg-gray-900 rounded border border-gray-800 p-8 text-center text-gray-500">
-        No cameras configured. Go to Cameras to add one.
-      </div>
+      <EmptyState
+        icon={<MonitorPlay size={28} />}
+        title="No cameras configured"
+        description="Go to Cameras to add your first IP camera."
+      />
     );
   }
 
