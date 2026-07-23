@@ -77,20 +77,19 @@ function CameraTile({
     <div
       title={camera.connection_error || undefined}
       draggable
+      onClick={() => navigate(`/live/${camera.id}`)}
       onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; onDragStart(index); }}
       onDragOver={(e) => onDragOver(e, index)}
       onDrop={(e) => onDrop(e, index)}
       className={`aspect-video bg-gray-800 rounded border-2 ${border} ${hasMotion ? "animate-motion-flash" : ""} relative group overflow-hidden cursor-pointer transition-all duration-200 ${isDragging ? "opacity-30 scale-95" : ""}`}
     >
-      <div onClick={() => navigate(`/live/${camera.id}`)} className="absolute inset-0">
-        {hasStream && <MiniLivePreview cameraId={camera.id} />}
-        {!hasStream && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-            <span className="text-gray-500 text-4xl font-light">{camera.name.charAt(0).toUpperCase()}</span>
-            <span className="text-gray-600 text-xs">{camera.name}</span>
-          </div>
-        )}
-      </div>
+      {hasStream && <MiniLivePreview cameraId={camera.id} />}
+      {!hasStream && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+          <span className="text-gray-500 text-4xl font-light">{camera.name.charAt(0).toUpperCase()}</span>
+          <span className="text-gray-600 text-xs">{camera.name}</span>
+        </div>
+      )}
 
       <div className="absolute top-0.5 left-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
         <GripVertical size={10} className="text-gray-600" />

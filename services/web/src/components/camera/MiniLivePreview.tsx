@@ -160,13 +160,13 @@ export default function MiniLivePreview({ cameraId }: Props) {
   }, [cameraId]);
 
   return (
-    <div className="absolute inset-0">
+    <div className="absolute inset-0 pointer-events-none">
       <video
         ref={videoRef}
         muted
         autoPlay
         playsInline
-        className={`absolute inset-0 w-full h-full object-cover ${
+        className={`absolute inset-0 w-full h-full object-cover pointer-events-none ${
           state === "playing" ? "opacity-70" : "opacity-0"
         }`}
       />
@@ -196,7 +196,7 @@ export default function MiniLivePreview({ cameraId }: Props) {
               e.stopPropagation();
               startStream();
             }}
-            className="flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 mt-0.5"
+            className="flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 mt-0.5 pointer-events-auto z-20"
           >
             <RefreshCw size={10} /> Retry
           </button>
