@@ -43,6 +43,7 @@ class BackendUpdate(BaseModel):
     is_active: bool | None = None
 
 
+# ── list all ──
 @router.get("/backends")
 async def get_backends(
     current_user: Annotated[dict, Depends(get_current_user)],
@@ -51,36 +52,27 @@ async def get_backends(
     return await list_storage_backends(db)
 
 
-@router.get("/backends/{backend_id}")
-async def get_backend(
-    backend_id: uuid.UUID,
-    current_user: Annotated[dict, Depends(get_current_user)],
+# ── create ──
+@router.post("/backends", status_code=status.HTTP_201_CREATED)
+async def add_backend(
+    body: BackendCreate,
+    current_user: Annotated[dict, Depends(require_admin)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    backend = await get_storage_backend(backend_id, db)
-    return {"data": backend}
+    backend = await create_storage_backend(
+        db,
+        name=body.name,
+        backend_type=body.backend_type,
+        mount_point=body.mount_point,
+        config=body.config,
+        total_bytes=body.total_bytes,
+        available_bytes=body.available_bytes,
+        priority=body.priority,
+    )
+    return {"data": _backend_to_response(backend)}
 
 
-@router.get("/backends/{backend_id}/health")
-async def get_backend_health(
-    backend_id: uuid.UUID,
-    current_user: Annotated[dict, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    backend = await get_storage_backend(backend_id, db)
-    return {
-        "data": {
-            "backend_id": str(backend_id),
-            "status": backend.health_status,
-            "latency_ms": 2,
-            "free_bytes": backend.available_bytes,
-            "checked_at": backend.last_health_check.isoformat()
-            if backend.last_health_check
-            else None,
-        }
-    }
-
-
+# ── usage ──
 @router.get("/usage")
 async def get_usage(
     current_user: Annotated[dict, Depends(get_current_user)],
@@ -102,22 +94,14 @@ async def get_usage(
     }
 
 
-@router.post("/backends", status_code=status.HTTP_201_CREATED)
-async def add_backend(
-    body: BackendCreate,
-    current_user: Annotated[dict, Depends(require_admin)],
+# ── get / update / delete by id ──
+@router.get("/backends/{backend_id}")
+async def get_backend(
+    backend_id: uuid.UUID,
+    current_user: Annotated[dict, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    backend = await create_storage_backend(
-        db,
-        name=body.name,
-        backend_type=body.backend_type,
-        mount_point=body.mount_point,
-        config=body.config,
-        total_bytes=body.total_bytes,
-        available_bytes=body.available_bytes,
-        priority=body.priority,
-    )
+    backend = await get_storage_backend(backend_id, db)
     return {"data": _backend_to_response(backend)}
 
 
@@ -150,6 +134,26 @@ async def remove_backend(
 ):
     await delete_storage_backend(backend_id, db)
     return {"data": {"deleted": str(backend_id)}}
+
+
+@router.get("/backends/{backend_id}/health")
+async def get_backend_health(
+    backend_id: uuid.UUID,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    backend = await get_storage_backend(backend_id, db)
+    return {
+        "data": {
+            "backend_id": str(backend_id),
+            "status": backend.health_status,
+            "latency_ms": 2,
+            "free_bytes": backend.available_bytes,
+            "checked_at": backend.last_health_check.isoformat()
+            if backend.last_health_check
+            else None,
+        }
+    }
 
 
 def _backend_to_response(b) -> dict:
