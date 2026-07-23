@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
 import apiClient from "../../api/client";
 import { Loader2, AlertTriangle, RefreshCw } from "lucide-react";
+import SnapshotThumbnail from "./SnapshotThumbnail";
 
 interface Props {
   cameraId: string;
@@ -136,16 +137,18 @@ export default function MiniLivePreview({ cameraId }: Props) {
       />
 
       {state === "connecting" && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-gray-900/80">
-          <Loader2 size={18} className="text-gray-400 animate-spin" />
-          <span className="text-[10px] text-gray-400">Connecting...</span>
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-gray-900/60">
+          <SnapshotThumbnail cameraId={cameraId} className="opacity-40" />
+          <Loader2 size={18} className="text-gray-400 animate-spin z-10" />
+          <span className="text-[10px] text-gray-400 z-10">Connecting...</span>
         </div>
       )}
 
       {state === "loading" && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-gray-900/80">
-          <Loader2 size={18} className="text-blue-400 animate-spin" />
-          <span className="text-[10px] text-gray-400">Loading stream...</span>
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-gray-900/60">
+          <SnapshotThumbnail cameraId={cameraId} className="opacity-40" />
+          <Loader2 size={18} className="text-blue-400 animate-spin z-10" />
+          <span className="text-[10px] text-gray-400 z-10">Loading stream...</span>
         </div>
       )}
 
