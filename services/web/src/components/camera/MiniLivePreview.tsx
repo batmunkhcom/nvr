@@ -22,6 +22,8 @@ export default function MiniLivePreview({ cameraId }: Props) {
   const [errorMsg, setErrorMsg] = useState("");
   const hlsRef = useRef<Hls | null>(null);
   const hlsRetryCount = useRef(0);
+  const autoRetryCount = useRef(0);
+  const autoRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const hlsPath = `/hls/${cameraId}_sub/index.m3u8`;
 
@@ -36,7 +38,19 @@ export default function MiniLivePreview({ cameraId }: Props) {
     cleanup();
     setState("connecting");
     setErrorMsg("");
+    autoRetryCount.current = 0;
     doStart();
+  };
+
+  const scheduleRetry = () => {
+    if (autoRetryCount.current >= 3) return;
+    autoRetryCount.current++;
+    autoRetryTimer.current = setTimeout(() => {
+      cleanup();
+      setState("connecting");
+      setErrorMsg("");
+      doStart();
+    }, 5_000);
   };
 
   const doStart = () => {
@@ -53,6 +67,7 @@ export default function MiniLivePreview({ cameraId }: Props) {
             if (!cancelled) {
               setState("error");
               setErrorMsg("Could not start stream relay");
+              scheduleRetry();
             }
             return;
           }
@@ -80,6 +95,7 @@ export default function MiniLivePreview({ cameraId }: Props) {
       if (!cancelled) {
         setState("error");
         setErrorMsg("Stream not available");
+        scheduleRetry();
       }
     }
 
@@ -136,10 +152,10 @@ export default function MiniLivePreview({ cameraId }: Props) {
   };
 
   useEffect(() => {
-    const cancel = doStart();
+    doStart();
     return () => {
-      cancel?.();
       cleanup();
+      if (autoRetryTimer.current) clearTimeout(autoRetryTimer.current);
     };
   }, [cameraId]);
 

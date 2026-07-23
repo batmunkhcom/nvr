@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, type DragEvent } from "react";
+import { useState, useMemo, useCallback, useRef, type DragEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCameras, useCameraMutations } from "../../hooks/useCameras";
 import { useUiPreference } from "../../hooks/useUiPreference";
@@ -172,6 +172,9 @@ export default function CameraGrid() {
   const [columns, setColumns] = useUiPreference<number>("dashboard_columns", 2);
   const cols = gridColsClass[columns] ? columns : 2;
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const dragIndexRef = useRef<number | null>(null);
+  const camerasRef = useRef(cameras);
+  camerasRef.current = cameras;
 
   const motionCameraIds = useMemo(() => {
     const now = Date.now();
@@ -187,28 +190,28 @@ export default function CameraGrid() {
 
   const handleDragStart = useCallback((idx: number) => {
     setDragIndex(idx);
+    dragIndexRef.current = idx;
   }, []);
 
   const handleDragOver = useCallback((e: DragEvent, idx: number) => {
     e.preventDefault();
-    if (dragIndex === null || dragIndex === idx) return;
-  }, [dragIndex]);
+  }, []);
 
   const handleDrop = useCallback((_e: DragEvent, targetIdx: number) => {
-    if (dragIndex === null || dragIndex === targetIdx) {
-      setDragIndex(null);
-      return;
-    }
-    if (!cameras) return;
+    const src = dragIndexRef.current;
+    if (src === null || src === targetIdx) { setDragIndex(null); dragIndexRef.current = null; return; }
+    const items = camerasRef.current;
+    if (!items) { setDragIndex(null); dragIndexRef.current = null; return; }
 
-    const items = [...cameras];
-    const [moved] = items.splice(dragIndex, 1);
-    items.splice(targetIdx, 0, moved);
+    const reordered = [...items];
+    const [moved] = reordered.splice(src, 1);
+    reordered.splice(targetIdx, 0, moved);
 
-    const reordered = items.map((c, i) => ({ id: c.id, display_order: i }));
-    reorderCameras.mutate(reordered);
+    const payload = reordered.map((c, i) => ({ id: c.id, display_order: i }));
+    reorderCameras.mutate(payload);
     setDragIndex(null);
-  }, [dragIndex, cameras, reorderCameras]);
+    dragIndexRef.current = null;
+  }, [reorderCameras]);
 
   const handleDragEnd = useCallback(() => {
     setDragIndex(null);

@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Video, Film, Bell, HardDrive,
   MapPin, Clock, Users, Settings,
   ChevronsLeft, ChevronsRight,
-  BookOpen, ExternalLink, Code,
+  BookOpen, ExternalLink, Code, MessageSquare, LogOut,
 } from "lucide-react";
 import { useUiPreference } from "../../hooks/useUiPreference";
 import { useLocale } from "../../i18n/LocaleContext";
@@ -13,6 +13,7 @@ export default function Sidebar() {
   const [collapsed, setCollapsed] = useUiPreference<boolean>("sidebar_collapsed", false);
   const { t } = useLocale();
   const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
 
   const navItems = [
     { to: "/dashboard", icon: LayoutDashboard, key: "nav.dashboard" },
@@ -73,12 +74,12 @@ export default function Sidebar() {
       {!collapsed && (
         <div className="p-2 border-t border-gray-800 text-[10px] text-gray-500 space-y-0.5">
           <a
-            href="https://github.com/batmunkhcom/nvr"
+            href="https://github.com/batmunkhcom/nvr/releases"
             target="_blank"
             rel="noopener"
             className="flex items-center gap-1.5 px-2 py-1 hover:text-gray-200 rounded transition-colors"
           >
-            <BookOpen size={11} /> About
+            <BookOpen size={11} /> Changelog
           </a>
           <a
             href="https://github.com/batmunkhcom/nvr#readme"
@@ -96,6 +97,20 @@ export default function Sidebar() {
           >
             <Code size={11} /> API Docs
           </a>
+          <a
+            href="https://github.com/batmunkhcom/nvr/issues"
+            target="_blank"
+            rel="noopener"
+            className="flex items-center gap-1.5 px-2 py-1 hover:text-gray-200 rounded transition-colors"
+          >
+            <MessageSquare size={11} /> Feedback
+          </a>
+          <button
+            onClick={logout}
+            className="flex items-center gap-1.5 px-2 py-1 hover:text-red-400 rounded transition-colors w-full text-left"
+          >
+            <LogOut size={11} /> Logout
+          </button>
           <div className="px-2 pt-1 text-gray-500 leading-tight">
             mBm NVR System v0.2<br />
             <span className="text-gray-600">mBm TECHNOLOGY since &copy; 2023</span>
