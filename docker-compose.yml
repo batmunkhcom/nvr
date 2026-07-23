@@ -170,6 +170,9 @@ services:
       VENDOR_PATTERNS_PATH: /app/config/vendor_patterns.yml
       DISCOVERY_SUBNETS: ${DISCOVERY_SUBNETS}
       FFMPEG_PATH: ${FFMPEG_PATH}
+      PYTHONPATH: /app/services/stream-manager:/app/packages/common
+    command: ["python", "-m", "app.main"]
+    working_dir: /app/services/stream-manager
     volumes:
       - ./services/stream-manager:/app/services/stream-manager
       - ./packages:/app/packages
