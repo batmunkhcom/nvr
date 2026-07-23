@@ -110,7 +110,8 @@ export default function LiveView() {
                 if (data.fatal) {
                   setPlaying(false);
                   setStatus("error");
-                  setErrorMsg("Stream playback failed — camera may be offline");
+                  const detail = data.details || data.error?.message || "unknown";
+                  setErrorMsg(`Stream playback failed: ${detail}`);
                   hls.destroy();
                 }
               });
