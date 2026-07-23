@@ -13,12 +13,15 @@ type StreamState = "connecting" | "loading" | "playing" | "error";
 const MAX_START_ATTEMPTS = 3;
 const POLL_INTERVAL_MS = 1_000;
 const MAX_POLL_ATTEMPTS = 20;
+const HLS_RETRY_DELAY_MS = 2_000;
+const HLS_MAX_RETRIES = 5;
 
 export default function MiniLivePreview({ cameraId }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [state, setState] = useState<StreamState>("connecting");
   const [errorMsg, setErrorMsg] = useState("");
   const hlsRef = useRef<Hls | null>(null);
+  const hlsRetryCount = useRef(0);
 
   const hlsPath = `/hls/${cameraId}_sub/index.m3u8`;
 
@@ -105,10 +108,26 @@ export default function MiniLivePreview({ cameraId }: Props) {
 
     hls.on(Hls.Events.ERROR, (_e, data) => {
       if (data.fatal) {
-        setState("error");
-        setErrorMsg(data.type === Hls.ErrorTypes.NETWORK_ERROR
-          ? "Stream network error"
-          : "Stream playback error");
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          if (hlsRetryCount.current < HLS_MAX_RETRIES) {
+            hlsRetryCount.current++;
+            setErrorMsg(`Network error — retrying (${hlsRetryCount.current}/${HLS_MAX_RETRIES})...`);
+            setTimeout(() => {
+              if (hlsRef.current) {
+                hlsRef.current.loadSource(hlsPath);
+              }
+            }, HLS_RETRY_DELAY_MS);
+            return;
+          }
+          setState("error");
+          setErrorMsg("Stream network error after retries");
+        } else {
+          setState("error");
+          setErrorMsg(data.type === Hls.ErrorTypes.MEDIA_ERROR
+            ? "Stream playback error"
+            : "Stream playback error");
+        }
+        cleanup();
       }
     });
 

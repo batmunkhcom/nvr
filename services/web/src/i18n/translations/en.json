@@ -1,0 +1,90 @@
+{
+  "app": {
+    "title": "NVR System",
+    "loading": "Loading..."
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "cameras": "Cameras",
+    "live": "Live View",
+    "recordings": "Recordings",
+    "events": "Events",
+    "storage": "Storage",
+    "settings": "Settings"
+  },
+  "auth": {
+    "login": "Log in",
+    "logout": "Log out",
+    "username": "Username",
+    "password": "Password",
+    "login_failed": "Login failed"
+  },
+  "cameras": {
+    "title": "Cameras",
+    "add": "Add Camera",
+    "edit": "Edit Camera",
+    "delete": "Delete Camera",
+    "name": "Name",
+    "ip_address": "IP Address",
+    "manufacturer": "Manufacturer",
+    "status": {
+      "online": "Online",
+      "offline": "Offline",
+      "degraded": "Degraded",
+      "unknown": "Unknown"
+    },
+    "stream_start": "Start Stream",
+    "stream_stop": "Stop Stream",
+    "no_cameras": "No cameras configured. Add your first camera to begin monitoring."
+  },
+  "recordings": {
+    "title": "Recordings",
+    "no_recordings": "No recordings found. Scheduled or motion-triggered recordings will appear here."
+  },
+  "events": {
+    "title": "Events",
+    "no_events": "No events yet. Motion detection and system alerts will appear here."
+  },
+  "storage": {
+    "title": "Storage",
+    "no_storage": "No storage information available."
+  },
+  "settings": {
+    "title": "Settings",
+    "system_config": "System Configuration",
+    "refresh": "Refresh",
+    "saved": "Saved",
+    "save_failed": "Failed to save"
+  },
+  "ai": {
+    "title": "AI Engine",
+    "analyze": "Analyze",
+    "analyzing": "Analyzing...",
+    "disabled": "AI is disabled or not configured",
+    "error": "AI analysis failed",
+    "motion_on": "Motion Detection On",
+    "motion_off": "Motion Detection Off"
+  },
+  "stream": {
+    "connecting": "Connecting...",
+    "loading": "Loading stream...",
+    "error": "Stream error",
+    "retry": "Retry",
+    "network_error": "Network error — retrying"
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "close": "Close",
+    "confirm": "Confirm",
+    "search": "Search",
+    "all": "All",
+    "none": "None",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "on": "On",
+    "off": "Off",
+    "test": "Test"
+  }
+}

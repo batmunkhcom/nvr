@@ -9,14 +9,17 @@ import Storage from "./pages/Storage";
 import Settings from "./pages/Settings";
 import AppShell from "./components/layout/AppShell";
 import { ToastProvider } from "./components/ui/Toast";
+import { LocaleProvider } from "./i18n/LocaleContext";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   return (
-    <ToastProvider>
-      {children}
-    </ToastProvider>
+    <LocaleProvider>
+      <ToastProvider>
+        {children}
+      </ToastProvider>
+    </LocaleProvider>
   );
 }
 

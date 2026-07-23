@@ -4,18 +4,20 @@ import {
   ChevronsLeft, ChevronsRight,
 } from "lucide-react";
 import { useUiPreference } from "../../hooks/useUiPreference";
-
-const navItems = [
-  { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/cameras", icon: Video, label: "Cameras" },
-  { to: "/recordings", icon: Film, label: "Recordings" },
-  { to: "/events", icon: Bell, label: "Events" },
-  { to: "/storage", icon: HardDrive, label: "Storage" },
-  { to: "/settings", icon: Settings, label: "Settings" },
-];
+import { useLocale } from "../../i18n/LocaleContext";
 
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useUiPreference<boolean>("sidebar_collapsed", false);
+  const { t } = useLocale();
+
+  const navItems = [
+    { to: "/dashboard", icon: LayoutDashboard, key: "nav.dashboard" },
+    { to: "/cameras", icon: Video, key: "nav.cameras" },
+    { to: "/recordings", icon: Film, key: "nav.recordings" },
+    { to: "/events", icon: Bell, key: "nav.events" },
+    { to: "/storage", icon: HardDrive, key: "nav.storage" },
+    { to: "/settings", icon: Settings, key: "nav.settings" },
+  ];
 
   return (
     <aside
@@ -38,7 +40,9 @@ export default function Sidebar() {
         </button>
       </div>
       <nav className="flex-1 p-2 space-y-1">
-        {navItems.map(({ to, icon: Icon, label }) => (
+        {navItems.map(({ to, icon: Icon, key }) => {
+          const label = t(key);
+          return (
           <NavLink
             key={to}
             to={to}
@@ -54,7 +58,8 @@ export default function Sidebar() {
             <Icon size={18} className="flex-shrink-0" />
             {!collapsed && label}
           </NavLink>
-        ))}
+          );
+        })}
       </nav>
     </aside>
   );

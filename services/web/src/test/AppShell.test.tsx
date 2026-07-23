@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { BrowserRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import AppShell from "../components/layout/AppShell";
+import { LocaleProvider } from "../i18n/LocaleContext";
 import apiClient from "../api/client";
 
 vi.mock("../api/client", () => ({
@@ -13,7 +14,9 @@ function renderWithProviders(component: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <BrowserRouter>{component}</BrowserRouter>
+      <LocaleProvider>
+        <BrowserRouter>{component}</BrowserRouter>
+      </LocaleProvider>
     </QueryClientProvider>
   );
 }
@@ -49,12 +52,12 @@ describe("AppShell", () => {
   it("sidebar collapse toggle hides labels and persists to ui-config", async () => {
     renderWithProviders(<AppShell />);
 
-    // expanded by default — label visible
-    expect(screen.getByText("NVR System")).toBeInTheDocument();
+    const brandTexts = screen.getAllByText("NVR System");
+    // Sidebar brand + Topbar title both show "NVR System" after i18n
+    expect(brandTexts.length).toBeGreaterThanOrEqual(2);
 
     fireEvent.click(screen.getByTitle("Collapse sidebar"));
 
-    // persisted via API, not localStorage (AGENTS.md Rule 6)
     await waitFor(() => {
       expect(apiClient.patch).toHaveBeenCalledWith("/system/ui-config", {
         key: "ui.sidebar_collapsed",
@@ -74,6 +77,8 @@ describe("AppShell", () => {
     await waitFor(() => {
       expect(screen.getByTitle("Expand sidebar")).toBeInTheDocument();
     });
-    expect(screen.queryByText("NVR System")).not.toBeInTheDocument();
+    // Sidebar brand hidden, but Topbar still shows "NVR System"
+    const brandTexts = screen.getAllByText("NVR System");
+    expect(brandTexts.length).toBe(1); // only Topbar remains
   });
 });

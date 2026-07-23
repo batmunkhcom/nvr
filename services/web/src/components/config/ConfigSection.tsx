@@ -33,7 +33,12 @@ const LABELS: Record<string, [string, string | undefined, "text" | "number" | "t
   "notification.telegram_bot_token": ["Telegram Bot Token", "Create via @BotFather", "text"],
   "notification.telegram_chat_id": ["Telegram Chat ID", "Your user/group chat ID", "text"],
   "notification.webhook_url": ["Webhook URL", "HTTP endpoint for POST notifications", "text"],
-  "ai.enabled": ["AI Detection", "Enable AI object detection engine", "toggle"],
+  "ai.enabled": ["AI Detection", "Enable AI engine (OpenAI-compatible or Ollama)", "toggle"],
+  "ai.provider": ["AI Provider", "openai or ollama", "text"],
+  "ai.base_url": ["AI Base URL", "API endpoint URL", "text"],
+  "ai.api_key": ["AI API Key", "Bearer token (empty for local Ollama)", "text"],
+  "ai.model": ["AI Model", "gpt-4o-mini / llama3.2-vision / etc.", "text"],
+  "ai.motion_detection_enabled": ["Motion Detection", "OpenCV pixel-change detection", "toggle"],
   "ai.confidence_threshold": ["Confidence Threshold", "Minimum detection confidence (0–1)", "number"],
 };
 
