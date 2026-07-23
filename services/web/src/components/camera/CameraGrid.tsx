@@ -76,13 +76,16 @@ function CameraTile({
   return (
     <div
       title={camera.connection_error || undefined}
-      draggable
       onClick={() => navigate(`/live/${camera.id}`)}
-      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; onDragStart(index); }}
-      onDragOver={(e) => onDragOver(e, index)}
-      onDrop={(e) => onDrop(e, index)}
-      className={`aspect-video bg-gray-800 rounded border-2 ${border} ${hasMotion ? "animate-motion-flash" : ""} relative group overflow-hidden cursor-pointer transition-all duration-200 ${isDragging ? "opacity-30 scale-95" : ""}`}
+      className={`aspect-video bg-gray-800 rounded border-2 ${border} ${hasMotion ? "animate-motion-flash" : ""} relative group overflow-hidden transition-all duration-200 ${isDragging ? "opacity-30 scale-95" : ""}`}
     >
+      <div
+        draggable
+        onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; onDragStart(index); }}
+        onDragOver={(e) => onDragOver(e, index)}
+        onDrop={(e) => onDrop(e, index)}
+        className="absolute left-0 top-0 bottom-0 w-8 z-30 cursor-grab active:cursor-grabbing"
+      />
       {hasStream && <MiniLivePreview cameraId={camera.id} />}
       {!hasStream && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
