@@ -516,9 +516,11 @@ start_cmd() {
 
   # 4. Web UI
   info "[4/5] Starting Web UI (port 3000)..."
+  fuser -k 3000/tcp 2>/dev/null || true
+  sleep 0.5
   cd services/web
   npm install --silent 2>/dev/null || true
-  setsid npx vite --host 0.0.0.0 --port 3000 \
+  setsid npx vite --host 0.0.0.0 --port 3000 --strictPort \
     </dev/null >"${PID_DIR}/web.log" 2>&1 &
   echo $! > "${PID_DIR}/web.pid"
   cd "$PROJECT_DIR"
