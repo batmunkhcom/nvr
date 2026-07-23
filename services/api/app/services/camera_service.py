@@ -127,9 +127,7 @@ async def update_camera(camera_id: uuid.UUID, body: CameraUpdate, db: AsyncSessi
     camera = await get_camera(camera_id, db)
     update_data = body.model_dump(exclude_unset=True)
     if "location_id" in update_data:
-        update_data["location_id"] = await _resolve_location_id(
-            update_data["location_id"], db
-        )
+        update_data["location_id"] = await _resolve_location_id(update_data["location_id"], db)
     for field, value in update_data.items():
         setattr(camera, field, value)
     camera.updated_at = datetime.now(UTC)
@@ -152,9 +150,7 @@ async def _resolve_location_id(raw: str | None, db: AsyncSession) -> uuid.UUID |
 
     result = await db.execute(select(Location).where(Location.id == location_id))
     if not result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Location not found"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Location not found")
     return location_id
 
 

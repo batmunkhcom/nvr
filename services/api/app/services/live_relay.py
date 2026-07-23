@@ -69,13 +69,19 @@ async def _spawn_ffmpeg(
     try:
         return await asyncio.create_subprocess_exec(
             _ffmpeg_path,
-            "-hide_banner", "-loglevel", "error",
-            "-rtsp_transport", rtsp_transport,
-            "-i", rtsp_uri,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-rtsp_transport",
+            rtsp_transport,
+            "-i",
+            rtsp_uri,
             *codec_args,
             "-an",
-            "-f", "rtsp",
-            "-rtsp_transport", "tcp",
+            "-f",
+            "rtsp",
+            "-rtsp_transport",
+            "tcp",
             f"{target}/{cid}",
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
@@ -146,7 +152,7 @@ async def _monitor(camera_id: str, proc: asyncio.subprocess.Process):
 
         restart_count = info.get("restart_count", 0)
         if restart_count < MAX_RESTARTS:
-            backoff = min(BASE_BACKOFF * (2 ** restart_count), MAX_BACKOFF)
+            backoff = min(BASE_BACKOFF * (2**restart_count), MAX_BACKOFF)
             logger.info(
                 "relay_restarting",
                 camera_id=camera_id,
@@ -156,11 +162,16 @@ async def _monitor(camera_id: str, proc: asyncio.subprocess.Process):
             )
             info["restart_count"] = restart_count + 1
             await asyncio.sleep(backoff)
-            if camera_id not in STREAM_DICT or STREAM_DICT.get(camera_id, {}).get("_stopped_by_user"):
+            if camera_id not in STREAM_DICT or STREAM_DICT.get(camera_id, {}).get(
+                "_stopped_by_user"
+            ):
                 return
+
+            current_transport = info.get("rtsp_transport", "tcp")
+            alternate = "udp" if current_transport == "tcp" else "tcp"
             new_proc = await _spawn_ffmpeg(
                 info["rtsp_uri"],
-                info.get("rtsp_transport", "tcp"),
+                current_transport,
                 camera_id,
                 info.get("relay_target"),
             )
@@ -168,6 +179,33 @@ async def _monitor(camera_id: str, proc: asyncio.subprocess.Process):
                 info["process"] = new_proc
                 info["running"] = True
                 t = asyncio.create_task(_monitor(camera_id, new_proc))
+                _BG_TASKS.add(t)
+                t.add_done_callback(_BG_TASKS.discard)
+                return
+
+            # Try alternate transport as fallback (Rule 20: tcp↔udp auto)
+            logger.info(
+                "relay_transport_fallback",
+                camera_id=camera_id,
+                from_transport=current_transport,
+                to_transport=alternate,
+            )
+            fallback_proc = await _spawn_ffmpeg(
+                info["rtsp_uri"],
+                alternate,
+                camera_id,
+                info.get("relay_target"),
+            )
+            if fallback_proc:
+                info["process"] = fallback_proc
+                info["rtsp_transport"] = alternate
+                info["running"] = True
+                logger.info(
+                    "relay_transport_switched",
+                    camera_id=camera_id,
+                    new_transport=alternate,
+                )
+                t = asyncio.create_task(_monitor(camera_id, fallback_proc))
                 _BG_TASKS.add(t)
                 t.add_done_callback(_BG_TASKS.discard)
                 return

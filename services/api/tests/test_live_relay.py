@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from app.services import live_relay
@@ -129,12 +129,12 @@ class TestCircuitBreaker:
         """Rule 17: exponential backoff must cap at 600s, not grow unbounded."""
         # 3 * 2^9 = 1536 — must be capped
         for restart_count in range(15):
-            backoff = min(live_relay.BASE_BACKOFF * (2 ** restart_count), live_relay.MAX_BACKOFF)
+            backoff = min(live_relay.BASE_BACKOFF * (2**restart_count), live_relay.MAX_BACKOFF)
             assert backoff <= live_relay.MAX_BACKOFF
 
     def test_backoff_progression(self):
         """Backoff doubles each restart: 3, 6, 12, 24..."""
         expected = [3, 6, 12, 24, 48, 96, 192, 384, 600, 600]
         for i, exp in enumerate(expected):
-            backoff = min(live_relay.BASE_BACKOFF * (2 ** i), live_relay.MAX_BACKOFF)
+            backoff = min(live_relay.BASE_BACKOFF * (2**i), live_relay.MAX_BACKOFF)
             assert backoff == exp

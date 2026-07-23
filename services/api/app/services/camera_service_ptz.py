@@ -156,9 +156,7 @@ async def _send_onvif(camera: Camera, body: str) -> bool:
         return False
 
 
-async def _vendor_ptz(
-    camera: Camera, command: str, action: str, speed: float
-) -> dict[str, Any]:
+async def _vendor_ptz(camera: Camera, command: str, action: str, speed: float) -> dict[str, Any]:
     """Fall back to vendor-specific HTTP PTZ API."""
     mfr = (camera.manufacturer or "").lower()
     path = VENDOR_PTZ_PATHS.get(mfr)
@@ -179,11 +177,14 @@ async def _vendor_ptz(
         async with httpx.AsyncClient(timeout=5.0) as client:
             if mfr == "hikvision":
                 resp = await client.put(
-                    url, json={"PTZCtrl": {"pan": params.get("pan", 0), "tilt": params.get("tilt", 0)}},
+                    url,
+                    json={"PTZCtrl": {"pan": params.get("pan", 0), "tilt": params.get("tilt", 0)}},
                     auth=(camera.username, pw) if camera.username else None,
                 )
             elif mfr == "dahua":
-                resp = await client.get(url, params=params, auth=(camera.username, pw) if camera.username else None)
+                resp = await client.get(
+                    url, params=params, auth=(camera.username, pw) if camera.username else None
+                )
             else:
                 resp = await client.get(url, params=params)
             if resp.status_code < 400:
@@ -195,23 +196,44 @@ async def _vendor_ptz(
         return {"status": "error", "error": str(e)}
 
 
-def _build_vendor_params(
-    mfr: str, command: str, action: str, speed: float
-) -> dict[str, Any]:
+def _build_vendor_params(mfr: str, command: str, action: str, speed: float) -> dict[str, Any]:
     """Build vendor-specific HTTP PTZ parameters."""
     if mfr == "dahua":
-        dir_map = {"up": "Up", "down": "Down", "left": "Left", "right": "Right",
-                   "zoomin": "ZoomInc", "zoomout": "ZoomDec"}
-        return {"action": "start", "code": dir_map.get(command, "Up"),
-                "arg1": 0, "arg2": int(speed * 10), "arg3": 0}
+        dir_map = {
+            "up": "Up",
+            "down": "Down",
+            "left": "Left",
+            "right": "Right",
+            "zoomin": "ZoomInc",
+            "zoomout": "ZoomDec",
+        }
+        return {
+            "action": "start",
+            "code": dir_map.get(command, "Up"),
+            "arg1": 0,
+            "arg2": int(speed * 10),
+            "arg3": 0,
+        }
     if mfr == "axis":
-        dir_map = {"up": "up", "down": "down", "left": "left", "right": "right",
-                   "zoomin": "zoom_in", "zoomout": "zoom_out"}
+        dir_map = {
+            "up": "up",
+            "down": "down",
+            "left": "left",
+            "right": "right",
+            "zoomin": "zoom_in",
+            "zoomout": "zoom_out",
+        }
         cmd = dir_map.get(command, "up")
         return {"move": cmd, "speed": int(speed * 100)}
     if mfr == "hikvision":
-        dir_map = {"up": (0, 1), "down": (0, -1), "left": (-1, 0), "right": (1, 0),
-                   "zoomin": (0, 1), "zoomout": (0, -1)}
+        dir_map = {
+            "up": (0, 1),
+            "down": (0, -1),
+            "left": (-1, 0),
+            "right": (1, 0),
+            "zoomin": (0, 1),
+            "zoomout": (0, -1),
+        }
         pan, tilt = dir_map.get(command, (0, 0))
         return {"pan": int(pan * speed * 10), "tilt": int(tilt * speed * 10)}
     return {}
@@ -237,7 +259,7 @@ def _soap_envelope(body_inner: str) -> str:
     return (
         '<?xml version="1.0" encoding="utf-8"?>'
         '<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"'
-        f' {WS_SEC_NS} {WS_UTIL_NS}>'
+        f" {WS_SEC_NS} {WS_UTIL_NS}>"
         "<s:Header/>"
         f"<s:Body>{body_inner}</s:Body>"
         "</s:Envelope>"
@@ -255,5 +277,6 @@ async def _get_camera(camera_id: uuid.UUID) -> Any:
         camera = result.scalar_one_or_none()
         if not camera:
             from fastapi import HTTPException
+
             raise HTTPException(404, "Camera not found")
         return camera

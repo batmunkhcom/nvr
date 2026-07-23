@@ -11,11 +11,11 @@ import pytest
 class TestStartStop:
     @pytest.mark.anyio
     async def test_start_and_stop(self):
+        from app.services import health_check_loop as hcl
         from app.services.health_check_loop import (
             start_health_check,
             stop_health_check,
         )
-        from app.services import health_check_loop as hcl
 
         async def fake_loop(_interval_s: int) -> None:
             await asyncio.Event().wait()
@@ -28,11 +28,11 @@ class TestStartStop:
 
     @pytest.mark.anyio
     async def test_double_start_is_noop(self):
+        from app.services import health_check_loop as hcl
         from app.services.health_check_loop import (
             start_health_check,
             stop_health_check,
         )
-        from app.services import health_check_loop as hcl
 
         async def fake_loop(_interval_s: int) -> None:
             await asyncio.Event().wait()

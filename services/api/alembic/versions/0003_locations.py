@@ -21,7 +21,9 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), primary_key=True, server_default=sa.func.uuid_generate_v4()),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("description", sa.Text()),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
         sa.UniqueConstraint("name", name="uq_locations_name"),
     )
     op.add_column("cameras", sa.Column("location_id", sa.Uuid(), nullable=True))

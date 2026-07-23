@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  POSTGRES_HOST: localhost
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: nvr_test
+  POSTGRES_USER: test
+  POSTGRES_PASSWORD: test
+  REDIS_HOST: localhost
+  REDIS_PORT: 6379
+
 jobs:
   lint-python:
     runs-on: ubuntu-latest
@@ -48,17 +57,15 @@ jobs:
         image: redis:7-alpine
         ports:
           - 6379:6379
-    env:
-      DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/nvr_test
-      REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install ".[dev]"
-      - run: cd services/api && alembic upgrade head
-      - run: python -m pytest -v --cov=services --cov-report=term-missing
+      - name: Install dev dependencies
+        run: pip install ".[dev]"
+      - name: Run tests
+        run: python -m pytest -v --tb=short services/api/tests/
 
   lint-web:
     runs-on: ubuntu-latest
@@ -68,11 +75,11 @@ jobs:
         with:
           node-version: "20"
       - run: cd services/web && npm ci
-      - run: cd services/web && npx tsc --noEmit || true
-      - run: cd services/web && npx eslint src/ || true
+      - run: cd services/web && npx tsc --noEmit
+      - run: cd services/web && npx vitest run
 
   build:
-    needs: [lint-python, test]
+    needs: [lint-python, test, lint-web]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

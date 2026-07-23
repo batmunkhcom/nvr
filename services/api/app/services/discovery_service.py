@@ -47,8 +47,13 @@ async def start_discovery(
         "started_at": time.time(),
         "errors": [],
     }
-    logger.info("discovery_started", scan_id=str(scan_id), subnets=subnets,
-                methods=methods, total_ips=total_ips)
+    logger.info(
+        "discovery_started",
+        scan_id=str(scan_id),
+        subnets=subnets,
+        methods=methods,
+        total_ips=total_ips,
+    )
 
     t = asyncio.create_task(_run_scan(scan_id))
     _tasks.add(t)
@@ -67,8 +72,13 @@ async def start_discovery(
 async def get_discovery_status(scan_id: uuid.UUID) -> dict[str, Any]:
     sid = str(scan_id)
     if sid not in _scans:
-        return {"scan_id": sid, "status": "not_found", "phases": {},
-                "found_count": 0, "progress_pct": 0}
+        return {
+            "scan_id": sid,
+            "status": "not_found",
+            "phases": {},
+            "found_count": 0,
+            "progress_pct": 0,
+        }
     scan = _scans[sid]
     total = max(scan.get("total_ips", 0), 1)
     pct = min(100, int(scan["scanned_ips"] / total * 100)) if total > 0 else 0
@@ -97,6 +107,7 @@ async def get_discovery_results(scan_id: uuid.UUID) -> dict[str, Any]:
 
 # ── background scan ────────────────────────────────────────────────────────
 
+
 async def _run_scan(scan_id: uuid.UUID):
     sid = str(scan_id)
     scan = _scans.get(sid)
@@ -122,22 +133,24 @@ async def _run_scan(scan_id: uuid.UUID):
                 if any(d["ip_address"] == ip for d in scan["devices"]):
                     return
                 scan["found_count"] += 1
-                scan["devices"].append({
-                    "ip_address": ip,
-                    "manufacturer": info.get("manufacturer"),
-                    "model": info.get("model"),
-                    "http_title": info.get("http_title"),
-                    "stream_main_uri": info.get("stream_main_uri"),
-                    "stream_sub_uri": info.get("stream_sub_uri"),
-                    "open_ports": info.get("open_ports"),
-                    "has_rtsp": info.get("has_rtsp"),
-                    "has_http": info.get("has_http"),
-                    "has_audio": info.get("has_audio"),
-                    "has_ptz": info.get("has_ptz"),
-                    "has_onvif": info.get("has_onvif"),
-                    "has_motion_detection": info.get("has_motion_detection"),
-                    "confidence": _calc_confidence(info),
-                })
+                scan["devices"].append(
+                    {
+                        "ip_address": ip,
+                        "manufacturer": info.get("manufacturer"),
+                        "model": info.get("model"),
+                        "http_title": info.get("http_title"),
+                        "stream_main_uri": info.get("stream_main_uri"),
+                        "stream_sub_uri": info.get("stream_sub_uri"),
+                        "open_ports": info.get("open_ports"),
+                        "has_rtsp": info.get("has_rtsp"),
+                        "has_http": info.get("has_http"),
+                        "has_audio": info.get("has_audio"),
+                        "has_ptz": info.get("has_ptz"),
+                        "has_onvif": info.get("has_onvif"),
+                        "has_motion_detection": info.get("has_motion_detection"),
+                        "confidence": _calc_confidence(info),
+                    }
+                )
 
         for method in methods:
             scan["phases"][method] = "running"
@@ -145,12 +158,12 @@ async def _run_scan(scan_id: uuid.UUID):
             scan["phases"][method] = "complete"
 
         scan["status"] = "completed"
-        logger.info("discovery_completed", scan_id=sid, found=scan["found_count"],
-                    scanned=scan["total_ips"])
+        logger.info(
+            "discovery_completed", scan_id=sid, found=scan["found_count"], scanned=scan["total_ips"]
+        )
 
     except Exception as e:
-        logger.error("discovery_scan_failed", scan_id=sid, error=str(e),
-                     exc_info=True)
+        logger.error("discovery_scan_failed", scan_id=sid, error=str(e), exc_info=True)
         scan["status"] = "failed"
         scan["errors"].append(str(e))
     finally:
@@ -158,6 +171,7 @@ async def _run_scan(scan_id: uuid.UUID):
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
+
 
 def _expand_range(spec: str) -> list[str]:
     """Expand '192.168.1.100-192.168.1.150' or '192.168.1.100-150' into IPs."""
@@ -175,7 +189,7 @@ def _expand_range(spec: str) -> list[str]:
         parts = start_s.strip().split(".")
         if len(parts) != 4 or not end_s.isdigit():
             return []
-        end_s = ".".join(parts[:3] + [end_s])
+        end_s = ".".join([*parts[:3], end_s])
     try:
         end = ipaddress.ip_address(end_s)
     except ValueError:

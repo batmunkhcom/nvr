@@ -117,9 +117,7 @@ class Camera(Base):
         ForeignKey("locations.id", ondelete="SET NULL"),
     )
     notes: Mapped[str | None] = mapped_column(Text)
-    display_order: Mapped[int] = mapped_column(
-        Integer, default=0, server_default="0"
-    )
+    display_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),

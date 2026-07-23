@@ -7,7 +7,6 @@ from typing import Any
 
 import structlog
 from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.database import async_session_factory
 from ..models.camera import Camera
@@ -25,6 +24,7 @@ async def _check_single(camera: Camera) -> dict[str, Any]:
         if new_status != prev_status and prev_status != "online":
             try:
                 from .notification_service import send_camera_alert
+
                 await send_camera_alert(
                     camera_id=cam_id,
                     camera_name=camera.name or cam_id,
@@ -36,6 +36,7 @@ async def _check_single(camera: Camera) -> dict[str, Any]:
         elif new_status == "online" and prev_status != "online":
             try:
                 from .notification_service import send_camera_alert
+
                 await send_camera_alert(
                     camera_id=cam_id,
                     camera_name=camera.name or cam_id,
@@ -45,16 +46,14 @@ async def _check_single(camera: Camera) -> dict[str, Any]:
                 pass
 
     try:
-        probe_result = await probe_ip(
-            camera.ip_address or "", port=554, timeout=3.0
-        )
+        probe_result = await probe_ip(camera.ip_address or "", port=554, timeout=3.0)
         if not probe_result.get("reachable") or 554 not in probe_result.get("open_ports", []):
             err = "Camera unreachable on port 554"
             async with async_session_factory() as session:
                 await session.execute(
                     update(Camera)
-                        .where(Camera.id == camera.id)
-                        .values(status="offline", connection_error=err)
+                    .where(Camera.id == camera.id)
+                    .values(status="offline", connection_error=err)
                 )
                 await session.commit()
             await _notify_if_changed("offline", err)
@@ -65,15 +64,15 @@ async def _check_single(camera: Camera) -> dict[str, Any]:
             async with async_session_factory() as session:
                 await session.execute(
                     update(Camera)
-                        .where(Camera.id == camera.id)
-                        .values(status="offline", connection_error=err)
+                    .where(Camera.id == camera.id)
+                    .values(status="offline", connection_error=err)
                 )
                 await session.commit()
             await _notify_if_changed("offline", err)
             return {"status": "offline", "error_code": "no_stream_uri"}
 
-        from ..services.camera_rtsp_check import check_rtsp_stream
         from ..core.security import decrypt_password_aes
+        from ..services.camera_rtsp_check import check_rtsp_stream
 
         password = None
         if camera.encrypted_password:
@@ -89,8 +88,8 @@ async def _check_single(camera: Camera) -> dict[str, Any]:
             if not auth_ok:
                 await session.execute(
                     update(Camera)
-                        .where(Camera.id == camera.id)
-                        .values(status="degraded", connection_error=error_msg[:500])
+                    .where(Camera.id == camera.id)
+                    .values(status="degraded", connection_error=error_msg[:500])
                 )
                 await session.commit()
                 await _notify_if_changed("degraded", error_msg)
@@ -98,8 +97,8 @@ async def _check_single(camera: Camera) -> dict[str, Any]:
 
             await session.execute(
                 update(Camera)
-                    .where(Camera.id == camera.id)
-                    .values(status="online", connection_error=None)
+                .where(Camera.id == camera.id)
+                .values(status="online", connection_error=None)
             )
             await session.commit()
             await _notify_if_changed("online")
@@ -130,8 +129,12 @@ async def health_check_loop(interval_s: int) -> None:
                     *[_check_single(cam) for cam in cameras],
                     return_exceptions=True,
                 )
-                degraded = sum(1 for r in results if isinstance(r, dict) and r.get("status") == "degraded")
-                offline = sum(1 for r in results if isinstance(r, dict) and r.get("status") == "offline")
+                degraded = sum(
+                    1 for r in results if isinstance(r, dict) and r.get("status") == "degraded"
+                )
+                offline = sum(
+                    1 for r in results if isinstance(r, dict) and r.get("status") == "offline"
+                )
                 logger.info(
                     "health_check_loop_iteration",
                     cameras_checked=len(cameras),
@@ -157,6 +160,7 @@ def start_health_check(interval_s: int | None = None) -> None:
             effective = interval_s or 120
             try:
                 from .config_service import get_config_int
+
                 async with async_session_factory() as session:
                     db_interval = await get_config_int(session, "camera.health_check_interval_s", 0)
                 if db_interval and db_interval >= 30:

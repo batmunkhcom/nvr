@@ -9,7 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.database import get_db
 from ...middleware.auth import get_current_user, require_operator
-from ...schemas.camera import CameraCreate, CameraUpdate, CameraReorderRequest, DiscoveryRequest, ProbeRequest
+from ...schemas.camera import (
+    CameraCreate,
+    CameraReorderRequest,
+    CameraUpdate,
+    DiscoveryRequest,
+    ProbeRequest,
+)
 from ...services.camera_probe import probe_ip
 from ...services.camera_service import (
     camera_to_dict,
@@ -107,13 +113,12 @@ async def reorder_cameras(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     from sqlalchemy import update
+
     from ...models.camera import Camera
 
     for item in body.cameras:
         await db.execute(
-            update(Camera)
-            .where(Camera.id == item.id)
-            .values(display_order=item.display_order)
+            update(Camera).where(Camera.id == item.id).values(display_order=item.display_order)
         )
     await db.commit()
     return {"data": {"status": "ok", "count": len(body.cameras)}}
@@ -187,8 +192,9 @@ async def camera_ptz(
 
 def _authed_rtsp_uri(camera, rtsp_uri: str) -> str:
     """Embed decrypted credentials into an RTSP URI for FFmpeg."""
-    import structlog
     from urllib.parse import urlparse, urlunparse
+
+    import structlog
 
     from ...core.security import decrypt_password_aes
 
@@ -243,6 +249,7 @@ async def live_stop(
     current_user: Annotated[dict, Depends(require_operator)],
 ):
     from ...services.live_relay import stop_relay
+
     result = await stop_relay(camera_id)
     return {"data": result}
 
@@ -253,6 +260,7 @@ async def live_status(
     current_user: Annotated[dict, Depends(get_current_user)],
 ):
     from ...services.live_relay import relay_status
+
     result = await relay_status(camera_id)
     return {"data": result}
 

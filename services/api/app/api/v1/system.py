@@ -157,5 +157,6 @@ async def test_notification(
 ):
     """Send a test notification through all enabled channels."""
     from ...services.notification_service import send_test_notification
+
     result = await send_test_notification()
     return {"data": result}

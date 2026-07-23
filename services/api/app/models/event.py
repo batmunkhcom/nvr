@@ -39,5 +39,8 @@ class Event(Base):
         UUID(as_uuid=True), ForeignKey("users.id")
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC), server_default=func.now(), primary_key=True
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+        primary_key=True,
     )

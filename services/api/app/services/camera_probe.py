@@ -114,26 +114,48 @@ async def probe_ip(ip: str, timeout: float = 5.0) -> dict[str, Any]:
         "stream_sub_uri": _build_stream_uri(ip, manufacturer, sub=True),
         "has_rtsp": rtsp_info.get("reachable", False),
         "has_http": http_info.get("reachable", False),
-        "has_audio": manufacturer in {"hikvision", "dahua", "axis", "reolink", "amcrest", "uniview"},
-        "has_ptz": manufacturer in {"hikvision", "dahua", "axis", "foscam", "bosch", "samsung_hanwha"},
-        "has_onvif": manufacturer in {
-            "hikvision", "dahua", "axis", "bosch", "samsung_hanwha",
-            "uniview", "reolink", "amcrest", "foscam",
+        "has_audio": manufacturer
+        in {"hikvision", "dahua", "axis", "reolink", "amcrest", "uniview"},
+        "has_ptz": manufacturer
+        in {"hikvision", "dahua", "axis", "foscam", "bosch", "samsung_hanwha"},
+        "has_onvif": manufacturer
+        in {
+            "hikvision",
+            "dahua",
+            "axis",
+            "bosch",
+            "samsung_hanwha",
+            "uniview",
+            "reolink",
+            "amcrest",
+            "foscam",
         },
         "has_motion_detection": manufacturer in {"hikvision", "dahua", "axis"},
+        "onvif_url": _build_onvif_url(ip, http_info)
+        if _vendor_supports_onvif(manufacturer)
+        else None,
     }
 
-    logger.info("camera_probe_done", ip=ip, reachable=result["reachable"],
-                manufacturer=manufacturer, open_ports=len(open_ports))
+    logger.info(
+        "camera_probe_done",
+        ip=ip,
+        reachable=result["reachable"],
+        manufacturer=manufacturer,
+        open_ports=len(open_ports),
+    )
     return result
 
 
 # ── port scan ──────────────────────────────────────────────────────────────
 
+
 async def _scan_ports(ip: str, ports: list[int], timeout: float) -> list[int]:
-    results: list[tuple[int, bool]] = list(await asyncio.gather(
-        *(_check_port(ip, p, timeout) for p in ports), return_exceptions=True,
-    ))
+    results: list[tuple[int, bool]] = list(
+        await asyncio.gather(
+            *(_check_port(ip, p, timeout) for p in ports),
+            return_exceptions=True,
+        )
+    )
     open_ports: list[int] = []
     for item in results:
         if isinstance(item, tuple):
@@ -146,7 +168,8 @@ async def _scan_ports(ip: str, ports: list[int], timeout: float) -> list[int]:
 async def _check_port(ip: str, port: int, timeout: float) -> tuple[int, bool]:
     try:
         _, writer = await asyncio.wait_for(
-            asyncio.open_connection(ip, port), timeout=timeout,
+            asyncio.open_connection(ip, port),
+            timeout=timeout,
         )
         writer.close()
         with contextlib.suppress(TimeoutError, Exception):
@@ -157,6 +180,7 @@ async def _check_port(ip: str, port: int, timeout: float) -> tuple[int, bool]:
 
 
 # ── RTSP probe ─────────────────────────────────────────────────────────────
+
 
 async def _probe_rtsp_ports(ip: str, open_ports: list[int], timeout: float) -> dict[str, Any]:
     rtsp_ports = [p for p in open_ports if p in RTSP_PORTS]
@@ -172,16 +196,13 @@ async def _probe_rtsp_ports(ip: str, open_ports: list[int], timeout: float) -> d
 async def _probe_rtsp(ip: str, port: int, timeout: float) -> dict[str, Any]:
     try:
         reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(ip, port), timeout=timeout,
+            asyncio.open_connection(ip, port),
+            timeout=timeout,
         )
     except (TimeoutError, ConnectionRefusedError, OSError):
         return {"reachable": False}
 
-    request = (
-        f"OPTIONS rtsp://{ip}:{port} RTSP/1.0\r\n"
-        f"CSeq: 1\r\n"
-        f"User-Agent: NVR-Probe/1.0\r\n\r\n"
-    )
+    request = f"OPTIONS rtsp://{ip}:{port} RTSP/1.0\r\nCSeq: 1\r\nUser-Agent: NVR-Probe/1.0\r\n\r\n"
     try:
         writer.write(request.encode())
         await asyncio.wait_for(writer.drain(), timeout=2.0)
@@ -207,6 +228,7 @@ async def _probe_rtsp(ip: str, port: int, timeout: float) -> dict[str, Any]:
 
 # ── HTTP probe ─────────────────────────────────────────────────────────────
 
+
 async def _probe_http_ports(ip: str, open_ports: list[int], timeout: float) -> dict[str, Any]:
     http_ports = [p for p in open_ports if p in HTTP_PORTS]
     if not http_ports:
@@ -221,16 +243,14 @@ async def _probe_http_ports(ip: str, open_ports: list[int], timeout: float) -> d
 async def _probe_http(ip: str, port: int, timeout: float) -> dict[str, Any]:
     try:
         reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(ip, port), timeout=timeout,
+            asyncio.open_connection(ip, port),
+            timeout=timeout,
         )
     except (TimeoutError, ConnectionRefusedError, OSError):
         return {"reachable": False}
 
     request = (
-        f"GET / HTTP/1.0\r\n"
-        f"Host: {ip}\r\n"
-        f"User-Agent: NVR-Probe/1.0\r\n"
-        f"Accept: text/html\r\n\r\n"
+        f"GET / HTTP/1.0\r\nHost: {ip}\r\nUser-Agent: NVR-Probe/1.0\r\nAccept: text/html\r\n\r\n"
     )
     try:
         writer.write(request.encode())
@@ -265,6 +285,7 @@ async def _probe_http(ip: str, port: int, timeout: float) -> dict[str, Any]:
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
+
 def _extract_header(text: str, header_name: str) -> str | None:
     m = re.search(rf"{header_name}:\s*(.+?)\r?\n", text, re.IGNORECASE)
     return m.group(1).strip() if m else None
@@ -278,8 +299,8 @@ def _extract_html_title(html: str) -> str | None:
 def _extract_model_from_title(title: str) -> str | None:
     patterns = [
         r"([A-Z]+[-_]\d+[A-Z]*(?:[-_]\d+)*)",  # DS-2CD2042WD-I
-        r"([A-Z]+\d+[-_][A-Z]+\d+)",              # IPC-HDW2431T
-        r"([A-Z]+[-_][A-Z0-9]{4,})",              # Generic model-like
+        r"([A-Z]+\d+[-_][A-Z]+\d+)",  # IPC-HDW2431T
+        r"([A-Z]+[-_][A-Z0-9]{4,})",  # Generic model-like
     ]
     for pat in patterns:
         m = re.search(pat, title, re.IGNORECASE)
@@ -304,12 +325,48 @@ def _build_stream_uri(ip: str, manufacturer: str | None, sub: bool = False) -> s
     return f"rtsp://{ip}:554{path}"
 
 
+ONVIF_VENDORS = {
+    "hikvision",
+    "dahua",
+    "axis",
+    "bosch",
+    "samsung_hanwha",
+    "uniview",
+    "reolink",
+    "amcrest",
+    "foscam",
+}
+
+
+def _vendor_supports_onvif(manufacturer: str | None) -> bool:
+    return manufacturer in ONVIF_VENDORS
+
+
+def _build_onvif_url(ip: str, http_info: dict[str, Any]) -> str | None:
+    """Guess the ONVIF device service URL from open HTTP ports."""
+    http_ports = [p for p in http_info.get("open_ports", []) if p in HTTP_PORTS]
+    if not http_ports:
+        return None
+    # Most ONVIF cameras expose device service on port 80
+    return f"http://{ip}/onvif/device_service"
+
+
 def _empty_result(ip: str) -> dict[str, Any]:
     return {
-        "reachable": False, "ip": ip, "open_ports": [],
-        "manufacturer": None, "model": None, "server_header": None,
-        "http_title": None, "stream_main_uri": None, "stream_sub_uri": None,
-        "has_rtsp": False, "has_http": False,
-        "has_audio": False, "has_ptz": False, "has_onvif": False,
+        "reachable": False,
+        "ip": ip,
+        "open_ports": [],
+        "manufacturer": None,
+        "model": None,
+        "server_header": None,
+        "http_title": None,
+        "stream_main_uri": None,
+        "stream_sub_uri": None,
+        "has_rtsp": False,
+        "has_http": False,
+        "has_audio": False,
+        "has_ptz": False,
+        "has_onvif": False,
         "has_motion_detection": False,
+        "onvif_url": None,
     }

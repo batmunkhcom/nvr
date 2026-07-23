@@ -5,12 +5,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import uuid
+from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Annotated
 
 from ...core.database import get_db
 from ...middleware.auth import get_current_user
@@ -27,8 +26,8 @@ async def capture_snapshot(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Capture a JPEG snapshot from the camera's sub-stream via FFmpeg and return as base64."""
-    from ...services.camera_service import get_camera
     from ...core.security import decrypt_password_aes
+    from ...services.camera_service import get_camera
 
     camera = await get_camera(camera_id, db)
 
@@ -49,11 +48,11 @@ async def capture_snapshot(
     if camera.username and camera.encrypted_password:
         try:
             password = decrypt_password_aes(camera.encrypted_password)
-        except Exception:
+        except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to decrypt camera password",
-            )
+            ) from exc
 
     from urllib.parse import urlparse, urlunparse
 
@@ -72,27 +71,31 @@ async def capture_snapshot(
         proc = await asyncio.create_subprocess_exec(
             ffmpeg_path,
             "-hide_banner",
-            "-loglevel", "error",
-            "-rtsp_transport", camera.rtsp_transport or "tcp",
-            "-i", authed_uri,
-            "-vframes", "1",
-            "-q:v", "5",
-            "-f", "image2",
+            "-loglevel",
+            "error",
+            "-rtsp_transport",
+            camera.rtsp_transport or "tcp",
+            "-i",
+            authed_uri,
+            "-vframes",
+            "1",
+            "-q:v",
+            "5",
+            "-f",
+            "image2",
             "-",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
 
         try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=8.0
-            )
-        except asyncio.TimeoutError:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=8.0)
+        except TimeoutError:
             proc.kill()
             raise HTTPException(
                 status_code=status.HTTP_504_GATEWAY_TIMEOUT,
                 detail="Snapshot capture timed out",
-            )
+            ) from None
 
         if proc.returncode != 0 or not stdout:
             err = stderr.decode("utf-8", errors="replace")[:200] if stderr else "no output"
@@ -115,7 +118,7 @@ async def capture_snapshot(
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail="FFmpeg is not installed",
-        )
+        ) from None
     except HTTPException:
         raise
     except Exception as exc:
@@ -123,4 +126,4 @@ async def capture_snapshot(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unexpected error capturing snapshot",
-        )
+        ) from exc

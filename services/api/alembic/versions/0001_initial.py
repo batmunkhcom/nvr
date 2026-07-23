@@ -54,7 +54,11 @@ def upgrade() -> None:
     # Pre-create all enum types via DO block (PG16 doesn't support IF NOT EXISTS for CREATE TYPE).
     for name, values in _enums.items():
         vals = ", ".join(f"'{v}'" for v in values)
-        op.execute(sa.text(f"DO $$ BEGIN CREATE TYPE {name} AS ENUM ({vals}); EXCEPTION WHEN duplicate_object THEN NULL; END $$"))
+        op.execute(
+            sa.text(
+                f"DO $$ BEGIN CREATE TYPE {name} AS ENUM ({vals}); EXCEPTION WHEN duplicate_object THEN NULL; END $$"
+            )
+        )
 
     # ── system_config ───────────────────────────────────────────────────
     op.create_table(

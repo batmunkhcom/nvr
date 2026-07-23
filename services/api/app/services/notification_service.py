@@ -67,13 +67,17 @@ async def send_camera_alert(
             if tok and chat:
                 results.append(await _send_telegram(tok, chat, body))
             else:
-                results.append({"channel": "telegram", "status": "skipped", "reason": "missing config"})
+                results.append(
+                    {"channel": "telegram", "status": "skipped", "reason": "missing config"}
+                )
         elif ch == "webhook":
             url = config.get("webhook_url")
             if url:
                 results.append(await _send_webhook(url, subject, body))
             else:
-                results.append({"channel": "webhook", "status": "skipped", "reason": "missing config"})
+                results.append(
+                    {"channel": "webhook", "status": "skipped", "reason": "missing config"}
+                )
 
     return {"status": "dispatched", "results": results}
 
@@ -82,7 +86,6 @@ async def _send_telegram(bot_token: str, chat_id: str, text: str) -> dict[str, A
     """Send message via Telegram Bot API (no external library needed)."""
 
     import aiohttp
-    import asyncio
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {
@@ -122,7 +125,11 @@ async def _send_webhook(url: str, subject: str, body: str) -> dict[str, Any]:
         ):
             ok = resp.status < 400
             logger.info("webhook_sent" if ok else "webhook_failed", http_status=resp.status)
-            return {"channel": "webhook", "status": "sent" if ok else "failed", "http_status": resp.status}
+            return {
+                "channel": "webhook",
+                "status": "sent" if ok else "failed",
+                "http_status": resp.status,
+            }
     except Exception as exc:
         logger.error("webhook_error", error=str(exc))
         return {"channel": "webhook", "status": "failed", "error": str(exc)}

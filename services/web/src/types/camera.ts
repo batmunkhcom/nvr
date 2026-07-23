@@ -95,12 +95,14 @@ export interface ProbeResult {
   server_header: string | null;
   http_title: string | null;
   stream_main_uri: string | null;
+  stream_sub_uri: string | null;
   has_rtsp: boolean;
   has_http: boolean;
   has_audio: boolean;
   has_ptz: boolean;
   has_onvif: boolean;
   has_motion_detection: boolean;
+  onvif_url: string | null;
 }
 
 export interface DiscoveredDevice {
