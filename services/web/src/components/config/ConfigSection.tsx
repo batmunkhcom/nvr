@@ -11,13 +11,13 @@ interface ConfigEntry {
   type: "text" | "number" | "toggle";
 }
 
-const CATEGORIES: { prefix: string; label: string; icon: typeof Monitor }[] = [
-  { prefix: "ui.", label: "User Interface", icon: Monitor },
-  { prefix: "camera.", label: "Camera Defaults", icon: Camera },
-  { prefix: "mediamtx.", label: "MediaMTX", icon: Radio },
-  { prefix: "recording.", label: "Recording", icon: Disc },
-  { prefix: "notification.", label: "Notifications", icon: MessageSquare },
-  { prefix: "ai.", label: "AI Engine", icon: Brain },
+const CATEGORIES: { key: string; label: string; icon: typeof Monitor }[] = [
+  { key: "ui.", label: "UI", icon: Monitor },
+  { key: "camera.", label: "Camera", icon: Camera },
+  { key: "mediamtx.", label: "MediaMTX", icon: Radio },
+  { key: "recording.", label: "Recording", icon: Disc },
+  { key: "notification.", label: "Notifications", icon: MessageSquare },
+  { key: "ai.", label: "AI", icon: Brain },
 ];
 
 const LABELS: Record<string, [string, string | undefined, "text" | "number" | "toggle"]> = {
@@ -49,7 +49,7 @@ export default function ConfigSection() {
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [loaded, setLoaded] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [activeTab, setActiveTab] = useState("ui.");
 
   const load = async () => {
     try {
@@ -92,7 +92,6 @@ export default function ConfigSection() {
   };
 
   const displayValue = (key: string) => key in editing ? editing[key] : (configs[key] ?? "");
-
   const changed = (key: string) => key in editing && editing[key] !== (configs[key] ?? "");
 
   const entries: ConfigEntry[] = Object.keys(LABELS).map((key) => {
@@ -102,28 +101,22 @@ export default function ConfigSection() {
 
   if (!loaded) {
     return (
-      <div className="grid grid-cols-2 gap-4">
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="h-40 bg-gray-800 rounded-xl animate-pulse" />
+      <div className="space-y-3">
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="h-10 bg-gray-800 rounded animate-pulse" />
         ))}
       </div>
     );
   }
 
-  const toggleCategory = (prefix: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      next.has(prefix) ? next.delete(prefix) : next.add(prefix);
-      return next;
-    });
-  };
+  const activeEntries = entries.filter((e) => e.key.startsWith(activeTab));
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-3">
         <div>
           <h2 className="text-lg font-bold text-white">Configuration</h2>
-          <p className="text-xs text-gray-500 mt-0.5">System-wide settings organized by category</p>
+          <p className="text-xs text-gray-500 mt-0.5">System-wide settings by category</p>
         </div>
         <button
           onClick={load}
@@ -133,105 +126,103 @@ export default function ConfigSection() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {CATEGORIES.map(({ prefix, label, icon: Icon }) => {
-          const groupEntries = entries.filter((e) => e.key.startsWith(prefix));
-          if (!groupEntries.length) return null;
-          const isOpen = !collapsed.has(prefix);
+      <div className="flex gap-1 mb-4 border-b border-gray-800 pb-0">
+        {CATEGORIES.map(({ key, label, icon: Icon }) => {
+          const count = entries.filter((e) => e.key.startsWith(key)).length;
+          if (!count) return null;
+          return (
+            <button
+              key={key}
+              onClick={() => setActiveTab(key)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-t text-sm font-medium transition-colors ${
+                activeTab === key
+                  ? "bg-gray-800 text-white border-t border-l border-r border-gray-700"
+                  : "text-gray-500 hover:text-gray-300 hover:bg-gray-800/50"
+              }`}
+            >
+              <Icon size={14} className="flex-shrink-0" />
+              <span className="hidden sm:inline">{label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="bg-gray-800/50 rounded-b rounded-r border border-gray-700/50 p-4">
+        {activeEntries.map((entry) => {
+          const val = displayValue(entry.key);
+          const isChanged = changed(entry.key);
+          const isSaving = saving[entry.key];
 
           return (
             <div
-              key={prefix}
-              className="bg-gray-800/50 rounded-xl border border-gray-700/50 overflow-hidden transition-colors hover:border-gray-600/50"
+              key={entry.key}
+              className="flex items-start justify-between gap-4 py-2.5 border-b border-gray-700/30 last:border-0"
             >
-              <button
-                onClick={() => toggleCategory(prefix)}
-                className="w-full flex items-center gap-2.5 px-4 py-3 bg-gray-800/80 border-b border-gray-700/30 text-left"
-              >
-                <Icon size={15} className="text-blue-400 flex-shrink-0" />
-                <span className="text-sm font-semibold text-gray-200">{label}</span>
-                <span className="text-[10px] text-gray-600 ml-auto">
-                  {groupEntries.length} setting{groupEntries.length > 1 ? "s" : ""}
-                </span>
-                <span className={`text-gray-500 text-xs transition-transform ${isOpen ? "rotate-0" : "-rotate-90"}`}>
-                  ▼
-                </span>
-              </button>
-
-              {isOpen && (
-                <div className="p-4 space-y-2.5">
-                  {groupEntries.map((entry) => {
-                    const val = displayValue(entry.key);
-                    const isChanged = changed(entry.key);
-                    const isSaving = saving[entry.key];
-
-                    return (
-                      <div key={entry.key} className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="text-[13px] text-gray-200">{entry.label}</div>
-                          {entry.description && (
-                            <div className="text-[11px] text-gray-500 mt-0.5">{entry.description}</div>
-                          )}
-                          <div className="text-[10px] text-gray-700 font-mono mt-0.5">{entry.key}</div>
-                        </div>
-                        <div className="flex-shrink-0">
-                          {entry.type === "toggle" ? (
-                            <button
-                              onClick={() => {
-                                const v = String(val) === "true" ? "false" : "true";
-                                apiClient.patch("/system/config", null, { params: { key: entry.key, value: v } }).then(() => {
-                                  setConfigs((prev) => ({ ...prev, [entry.key]: v }));
-                                });
-                              }}
-                              className={`relative w-9 h-5 rounded-full transition-colors ${
-                                String(val) === "true" ? "bg-blue-600" : "bg-gray-600"
-                              }`}
-                            >
-                              <span
-                                className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
-                                  String(val) === "true" ? "left-4" : "left-0.5"
-                                }`}
-                              />
-                            </button>
-                          ) : (
-                            <div className="flex items-center gap-1.5">
-                              <input
-                                type={entry.type === "number" ? "number" : "text"}
-                                value={val}
-                                onChange={(e) => setEditing((prev) => ({ ...prev, [entry.key]: e.target.value }))}
-                                min={entry.type === "number" ? 0 : undefined}
-                                className="w-36 px-2 py-1 bg-gray-700/70 border border-gray-600 rounded text-[13px] text-white outline-none focus:border-blue-500"
-                              />
-                              {isChanged && (
-                                <button
-                                  onClick={() => save(entry.key)}
-                                  disabled={isSaving}
-                                  className="p-1 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50"
-                                >
-                                  {isSaving ? <RotateCw size={13} className="animate-spin" /> : <Save size={13} />}
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  {prefix === "notification." && (
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] text-gray-200">{entry.label}</div>
+                {entry.description && (
+                  <div className="text-[11px] text-gray-500 mt-0.5">{entry.description}</div>
+                )}
+                <div className="text-[10px] text-gray-700 font-mono mt-0.5">{entry.key}</div>
+              </div>
+              <div className="flex-shrink-0">
+                {entry.type === "toggle" ? (
+                  <button
+                    onClick={() => {
+                      const v = String(val) === "true" ? "false" : "true";
+                      apiClient.patch("/system/config", null, { params: { key: entry.key, value: v } }).then(() => {
+                        setConfigs((prev) => ({ ...prev, [entry.key]: v }));
+                      });
+                    }}
+                    className={`relative w-9 h-5 rounded-full transition-colors ${
+                      String(val) === "true" ? "bg-blue-600" : "bg-gray-600"
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                        String(val) === "true" ? "left-4" : "left-0.5"
+                      }`}
+                    />
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type={entry.type === "number" ? "number" : "text"}
+                      value={val}
+                      onChange={(e) => setEditing((prev) => ({ ...prev, [entry.key]: e.target.value }))}
+                      min={entry.type === "number" ? 0 : undefined}
+                      className="w-44 px-2 py-1 bg-gray-700/70 border border-gray-600 rounded text-[13px] text-white outline-none focus:border-blue-500"
+                    />
                     <button
-                      onClick={testNotification}
-                      disabled={testing}
-                      className="mt-2 flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded text-xs text-gray-200"
+                      onClick={() => save(entry.key)}
+                      disabled={isSaving || !isChanged}
+                      className="p-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-30 disabled:hover:bg-blue-600 transition-opacity"
+                      title="Save"
                     >
-                      <Bell size={11} /> {testing ? "Testing..." : "Test Notification"}
+                      {isSaving ? <RotateCw size={13} className="animate-spin" /> : <Save size={13} />}
                     </button>
-                  )}
-                </div>
-              )}
+                  </div>
+                )}
+              </div>
             </div>
           );
         })}
+
+        {activeEntries.length === 0 && (
+          <p className="text-sm text-gray-500 text-center py-6">No settings in this category</p>
+        )}
+
+        {activeTab === "notification." && (
+          <div className="mt-3 pt-3 border-t border-gray-700/30">
+            <button
+              onClick={testNotification}
+              disabled={testing}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded text-xs text-gray-200"
+            >
+              <Bell size={11} /> {testing ? "Testing..." : "Test Notification"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

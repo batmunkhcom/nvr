@@ -71,12 +71,12 @@ export default function Sidebar() {
       </nav>
 
       {!collapsed && (
-        <div className="p-2 border-t border-gray-800 text-[10px] text-gray-600 space-y-0.5">
+        <div className="p-2 border-t border-gray-800 text-[10px] text-gray-500 space-y-0.5">
           <a
             href="https://github.com/batmunkhcom/nvr"
             target="_blank"
             rel="noopener"
-            className="flex items-center gap-1.5 px-2 py-1 hover:text-gray-400 rounded"
+            className="flex items-center gap-1.5 px-2 py-1 hover:text-gray-200 rounded transition-colors"
           >
             <BookOpen size={11} /> About
           </a>
@@ -84,7 +84,7 @@ export default function Sidebar() {
             href="https://github.com/batmunkhcom/nvr#readme"
             target="_blank"
             rel="noopener"
-            className="flex items-center gap-1.5 px-2 py-1 hover:text-gray-400 rounded"
+            className="flex items-center gap-1.5 px-2 py-1 hover:text-gray-200 rounded transition-colors"
           >
             <ExternalLink size={11} /> Docs
           </a>
@@ -92,13 +92,13 @@ export default function Sidebar() {
             href="/docs"
             target="_blank"
             rel="noopener"
-            className="flex items-center gap-1.5 px-2 py-1 hover:text-gray-400 rounded"
+            className="flex items-center gap-1.5 px-2 py-1 hover:text-gray-200 rounded transition-colors"
           >
             <Code size={11} /> API Docs
           </a>
-          <div className="px-2 pt-1 text-gray-700 leading-tight">
+          <div className="px-2 pt-1 text-gray-500 leading-tight">
             mBm NVR System v0.2<br />
-            <span className="text-gray-800">mBm TECHNOLOGY &copy; 2025</span>
+            <span className="text-gray-600">mBm TECHNOLOGY since &copy; 2023</span>
           </div>
         </div>
       )}

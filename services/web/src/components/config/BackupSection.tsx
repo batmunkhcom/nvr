@@ -12,7 +12,7 @@ export default function BackupSection() {
     setExporting(true);
     try {
       const [cameras, config, locations, schedules, users] = await Promise.all([
-        apiClient.get("/cameras?per_page=1000"),
+        apiClient.get("/cameras?per_page=100"),
         apiClient.get("/system/config"),
         apiClient.get("/locations"),
         apiClient.get("/recording-schedules"),
@@ -22,11 +22,11 @@ export default function BackupSection() {
         version: "1.0",
         exported_at: new Date().toISOString(),
         data: {
-          cameras: cameras.data?.data || cameras.data || [],
-          config: config.data?.data || config.data || {},
-          locations: locations.data?.data || locations.data || [],
-          schedules: schedules.data?.data || schedules.data || [],
-          users: users.data?.data || users.data || [],
+          cameras: cameras.data?.data || [],
+          config: config.data?.data || {},
+          locations: locations.data?.data || [],
+          schedules: schedules.data?.data || [],
+          users: users.data?.data || [],
         },
       };
       const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
