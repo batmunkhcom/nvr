@@ -3,6 +3,7 @@ import { useCameraMutations } from "../../hooks/useCameras";
 import type { Camera } from "../../types/camera";
 import LocationSelect from "./LocationSelect";
 import StorageBackendSelect from "./StorageBackendSelect";
+import ZoneEditor, { type AiZone } from "./ZoneEditor";
 
 interface Props {
   open: boolean;
@@ -27,6 +28,7 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
   const [motionSource, setMotionSource] = useState("server");
   const [aiSensitivity, setAiSensitivity] = useState("medium");
   const [aiConfidence, setAiConfidence] = useState("0.5");
+  const [aiZones, setAiZones] = useState<AiZone[]>([]);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -47,6 +49,12 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
       setMotionSource(camera.motion_source || "server");
       setAiSensitivity(camera.ai_sensitivity || "medium");
       setAiConfidence(String(camera.ai_min_confidence ?? 0.5));
+      setAiZones(
+        (camera.ai_zones || []).map((z) => ({
+          name: (z as AiZone).name || "Zone",
+          points: z.points,
+        }))
+      );
     }
   }, [camera]);
 
@@ -75,6 +83,7 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
         motion_source: motionSource,
         ai_sensitivity: aiSensitivity,
         ai_min_confidence: parseFloat(aiConfidence) || 0.5,
+        ai_zones: aiZones,
       });
       onClose();
     } catch (err: unknown) {
@@ -250,6 +259,11 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
                 <p className="text-[11px] text-gray-500 mt-1">Minimum AI confidence to record an event. Higher = fewer false alarms; 50% is a good default.</p>
               </div>
             </div>
+            {motionSource === "server" && (
+              <div className="mt-3">
+                <ZoneEditor cameraId={camera.id} zones={aiZones} onChange={setAiZones} />
+              </div>
+            )}
           </div>
 
           <div className="flex gap-2 pt-2">

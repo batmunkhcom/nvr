@@ -26,6 +26,23 @@ POLL_INTERVAL = 15
 SHUTDOWN = asyncio.Event()
 
 _workers: dict[str, object] = {}
+_signatures: dict[str, tuple] = {}
+
+
+def _signature(cam: dict) -> tuple:
+    """Config fingerprint — worker is recreated when this changes."""
+    return (
+        cam["stream_sub_uri"],
+        cam["stream_main_uri"],
+        json.dumps(cam["ai_objects"], sort_keys=True),
+        cam["ai_sensitivity"],
+        cam["ai_min_confidence"],
+        json.dumps(cam["ai_zones"]),
+        cam["motion_source"],
+        cam["onvif_events_service_url"],
+        cam["ai_enabled"],
+        cam.get("recording_mode"),
+    )
 
 
 async def _reconcile() -> None:
@@ -39,16 +56,24 @@ async def _reconcile() -> None:
     desired = {c["id"] for c in cameras}
     for cam_id in set(_workers) - desired:
         worker = _workers.pop(cam_id)
+        _signatures.pop(cam_id, None)
         await worker.stop()
         logger.info("ai_worker_removed", camera_id=cam_id)
 
     for cam in cameras:
+        sig = _signature(cam)
         if cam["id"] in _workers:
-            continue
+            if _signatures.get(cam["id"]) == sig:
+                continue
+            # config changed (zones, objects, stream...) -> recreate worker
+            await _workers.pop(cam["id"]).stop()
+            _signatures.pop(cam["id"], None)
+            logger.info("ai_worker_reloading", camera=cam["name"])
         worker = _build_worker(cam)
         if worker is None:
             continue
         _workers[cam["id"]] = worker
+        _signatures[cam["id"]] = sig
         await worker.start()
         logger.info("ai_worker_added", camera=cam["name"], camera_id=cam["id"])
 
