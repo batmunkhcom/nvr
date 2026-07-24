@@ -1,7 +1,6 @@
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState } from "react";
 import Hls from "hls.js";
-import { Volume2, VolumeX, ZoomIn, ZoomOut, Download } from "lucide-react";
-import { useVideoZoom } from "../../hooks/useVideoZoom";
+import { Volume2, VolumeX, Download } from "lucide-react";
 
 interface Props {
   src: string;
@@ -20,20 +19,12 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
   const videoRef = useRef<HTMLVideoElement>(null);
   const [speed, setSpeed] = useState(1);
   const [muted, setMuted] = useState(true);
-  const { scale, zoomIn, zoomOut, reset, transformStyle, onWheel, onMouseDown, onMouseMove, onMouseUp, onDoubleClick } = useVideoZoom();
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     video.playbackRate = speed;
   }, [speed]);
-
-  const toggleMute = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.muted = !video.muted;
-    setMuted(video.muted);
-  }, []);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -79,33 +70,18 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
         poster={poster}
         className={`w-full bg-black rounded ${className}`}
         playsInline
-        style={transformStyle}
-        onWheel={onWheel}
-        onMouseDown={onMouseDown}
-        onMouseMove={onMouseMove}
-        onMouseUp={onMouseUp}
-        onDoubleClick={onDoubleClick}
       />
       <div className="flex items-center gap-1 mt-2 flex-wrap">
-        <button onClick={toggleMute}
+        <button onClick={() => {
+          const video = videoRef.current;
+          if (!video) return;
+          video.muted = !video.muted;
+          setMuted(video.muted);
+        }}
           className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white mr-1"
           title={muted ? "Unmute" : "Mute"}>
           {muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
         </button>
-        {scale > 1 && (
-          <button onClick={reset}
-            className="px-2 py-0.5 rounded bg-blue-600 text-white text-xs hover:bg-blue-500 mr-1">
-            {scale.toFixed(1)}x
-          </button>
-        )}
-        <button onClick={zoomOut} disabled={scale <= 1}
-          className="p-1 rounded bg-gray-800 hover:bg-gray-700 disabled:opacity-30 text-gray-400 hover:text-white mr-1"
-          title="Zoom out">
-          <ZoomOut size={14} /></button>
-        <button onClick={zoomIn} disabled={scale >= 4}
-          className="p-1 rounded bg-gray-800 hover:bg-gray-700 disabled:opacity-30 text-gray-400 hover:text-white mr-1"
-          title="Zoom in">
-          <ZoomIn size={14} /></button>
         {onDownload && (
           <button onClick={onDownload}
             className="p-1 rounded bg-gray-800 hover:bg-indigo-600 text-gray-400 hover:text-white mr-1"
