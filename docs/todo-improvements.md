@@ -102,13 +102,22 @@
 
 ---
 
+## Phase 7 — Motion-only бичлэг + AI zones ✅ (2026-07-24)
+
+- [x] **7.1** AI engine motion publisher: motion state → Redis `nvr:motion` (өөрчлөлт + 30с heartbeat); motion-only sampler горим (AI унтраалттай motion-камеруудад); ONVIF subscriber ч нийтлэдэг
+- [x] **7.2** Recording engine `MotionRecorderController`: motion active → бичлэг эхлэх, 30с дараалангүй → зогсоох (`recording.motion_stop_delay_s`), шинэ motion → stop цуцлагдана. Continuous-аас тусдаа registry
+- [x] **7.3** Catalog `recording_type='motion'` тэмдэглэлт; analytics Decimal баг зассан
+- [x] **7.4** Live баталгаажуулалт: хөдөлгөөнтэй камер бичнэ, хөдөлгөөнгүй камер бичихгүй, 30с дараа зогсоно, сэргэхэд үргэлжилнэ ✅
+- [x] **7.5** AI zones backend: polygon шүүлтүүр (bbox bottom-center zone-д байх ёстой, cv2.pointPolygonTest); config signature-аар worker auto-reload (15с)
+- [x] **7.6** Zone editor UI: snapshot дээр polygon зурах (click → цэг, эхний цэг дээр дарахад хаагдана), олон zone, нэрлэх/устгах → CameraEditDialog-д
+- [x] **7.7** Live баталгаажуулалт: булангийн zone тавихад зам дээрх машин танихаа больсон (motion хэвээр), zone устгахад сэргэсэн ✅
+- [x] **7.8** Тест: motion controller 4 тест + zone filter 5 тест (64 backend + 34 frontend бүгд pass)
+
 ## Үлдэх backlog (дараагийн ажил)
 
-- [ ] Motion-only бичлэг (AI event-тэй холбосон) — одоо continuous л ажилладаг
-- [ ] AI zones (polygon) UI
 - [ ] Telegram/webhook мэдэгдэл идэвхжүүлэлт (notification_service бэлэн)
 - [ ] Storage backend mount-ууд (NFS/S3) — recordings volume-г том диск рүү зөөх
-- [ ] Дискийг физик өргөтгөх (одоо 29GB — ~0.5 хоногийн бичлэг л багтана; 26GB/хоног хэрэглээтэй)
+- [ ] Дискийг физик өргөтгөх (одоо 29GB; motion-бичлэгээр хэрэглээ 26GB/хоног-оос эрс буурсан)
 
 ---
 
