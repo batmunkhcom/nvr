@@ -18,11 +18,13 @@ from nvr_common.circuit_breaker import CircuitBreaker
 logger = structlog.get_logger()
 
 MEDIAMTX_RTSP_HOST = os.environ.get("MEDIAMTX_RTSP_HOST", "nvr-mediamtx")
+MEDIAMTX_API_URL = os.environ.get("MEDIAMTX_API_URL", "http://nvr-mediamtx:9997")
 FFMPEG_PATH = os.environ.get("FFMPEG_PATH", "ffmpeg")
 TRANSPORT_ORDER = ["tcp", "udp", "http"]
 RESTART_COOLDOWN = 600
 MEMORY_LIMIT_MB = 1024
 HEARTBEAT_TTL = 120
+IDLE_TIMEOUT_S = int(os.environ.get("STREAM_IDLE_TIMEOUT_S", "600"))
 
 _instance_count: int = 0
 
@@ -36,6 +38,7 @@ class StreamManager:
     _processes: dict[str, asyncio.subprocess.Process] = {}  # noqa: RUF012
     _monitors: dict[str, asyncio.Task] = {}  # noqa: RUF012
     _breakers: dict[str, CircuitBreaker] = {}  # noqa: RUF012
+    _last_reader_seen: dict[str, float] = {}  # noqa: RUF012
 
     @classmethod
     def _get_breaker(cls, camera_id: str) -> CircuitBreaker:
@@ -109,12 +112,13 @@ class StreamManager:
             )
             cls._processes[cid] = process
             breaker.reset()
+            cls._last_reader_seen[cid] = time.time()  # grace period for viewers to attach
 
             monitor = asyncio.create_task(cls._monitor(cid, process, stream_uri))
             cls._monitors[cid] = monitor
 
             logger.info("stream_connected", camera_id=cid, pid=process.pid, transport=transport)
-            logger.debug("ffmpeg_args", camera_id=cid, args=args[:2] + ["..."] + args[-3:])
+            logger.debug("ffmpeg_args", camera_id=cid, args=[*args[:2], "...", *args[-3:]])
         except Exception:
             logger.error("stream_connect_failed", camera_id=cid, exc_info=True)
             breaker.trip()
@@ -233,10 +237,45 @@ class StreamManager:
 
     @classmethod
     async def _run(cls) -> None:
-        """Main loop — heartbeat, periodic reconnects."""
+        """Main loop — heartbeat, idle stream reaping."""
         while cls._running:
             try:
                 await asyncio.sleep(HEARTBEAT_TTL)
             except asyncio.CancelledError:
                 break
             logger.debug("stream_manager_heartbeat", active_streams=len(cls._processes))
+            try:
+                await cls._reap_idle_streams()
+            except Exception:
+                logger.warning("idle_reaper_error", exc_info=True)
+
+    @classmethod
+    async def _reap_idle_streams(cls) -> None:
+        """Stop relays with zero MediaMTX readers for longer than IDLE_TIMEOUT_S.
+
+        Streams only consume CPU (transcode) while someone watches. Viewers
+        re-trigger start via the API when they return.
+        """
+        import httpx
+
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{MEDIAMTX_API_URL}/v3/paths/list")
+            if resp.status_code != 200:
+                return
+            items = resp.json().get("items") or []
+
+        now = time.time()
+        active_readers: dict[str, int] = {}
+        for item in items:
+            readers = item.get("readers") or []
+            active_readers[item.get("name", "")] = len(readers)
+
+        for cid in list(cls._processes):
+            if active_readers.get(cid, 0) > 0:
+                cls._last_reader_seen[cid] = now
+                continue
+            idle_for = now - cls._last_reader_seen.get(cid, now)
+            if idle_for > IDLE_TIMEOUT_S:
+                logger.info("stream_idle_stop", camera_id=cid, idle_s=int(idle_for))
+                await cls.disconnect(cid)
+                cls._last_reader_seen.pop(cid, None)

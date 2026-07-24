@@ -19,6 +19,7 @@ services:
     logging: *default-logging
     image: timescale/timescaledb:latest-pg16
     container_name: nvr-db
+    restart: unless-stopped
     ports:
       - "5432:5432"
     environment:
@@ -47,6 +48,7 @@ services:
     logging: *default-logging
     image: redis:7-alpine
     container_name: nvr-redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
@@ -63,6 +65,7 @@ services:
     logging: *default-logging
     image: minio/minio:latest
     container_name: nvr-minio
+    restart: unless-stopped
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -117,6 +120,7 @@ services:
       context: .
       dockerfile: docker/api/Dockerfile
     container_name: nvr-api
+    restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
@@ -173,6 +177,7 @@ services:
       context: .
       dockerfile: docker/stream-manager/Dockerfile
     container_name: nvr-stream-manager
+    restart: unless-stopped
     ports:
       - "8001:8001"
     environment:
@@ -214,6 +219,7 @@ services:
     logging: *default-logging
     image: bluenviron/mediamtx:latest
     container_name: nvr-mediamtx
+    restart: unless-stopped
     ports:
       - "8554:8554"
       - "8888:8888"
@@ -345,6 +351,7 @@ services:
       context: .
       dockerfile: docker/web/Dockerfile
     container_name: nvr-web
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:

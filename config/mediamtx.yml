@@ -5,5 +5,20 @@ hls: yes
 hlsAddress: :8888
 webrtc: yes
 webrtcAddress: :8889
+
+# Open internal access (LAN-only deployment): publish/read/playback/api without auth.
+# Tighten with real users when exposing beyond the trusted network.
+authMethod: internal
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+      - action: read
+      - action: playback
+      - action: api
+      - action: metrics
+
 paths:
   all:
