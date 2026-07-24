@@ -99,21 +99,32 @@ def test_confidence_valid_kept(sampler):
 def test_cooldown_first_detection_passes(sampler):
     s = _make_sampler(sampler)
     dets = [{"class": "car", "confidence": 0.9, "box": [0, 0, 10, 10]}]
-    assert len(s._apply_cooldown(dets)) == 1
+    assert len(s._apply_cooldown(dets, 640, 360)) == 1
 
 
-def test_cooldown_repeat_filtered(sampler):
+def test_cooldown_static_repeat_filtered(sampler):
+    """Static object (same position) is filtered within the cooldown window."""
     s = _make_sampler(sampler)
     dets = [{"class": "car", "confidence": 0.9, "box": [0, 0, 10, 10]}]
-    s._apply_cooldown(dets)
-    assert s._apply_cooldown(dets) == []  # within cooldown window
+    s._apply_cooldown(dets, 640, 360)
+    s._last_events["car"] = (s._last_events["car"][0] - sampler.MIN_EVENT_GAP_S - 1, *s._last_events["car"][1:])
+    assert s._apply_cooldown(dets, 640, 360) == []
+
+
+def test_cooldown_moved_object_is_new_event(sampler):
+    """Object that moved significantly counts as a new event."""
+    s = _make_sampler(sampler)
+    s._apply_cooldown([{"class": "car", "confidence": 0.9, "box": [0, 0, 10, 10]}], 640, 360)
+    s._last_events["car"] = (s._last_events["car"][0] - sampler.MIN_EVENT_GAP_S - 1, *s._last_events["car"][1:])
+    moved = [{"class": "car", "confidence": 0.9, "box": [300, 100, 310, 110]}]
+    assert len(s._apply_cooldown(moved, 640, 360)) == 1
 
 
 def test_cooldown_per_class(sampler):
     s = _make_sampler(sampler)
-    s._apply_cooldown([{"class": "car", "confidence": 0.9, "box": [0, 0, 10, 10]}])
+    s._apply_cooldown([{"class": "car", "confidence": 0.9, "box": [0, 0, 10, 10]}], 640, 360)
     other = [{"class": "person", "confidence": 0.9, "box": [0, 0, 10, 10]}]
-    assert len(s._apply_cooldown(other)) == 1  # different class not blocked
+    assert len(s._apply_cooldown(other, 640, 360)) == 1  # different class not blocked
 
 
 # ----------------------------------------------------------------------

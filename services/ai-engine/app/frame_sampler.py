@@ -21,7 +21,9 @@ from .detector import AIDetector, MotionDetector
 logger = structlog.get_logger()
 
 TARGET_FPS = 2
-COOLDOWN_SECONDS = 15
+STATIC_COOLDOWN_S = 300  # same object in same place -> 1 event per 5 min
+MIN_EVENT_GAP_S = 5  # never more than 1 event per class per 5s
+POSITION_TOLERANCE = 0.10  # normalized box-center movement = new object
 RECONNECT_BASE_S = 5
 RECONNECT_MAX_S = 120
 FRAME_WIDTH = 640
@@ -66,7 +68,8 @@ class FrameSampler:
         self._motion = MotionDetector(sensitivity=ai_sensitivity or "medium")
         self._event_callback = event_callback
         self._running = False
-        self._last_detection_at: dict[str, float] = {}
+        # class -> (last_event_ts, center_x_norm, center_y_norm)
+        self._last_events: dict[str, tuple[float, float, float]] = {}
         self._task: asyncio.Task | None = None
 
     async def start(self) -> None:
@@ -149,22 +152,43 @@ class FrameSampler:
                 for d in detections
                 if d["class"] in self.ai_objects and d["confidence"] >= self.ai_min_confidence
             ]
-            detections = self._apply_cooldown(detections)
+            detections = self._apply_cooldown(detections, frame.shape[1], frame.shape[0])
             if detections:
                 await self._persist(detections, frame, cv2)
 
             elapsed = asyncio.get_running_loop().time() - started
             await asyncio.sleep(max(0.05, frame_interval - elapsed))
 
-    def _apply_cooldown(self, detections: list[dict]) -> list[dict]:
-        """Keep only classes whose cooldown expired; mark them as fired now."""
+    def _apply_cooldown(self, detections: list[dict], frame_w: int, frame_h: int) -> list[dict]:
+        """Position-aware event dedup.
+
+        A detection is a NEW event when:
+        - the class has no recent event, or
+        - the object moved significantly (new arrival / object in motion).
+
+        A static object (parked car, standing person) re-fires at most once
+        per STATIC_COOLDOWN_S so events are not spammed.
+        """
         now_ts = datetime.now(UTC).timestamp()
         fresh = []
         for det in detections:
             cls = det["class"]
-            if now_ts - self._last_detection_at.get(cls, 0) >= COOLDOWN_SECONDS:
-                self._last_detection_at[cls] = now_ts
-                fresh.append(det)
+            box = det.get("box") or [0, 0, 0, 0]
+            cx = ((box[0] + box[2]) / 2) / max(frame_w, 1)
+            cy = ((box[1] + box[3]) / 2) / max(frame_h, 1)
+
+            last = self._last_events.get(cls)
+            if last is not None:
+                last_ts, last_cx, last_cy = last
+                gap = now_ts - last_ts
+                moved = abs(cx - last_cx) + abs(cy - last_cy) > POSITION_TOLERANCE
+                if gap < MIN_EVENT_GAP_S:
+                    continue
+                if not moved and gap < STATIC_COOLDOWN_S:
+                    continue
+
+            self._last_events[cls] = (now_ts, cx, cy)
+            fresh.append(det)
         return fresh
 
     async def _persist(self, detections: list[dict], frame: np.ndarray, cv2) -> None:
