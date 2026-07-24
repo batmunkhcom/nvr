@@ -3,12 +3,20 @@
 
 name: nvr
 
+# Default log rotation for all services — prevents disk fill on small volumes
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   # ============================================================================
   # Infrastructure
   # ============================================================================
 
   nvr-db:
+    logging: *default-logging
     image: timescale/timescaledb:latest-pg16
     container_name: nvr-db
     ports:
@@ -36,6 +44,7 @@ services:
           memory: "512M"
 
   nvr-redis:
+    logging: *default-logging
     image: redis:7-alpine
     container_name: nvr-redis
     ports:
@@ -51,6 +60,7 @@ services:
       - nvr-net
 
   nvr-minio:
+    logging: *default-logging
     image: minio/minio:latest
     container_name: nvr-minio
     ports:
@@ -72,6 +82,7 @@ services:
       - nvr-net
 
   nvr-mosquitto:
+    logging: *default-logging
     image: eclipse-mosquitto:2
     container_name: nvr-mosquitto
     ports:
@@ -83,6 +94,7 @@ services:
       - nvr-net
 
   nvr-chrony:
+    logging: *default-logging
     image: cturra/ntp:latest
     container_name: nvr-chrony
     ports:
@@ -100,6 +112,7 @@ services:
   # ============================================================================
 
   nvr-api:
+    logging: *default-logging
     build:
       context: .
       dockerfile: docker/api/Dockerfile
@@ -154,6 +167,7 @@ services:
           memory: "512M"
 
   nvr-stream-manager:
+    logging: *default-logging
     build:
       context: .
       dockerfile: docker/stream-manager/Dockerfile
@@ -196,6 +210,7 @@ services:
       - nvr-net
 
   nvr-mediamtx:
+    logging: *default-logging
     image: bluenviron/mediamtx:latest
     container_name: nvr-mediamtx
     ports:
@@ -210,6 +225,7 @@ services:
       - nvr-net
 
   nvr-recording-engine:
+    logging: *default-logging
     build:
       context: .
       dockerfile: docker/recording-engine/Dockerfile
@@ -247,6 +263,7 @@ services:
           memory: "2G"
 
   nvr-ai-engine:
+    logging: *default-logging
     build:
       context: .
       dockerfile: docker/ai-engine/Dockerfile
@@ -274,6 +291,7 @@ services:
           memory: "4G"
 
   nvr-mqtt-bridge:
+    logging: *default-logging
     build:
       context: .
       dockerfile: docker/mqtt-bridge/Dockerfile
@@ -292,6 +310,7 @@ services:
       - nvr-net
 
   nvr-nginx:
+    logging: *default-logging
     build:
       context: .
       dockerfile: docker/nginx/Dockerfile
@@ -307,6 +326,7 @@ services:
       - nvr-net
 
   nvr-web:
+    logging: *default-logging
     build:
       context: .
       dockerfile: docker/web/Dockerfile
