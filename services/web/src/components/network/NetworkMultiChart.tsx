@@ -10,6 +10,12 @@ import {
   Legend,
 } from "recharts";
 import type { OverlaySeries } from "../../types/network";
+const CAM_COLORS = [
+  "#3b82f6", "#ef4444", "#22c55e", "#f59e0b", "#8b5cf6",
+  "#ec4899", "#06b6d4", "#f97316", "#84cc16", "#6366f1",
+  "#14b8a6", "#e11d48", "#a855f7", "#64748b", "#0ea5e9",
+  "#d946ef", "#10b981", "#f43f5e", "#8b82f6", "#eab308",
+];
 
 interface Props {
   series: OverlaySeries[];
@@ -44,14 +50,14 @@ export default function NetworkMultiChart({ series, selectedId, height = 260 }: 
       .map(([time, vals]) => ({ time: fmtTime(time), ...vals }));
   }, [series]);
 
-  const camNames = useMemo(() => series.map((s) => s.camera_name), [series]);
-
-  const colorMap = useMemo(() => {
-    const m: Record<string, string> = {};
-    for (const s of series) {
-      m[s.camera_name] = s.color;
-    }
-    return m;
+  const camMeta = useMemo(() => {
+    return series.map((s, i) => ({
+      key: s.camera_id,
+      name: s.camera_name,
+      color: CAM_COLORS[i % CAM_COLORS.length],
+      location: s.location,
+      legendName: s.location ? `${s.camera_name} · ${s.location}` : s.camera_name,
+    }));
   }, [series]);
 
   return (
@@ -81,23 +87,18 @@ export default function NetworkMultiChart({ series, selectedId, height = 260 }: 
             }}
             labelStyle={{ color: "#D1D5DB" }}
           />
-          <Legend
-            wrapperStyle={{ fontSize: "10px" }}
-            onClick={(e: any) => {
-              /* allow toggling legend items */
-            }}
-          />
-          {camNames.map((name) => {
-            const isDimmed = selectedId != null && !series.some((s) => s.camera_name === name && s.camera_id === selectedId);
+          <Legend wrapperStyle={{ fontSize: "10px" }} />
+          {camMeta.map((meta) => {
+            const isDimmed = selectedId != null && meta.key !== selectedId;
             return (
               <Line
-                key={name}
+                key={meta.key}
                 type="monotone"
-                dataKey={name}
-                stroke={colorMap[name] || "#3b82f6"}
+                dataKey={meta.name}
+                stroke={meta.color}
                 strokeWidth={isDimmed ? 0.5 : 2}
                 dot={false}
-                name={name}
+                name={meta.legendName}
                 opacity={isDimmed ? 0.15 : 1}
                 activeDot={{ r: 3 }}
               />
