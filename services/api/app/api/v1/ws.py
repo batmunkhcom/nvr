@@ -12,6 +12,7 @@ router = APIRouter()
 @router.websocket("/api/v1/ws")
 async def ws_endpoint(ws: WebSocket):
     """Accept WebSocket connections with token auth via query param."""
+    await ws.accept()
     token = ws.query_params.get("token")
     if not token:
         await ws.close(code=4001, reason="Missing token")

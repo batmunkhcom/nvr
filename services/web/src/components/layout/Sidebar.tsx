@@ -1,7 +1,7 @@
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard, Video, Film, Bell, HardDrive,
-  MapPin, Clock, Users, Settings,
+  MapPin, Clock, Users, Settings, Wifi,
   ChevronsLeft, ChevronsRight,
   BookOpen, ExternalLink, Code, MessageSquare,
 } from "lucide-react";
@@ -15,16 +15,16 @@ export default function Sidebar() {
   const user = useAuthStore((s) => s.user);
 
   const navItems = [
-    { to: "/dashboard", icon: LayoutDashboard, key: "nav.dashboard" },
-    { to: "/cameras", icon: Video, key: "nav.cameras" },
-    { to: "/recordings", icon: Film, key: "nav.recordings" },
-    { to: "/events", icon: Bell, key: "nav.events" },
-    { to: "/storage", icon: HardDrive, key: "nav.storage" },
-    { to: "/locations", icon: MapPin, label: "Locations", admin: true },
-    { to: "/schedules", icon: Clock, label: "Schedules", admin: true },
-    { to: "/settings/users", icon: Users, label: "Users", admin: true },
-    { to: "/settings", icon: Settings, key: "nav.settings" },
-  ];
+     { to: "/dashboard", icon: LayoutDashboard, key: "nav.dashboard" },
+     { to: "/cameras", icon: Video, key: "nav.cameras" },
+     { to: "/network", icon: Wifi, key: "nav.network" },
+     { to: "/recordings", icon: Film, key: "nav.recordings" },
+     { to: "/events", icon: Bell, key: "nav.events" },
+     { to: "/storage", icon: HardDrive, key: "nav.storage" },
+     { to: "/locations", icon: MapPin, label: "Locations", admin: true },
+     { to: "/settings/users", icon: Users, label: "Users", admin: true },
+     { to: "/settings", icon: Settings, key: "nav.settings" },
+   ];
 
   return (
     <aside

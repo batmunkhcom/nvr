@@ -24,9 +24,19 @@ async def lifespan(app: FastAPI):
     await get_redis()
     from .services.health_check_loop import start_health_check, stop_health_check
 
+    # Initialize and start network monitor
+    from .services.network_monitor import network_monitor
+    from .services.network_alerts import network_alert_service
+    network_monitor.init(settings.database_url)
+    network_alert_service.init(settings.database_url)
+    await network_monitor.start()
+    logger.info("network_monitor_initialized")
+
     start_health_check()
     yield
     stop_health_check()
+    await network_monitor.stop()
+    logger.info("network_monitor_stopped")
     await close_redis()
     await engine.dispose()
     logger.info("app_stopped")

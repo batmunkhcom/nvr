@@ -12,7 +12,8 @@ import structlog
 logger = structlog.get_logger()
 
 STREAM_DICT: dict[str, dict[str, Any]] = {}
-MEDIAMTX_RTSP = os.environ.get("MEDIAMTX_RTSP", "rtsp://127.0.0.1:8554")
+MEDIAMTX_RTSP = os.environ.get("MEDIAMTX_RTSP", "rtsp://nvr-mediamtx:8554")
+_MEDIAMTX_API = os.environ.get("MEDIAMTX_API", "http://nvr-mediamtx:9997")
 _STREAM_MANAGER_URL = os.environ.get("STREAM_MANAGER_URL", "http://host.docker.internal:8001")
 
 
@@ -24,8 +25,8 @@ async def _call_stream_manager(
             resp = await client.post(f"{_STREAM_MANAGER_URL}{endpoint}", json=payload)
         else:
             resp = await client.get(f"{_STREAM_MANAGER_URL}{endpoint}", params=payload)
-        resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+        return data
 
 
 async def start_relay(
@@ -33,12 +34,19 @@ async def start_relay(
     rtsp_uri: str,
     rtsp_transport: str = "tcp",
     relay_target: str | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
     cid = str(relay_key)
     target = relay_target or MEDIAMTX_RTSP
 
-    if cid in STREAM_DICT and STREAM_DICT[cid].get("running"):
-        return {"hls_url": f"/hls/{cid}/index.m3u8", "status": "already_running"}
+    if not force:
+        try:
+            status_resp = await _call_stream_manager("GET", "/relay/status", {"relay_key": cid})
+            if status_resp.get("running"):
+                STREAM_DICT[cid] = {"running": True, "delegated": True}
+                return {"hls_url": f"/hls/{cid}/index.m3u8", "status": "already_running"}
+        except Exception:
+            pass
 
     logger.info("relay_delegating", camera_id=cid, rtsp_uri=rtsp_uri)
 
@@ -49,7 +57,16 @@ async def start_relay(
             "transport": rtsp_transport,
             "target": target,
         })
-        STREAM_DICT[cid] = {"running": True, "delegated": True}
+        status = result.get("status", "")
+        if status == "cooldown":
+            STREAM_DICT.pop(cid, None)
+            return {
+                "hls_url": None,
+                "status": "cooldown",
+                "cooldown_remaining_s": result.get("cooldown_remaining_s", 0),
+            }
+        if status in ("started", "pending", "already_running"):
+            STREAM_DICT[cid] = {"running": True, "delegated": True}
         return result
     except Exception as exc:
         logger.error("relay_delegate_failed", camera_id=cid, error=str(exc))
@@ -79,7 +96,7 @@ async def relay_status(relay_key: str | uuid.UUID) -> dict[str, Any]:
 async def _check_mediamtx_path(cid: str) -> bool:
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.get(f"http://127.0.0.1:9997/v3/paths/get/{cid}", timeout=2)
+            resp = await client.get(f"{_MEDIAMTX_API}/v3/paths/get/{cid}", timeout=2)
             if resp.status_code == 200:
                 return bool(resp.json().get("ready"))
     except Exception as exc:

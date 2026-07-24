@@ -3,15 +3,16 @@
     "title": "NVR Систем",
     "loading": "Ачаалж байна..."
   },
-  "nav": {
-    "dashboard": "Хянах самбар",
-    "cameras": "Камерууд",
-    "live": "Шууд үзэх",
-    "recordings": "Бичлэгүүд",
-    "events": "Үйл явдлууд",
-    "storage": "Хадгалалт",
-    "settings": "Тохиргоо"
-  },
+    "nav": {
+      "dashboard": "Хянах самбар",
+      "cameras": "Камерууд",
+      "live": "Шууд үзэх",
+      "recordings": "Бичлэгүүд",
+      "events": "Үйл явдлууд",
+      "storage": "Хадгалалт",
+      "network": "Сүлжээ",
+      "settings": "Тохиргоо"
+     },
   "auth": {
     "login": "Нэвтрэх",
     "logout": "Гарах",

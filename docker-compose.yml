@@ -129,7 +129,8 @@ services:
       S3_SECURE: ${S3_SECURE}
       DISCOVERY_SUBNETS: ${DISCOVERY_SUBNETS}
       NVR_ENCRYPTION_KEY: ${NVR_ENCRYPTION_KEY}
-      MEDIAMTX_RTSP: ${MEDIAMTX_RTSP:-rtsp://host.docker.internal:8554}
+      MEDIAMTX_RTSP: ${MEDIAMTX_RTSP:-rtsp://nvr-mediamtx:8554}
+      STREAM_MANAGER_URL: http://nvr-stream-manager:8001
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -157,16 +158,17 @@ services:
       context: .
       dockerfile: docker/stream-manager/Dockerfile
     container_name: nvr-stream-manager
-    network_mode: host
+    ports:
+      - "8001:8001"
     environment:
-      DB_HOST: localhost
+      DB_HOST: nvr-db
       DB_PORT: ${POSTGRES_PORT}
       DB_NAME: ${POSTGRES_DB}
       DB_USER: ${POSTGRES_USER}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
-      REDIS_HOST: localhost
+      REDIS_HOST: nvr-redis
       REDIS_PORT: ${REDIS_PORT}
-      API_URL: http://localhost:8000
+      API_URL: http://nvr-api:8000
       VENDOR_PATTERNS_PATH: /app/config/vendor_patterns.yml
       DISCOVERY_SUBNETS: ${DISCOVERY_SUBNETS}
       FFMPEG_PATH: ${FFMPEG_PATH}
@@ -190,14 +192,22 @@ services:
         reservations:
           cpus: "1"
           memory: "1G"
+    networks:
+      - nvr-net
 
   nvr-mediamtx:
     image: bluenviron/mediamtx:latest
     container_name: nvr-mediamtx
-    network_mode: host
+    ports:
+      - "8554:8554"
+      - "8888:8888"
+      - "8889:8889"
+      - "9997:9997"
     volumes:
       - ./config/mediamtx.yml:/mediamtx.yml
       - mediamtx_hls:/tmp/hls
+    networks:
+      - nvr-net
 
   nvr-recording-engine:
     build:
@@ -306,7 +316,7 @@ services:
     environment:
       VITE_API_URL: http://nvr-api:8000
       VITE_WS_URL: ws://nvr-api:8000
-      MEDIAMTX_HLS_URL: ${MEDIAMTX_HLS_URL:-http://host.docker.internal:8888}
+      MEDIAMTX_HLS_URL: ${MEDIAMTX_HLS_URL:-http://nvr-mediamtx:8888}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

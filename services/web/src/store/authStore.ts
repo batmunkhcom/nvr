@@ -15,10 +15,33 @@ interface AuthStore {
   logout: () => void;
 }
 
+function decodeTokenPayload(token: string): User | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(atob(parts[1]));
+    if (payload.sub && payload.username && payload.role) {
+      return { id: payload.sub, username: payload.username, role: payload.role };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function getInitialState() {
+  const token = localStorage.getItem("access_token");
+  if (token) {
+    const user = decodeTokenPayload(token);
+    if (user) {
+      return { user, accessToken: token, isAuthenticated: true };
+    }
+  }
+  return { user: null, accessToken: null, isAuthenticated: false };
+}
+
 export const useAuthStore = create<AuthStore>((set) => ({
-  user: null,
-  accessToken: localStorage.getItem("access_token"),
-  isAuthenticated: !!localStorage.getItem("access_token"),
+  ...getInitialState(),
 
   login: async (username: string, password: string) => {
     const res = await fetch("/api/v1/auth/login", {

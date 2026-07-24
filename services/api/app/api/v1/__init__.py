@@ -8,6 +8,7 @@ from .cameras import router as cameras_router
 from .events import router as events_router
 from .live import router as live_router
 from .locations import router as locations_router
+from .network import router as network_router
 from .recording_schedules import router as recording_schedules_router
 from .recordings import router as recordings_router
 from .snapshot import router as snapshot_router
@@ -23,6 +24,7 @@ router.include_router(cameras_router)
 router.include_router(events_router)
 router.include_router(live_router)
 router.include_router(locations_router)
+router.include_router(network_router, tags=["network"])
 router.include_router(recording_schedules_router)
 router.include_router(recordings_router)
 router.include_router(snapshot_router)

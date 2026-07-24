@@ -1,10 +1,11 @@
-import { useState, useMemo, useCallback, useRef, type DragEvent } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect, type DragEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCameras, useCameraMutations } from "../../hooks/useCameras";
 import { useUiPreference } from "../../hooks/useUiPreference";
 import { useEvents } from "../../hooks/useEvents";
 import { Camera } from "../../types/camera";
-import { LayoutGrid, Play, MoreVertical, Wifi, Pencil, Trash2, MonitorPlay, GripVertical } from "lucide-react";
+import { LayoutGrid, Play, MoreVertical, Wifi, Pencil, Trash2, MonitorPlay, GripVertical, X, Loader2, RefreshCw } from "lucide-react";
+import { useStreamPlayer, type StreamType } from "../../hooks/useStreamPlayer";
 import MiniLivePreview from "./MiniLivePreview";
 import EmptyState from "../ui/EmptyState";
 import { useConfirm } from "../ui/ConfirmDialog";
@@ -23,6 +24,25 @@ const statusBorder: Record<string, string> = {
   unknown: "border-gray-700 group-hover:border-gray-500",
 };
 
+const LOCATION_COLORS = [
+  "bg-blue-900/50 text-blue-400",
+  "bg-green-900/50 text-green-400",
+  "bg-yellow-900/50 text-yellow-400",
+  "bg-purple-900/50 text-purple-400",
+  "bg-pink-900/50 text-pink-400",
+  "bg-teal-900/50 text-teal-400",
+  "bg-orange-900/50 text-orange-400",
+  "bg-cyan-900/50 text-cyan-400",
+  "bg-red-900/50 text-red-400",
+  "bg-indigo-900/50 text-indigo-400",
+];
+
+function locationColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  return LOCATION_COLORS[Math.abs(hash) % LOCATION_COLORS.length];
+}
+
 const COLUMN_OPTIONS = [1, 2, 3, 4] as const;
 
 const gridColsClass: Record<number, string> = {
@@ -40,6 +60,7 @@ function CameraTile({
   onDragOver,
   onDrop,
   isDragging,
+  onExpand,
 }: {
   camera: Camera;
   index: number;
@@ -48,14 +69,31 @@ function CameraTile({
   onDragOver: (e: DragEvent, idx: number) => void;
   onDrop: (e: DragEvent, idx: number) => void;
   isDragging: boolean;
+  onExpand: (camera: Camera) => void;
 }) {
   const navigate = useNavigate();
   const { deleteCamera, testCamera } = useCameraMutations();
   const [menuOpen, setMenuOpen] = useState(false);
   const [testing, setTesting] = useState(false);
+  const clickRef = useRef(0);
   const dot = statusColors[camera.status] || statusColors.unknown;
   const border = hasMotion ? "border-red-500" : (statusBorder[camera.status] || statusBorder.unknown);
   const hasStream = !!(camera.stream_main_uri || camera.stream_sub_uri);
+
+  const handleClick = () => {
+    clickRef.current += 1;
+    const clicks = clickRef.current;
+    setTimeout(() => {
+      if (clickRef.current === clicks) {
+        if (clicks === 1) {
+          onExpand(camera);
+        } else if (clicks >= 2) {
+          navigate(`/live/${camera.id}`);
+        }
+        clickRef.current = 0;
+      }
+    }, 280);
+  };
 
   const handleTest = async () => {
     setMenuOpen(false);
@@ -76,7 +114,7 @@ function CameraTile({
   return (
     <div
       title={camera.connection_error || undefined}
-      onClick={() => navigate(`/live/${camera.id}`)}
+      onClick={handleClick}
       className={`aspect-video bg-gray-800 rounded border-2 ${border} ${hasMotion ? "animate-motion-flash" : ""} relative group overflow-hidden transition-all duration-200 ${isDragging ? "opacity-30 scale-95" : ""}`}
     >
       <div
@@ -106,7 +144,7 @@ function CameraTile({
         <span className="text-xs text-gray-200 truncate">{camera.name}</span>
         <span className="text-[10px] text-gray-500 flex-shrink-0">(cam{index + 1})</span>
         {camera.location_name && (
-          <span className="text-[10px] bg-blue-900/50 text-blue-400 px-1.5 py-0.5 rounded truncate max-w-[80px]">
+          <span className={`text-[10px] px-1.5 py-0.5 rounded truncate max-w-[80px] ${locationColor(camera.location_name)}`}>
             {camera.location_name}
           </span>
         )}
@@ -177,6 +215,7 @@ export default function CameraGrid() {
   const dragIndexRef = useRef<number | null>(null);
   const camerasRef = useRef(cameras);
   camerasRef.current = cameras;
+  const [expandedCamera, setExpandedCamera] = useState<Camera | null>(null);
 
   const motionCameraIds = useMemo(() => {
     const now = Date.now();
@@ -272,8 +311,80 @@ export default function CameraGrid() {
             onDragOver={handleDragOver}
             onDrop={handleDrop}
             isDragging={dragIndex === i}
+            onExpand={setExpandedCamera}
           />
         ))}
+      </div>
+
+      {expandedCamera && (
+        <ExpandedView camera={expandedCamera} onClose={() => setExpandedCamera(null)} />
+      )}
+    </div>
+  );
+}
+
+function ExpandedView({ camera, onClose }: { camera: Camera; onClose: () => void }) {
+  const [streamType, setStreamType] = useState<StreamType>("main");
+  const { state, retrySec, attachVideo, startStream } = useStreamPlayer({ cameraId: camera.id, streamType });
+
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center" onClick={onClose}>
+      <div className="relative w-full max-w-5xl mx-4" onClick={(e) => e.stopPropagation()}>
+        <button onClick={onClose} className="absolute -top-10 right-0 text-gray-400 hover:text-white">
+          <X size={24} />
+        </button>
+        <div className="bg-gray-900 rounded overflow-hidden">
+          <div className="relative aspect-video bg-black">
+            <video ref={attachVideo} muted autoPlay playsInline
+              className={`absolute inset-0 w-full h-full object-contain ${state === "playing" ? "" : "hidden"}`} />
+            {state === "connecting" && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+                <Loader2 size={32} className="text-gray-400 animate-spin" />
+                <span className="text-sm text-gray-400">Starting {streamType} stream...</span>
+              </div>
+            )}
+            {state === "loading" && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+                <Loader2 size={32} className="text-blue-400 animate-spin" />
+                <span className="text-sm text-gray-400">Buffering...</span>
+              </div>
+            )}
+            {state === "retrying" && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+                <span className="text-sm text-gray-400">Retrying in {retrySec}s...</span>
+                <button onClick={(e) => { e.stopPropagation(); startStream(); }}
+                  className="flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300">
+                  <RefreshCw size={14} /> Retry Now
+                </button>
+              </div>
+            )}
+            {state === "error" && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+                <span className="text-sm text-gray-400">Stream unavailable</span>
+                <button onClick={(e) => { e.stopPropagation(); startStream(); }}
+                  className="flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300">
+                  <RefreshCw size={14} /> Retry Now
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="px-4 py-2 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium text-gray-200">{camera.name}</span>
+              <button onClick={(e) => { e.stopPropagation(); setStreamType((p) => (p === "main" ? "sub" : "main")); }}
+                className="text-[10px] px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-300">
+                {streamType === "main" ? "MAIN STREAM" : "SUB STREAM"}
+              </button>
+            </div>
+            <span className="text-xs text-gray-500">{camera.ip_address}</span>
+          </div>
+        </div>
       </div>
     </div>
   );

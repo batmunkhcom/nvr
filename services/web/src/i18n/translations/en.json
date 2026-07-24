@@ -3,15 +3,16 @@
     "title": "mBm NVR System",
     "loading": "Loading..."
   },
-  "nav": {
-    "dashboard": "Dashboard",
-    "cameras": "Cameras",
-    "live": "Live View",
-    "recordings": "Recordings",
-    "events": "Events",
-    "storage": "Storage",
-    "settings": "Settings"
-  },
+    "nav": {
+      "dashboard": "Dashboard",
+      "cameras": "Cameras",
+      "live": "Live View",
+      "recordings": "Recordings",
+      "events": "Events",
+      "storage": "Storage",
+      "network": "Network",
+      "settings": "Settings"
+    },
   "auth": {
     "login": "Log in",
     "logout": "Log out",

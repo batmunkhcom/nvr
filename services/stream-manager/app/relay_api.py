@@ -17,18 +17,34 @@ async def relay_start(request: web.Request) -> web.Response:
     transport = body.get("transport", "tcp")
     target = body.get("target")
 
-    result = await StreamManager.connect(relay_key, rtsp_uri, transport)
+    try:
+        await StreamManager.connect(relay_key, rtsp_uri, transport, force=body.get("force", False))
+    except Exception as exc:
+        return web.json_response(
+            {"hls_url": None, "status": "error", "error": str(exc)},
+            status=500,
+        )
+
+    breaker = StreamManager._get_breaker(relay_key)
+    if await breaker.is_open():
+        remaining = breaker.cooldown_remaining()
+        return web.json_response(
+            {
+                "hls_url": None,
+                "status": "cooldown",
+                "cooldown_remaining_s": round(remaining, 1),
+            },
+            status=503,
+        )
+
+    running = relay_key in StreamManager._processes and (
+        StreamManager._processes[relay_key].returncode is None
+    )
 
     mediamtx_target = target or "rtsp://127.0.0.1:8554"
-    hls_id = relay_key
-    if hls_id.endswith("_sub"):
-        hls_id = hls_id
-    else:
-        hls_id = relay_key
-
     return web.json_response({
-        "hls_url": f"/hls/{hls_id}/index.m3u8",
-        "status": "started",
+        "hls_url": f"/hls/{relay_key}/index.m3u8",
+        "status": "started" if running else "pending",
         "mediamtx_target": mediamtx_target,
     })
 

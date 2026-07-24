@@ -15,7 +15,6 @@ class WSManager:
         self._connections: set[WebSocket] = set()
 
     async def connect(self, ws: WebSocket) -> None:
-        await ws.accept()
         self._connections.add(ws)
 
     async def disconnect(self, ws: WebSocket) -> None:

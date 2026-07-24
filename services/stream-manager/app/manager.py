@@ -17,6 +17,7 @@ from nvr_common.circuit_breaker import CircuitBreaker
 
 logger = structlog.get_logger()
 
+MEDIAMTX_RTSP_HOST = os.environ.get("MEDIAMTX_RTSP_HOST", "nvr-mediamtx")
 FFMPEG_PATH = os.environ.get("FFMPEG_PATH", "ffmpeg")
 TRANSPORT_ORDER = ["tcp", "udp", "http"]
 RESTART_COOLDOWN = 600
@@ -45,7 +46,7 @@ class StreamManager:
         return cls._breakers[camera_id]
 
     @classmethod
-    async def connect(cls, camera_id: UUID | str, stream_uri: str, transport: str = "tcp") -> None:
+    async def connect(cls, camera_id: UUID | str, stream_uri: str, transport: str = "tcp", force: bool = False) -> None:
         """Start FFmpeg process for a camera stream."""
         cid = str(camera_id)
         if cid in cls._processes and cls._processes[cid].returncode is None:
@@ -54,9 +55,18 @@ class StreamManager:
 
         breaker = cls._get_breaker(cid)
         if await breaker.is_open():
-            remaining = breaker.cooldown_remaining()
-            logger.warning("circuit_open_skip", camera_id=cid, cooldown_remaining=remaining)
-            return
+            if force:
+                logger.info("circuit_force_reset", camera_id=cid)
+                breaker.reset()
+            else:
+                remaining = breaker.cooldown_remaining()
+                logger.warning("circuit_open_skip", camera_id=cid, cooldown_remaining=remaining)
+                return
+
+        is_sub = cid.endswith("_sub")
+        bitrate = "2000k" if is_sub else "4000k"
+        maxrate = "2000k" if is_sub else "4000k"
+        bufsize = "4000k" if is_sub else "8000k"
 
         args = [
             FFMPEG_PATH,
@@ -68,11 +78,27 @@ class StreamManager:
             "-i",
             stream_uri,
             "-c:v",
-            "copy",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-tune",
+            "zerolatency",
+            "-g",
+            "15",
+            "-b:v",
+            bitrate,
+            "-maxrate",
+            maxrate,
+            "-bufsize",
+            bufsize,
             "-an",
+            "-pkt_size",
+            "1200",
             "-f",
             "rtsp",
-            f"rtsp://127.0.0.1:8554/{cid}",
+            "-rtsp_transport",
+            "tcp",
+            f"rtsp://{MEDIAMTX_RTSP_HOST}:8554/{cid}",
         ]
 
         try:
@@ -88,6 +114,7 @@ class StreamManager:
             cls._monitors[cid] = monitor
 
             logger.info("stream_connected", camera_id=cid, pid=process.pid, transport=transport)
+            logger.debug("ffmpeg_args", camera_id=cid, args=args[:2] + ["..."] + args[-3:])
         except Exception:
             logger.error("stream_connect_failed", camera_id=cid, exc_info=True)
             breaker.trip()
@@ -116,6 +143,7 @@ class StreamManager:
             while True:
                 line = await process.stderr.readline()
                 if not line:
+                    logger.warning("monitor_eof", camera_id=camera_id, pid=process.pid)
                     break
                 text = line.decode("utf-8", errors="replace").lower()
                 if any(
@@ -131,6 +159,8 @@ class StreamManager:
             logger.error("monitor_error", camera_id=camera_id, exc_info=True)
         finally:
             await cls._kill_ffmpeg(process)
+            if process.returncode is not None:
+                logger.warning("ffmpeg_exited", camera_id=camera_id, pid=process.pid, returncode=process.returncode)
 
         if cls._running:
             breaker.trip()
@@ -142,12 +172,16 @@ class StreamManager:
             reconnected = False
             for attempt in range(3):
                 transport = TRANSPORT_ORDER[(transport_idx + attempt) % len(TRANSPORT_ORDER)]
+                if await breaker.is_open():
+                    logger.warning("monitor_reconnect_breaker_open", camera_id=camera_id)
+                    break
                 try:
-                    await cls.connect(UUID(camera_id), stream_uri, transport)
+                    await cls.connect(camera_id, stream_uri, transport)
                     logger.info("stream_reconnected", camera_id=camera_id, transport=transport)
                     reconnected = True
                     break
-                except Exception:
+                except Exception as exc:
+                    logger.warning("monitor_reconnect_failed", camera_id=camera_id, error=str(exc))
                     continue
             return reconnected
 

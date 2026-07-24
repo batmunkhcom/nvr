@@ -163,6 +163,19 @@ fi
 # Create tag
 git tag -a "${TAG}" -m "${COMMIT_MSG}"
 echo "[post-commit] Tag created: ${TAG}"
+
+# Keep only the last 20 tags, delete older ones
+TAGS=$(git tag --sort=-creatordate)
+TAG_COUNT=$(echo "${TAGS}" | wc -l)
+if [ "${TAG_COUNT}" -gt 20 ]; then
+    TAGS_TO_DELETE=$(echo "${TAGS}" | tail -n +21)
+    echo "[post-commit] Cleaning up old tags (${TAG_COUNT} total, removing $((TAG_COUNT - 20)))..."
+    for t in ${TAGS_TO_DELETE}; do
+        git tag -d "${t}"
+        git push origin ":${t}" 2>/dev/null || true
+        echo "[post-commit] Deleted: ${t}"
+    done
+fi
 POST_COMMIT_EOF
 
 chmod +x "${HOOK_DIR}/post-commit"
