@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { useRecordings, useTimeline, useRecordingStreamUrl, useDeleteRecording, useBulkDeleteRecordings, recordingThumbnailUrl } from "../hooks/useRecordings";
 import { useCameras } from "../hooks/useCameras";
 import { TimelinePlayer, RecordingPlayer } from "../components/recording";
@@ -82,6 +82,28 @@ export default function Recordings() {
     setActivePlaybackId(recording.id);
     setSeekOffset(undefined);
   };
+
+  const handleDownload = useCallback(async (rec: Recording) => {
+    try {
+      const resp = await fetch(downloadUrl(rec.id));
+      if (!resp.ok) throw new Error("Download failed");
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const fn = rec.camera_name
+        ? `${rec.camera_name}_${(rec.start_time || "").replace(/[:+T]/g, "_").slice(0, 19)}.mp4`
+        : `recording_${rec.id.slice(0, 8)}.mp4`;
+      const a = document.createElement("a");
+      a.href = url; a.download = fn;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      toast("error", "Download failed");
+    }
+  }, []);
+
+  const activeRecording = useMemo(() => recList.find((r) => r.id === activePlaybackId), [recList, activePlaybackId]);
 
   const handleDelete = async (id: string) => {
     const ok = await confirm("Delete this recording?");
@@ -236,7 +258,15 @@ export default function Recordings() {
                     <X size={16} />
                   </button>
                 </div>
-                <RecordingPlayer src={streamUrl} startOffset={seekOffset} className="max-h-96" />
+                <RecordingPlayer
+                  src={streamUrl}
+                  startOffset={seekOffset}
+                  className="max-h-96"
+                  filename={activeRecording
+                    ? `${activeRecording.camera_name || "recording"}_${(activeRecording.start_time || "").replace(/[:+T]/g, "_").slice(0, 19)}.mp4`
+                    : undefined}
+                  onDownload={activeRecording ? () => handleDownload(activeRecording) : undefined}
+                />
               </div>
             )}
 
@@ -347,14 +377,13 @@ export default function Recordings() {
                         >
                           <Play size={14} />
                         </button>
-                        <a
-                          href={downloadUrl(rec.id)}
-                          download={rec.camera_name ? `${rec.camera_name}_${rec.start_time?.replace(/[:+T]/g, "_").slice(0, 19)}.mp4` : `recording_${rec.id?.slice(0, 8)}.mp4`}
+                        <button
+                          onClick={() => handleDownload(rec)}
                           className="p-1.5 bg-gray-800 hover:bg-indigo-600 rounded text-gray-400 hover:text-white"
                           title="Download"
                         >
                           <Download size={14} />
-                        </a>
+                        </button>
                         <button
                           onClick={() => handleDelete(rec.id)}
                           disabled={deleteRecording.isPending}

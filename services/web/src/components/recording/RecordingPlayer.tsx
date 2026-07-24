@@ -1,6 +1,6 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import Hls from "hls.js";
-import { Volume2, VolumeX, ZoomIn, ZoomOut } from "lucide-react";
+import { Volume2, VolumeX, ZoomIn, ZoomOut, Download } from "lucide-react";
 import { useVideoZoom } from "../../hooks/useVideoZoom";
 
 interface Props {
@@ -10,14 +10,16 @@ interface Props {
   controls?: boolean;
   className?: string;
   startOffset?: number;
+  filename?: string;
+  onDownload?: () => void;
 }
 
 const SPEEDS = [0.125, 0.25, 0.5, 0.75, 1, 1.5, 2, 4, 8];
 
-export default function RecordingPlayer({ src, poster, autoPlay = true, controls = true, className = "", startOffset }: Props) {
+export default function RecordingPlayer({ src, poster, autoPlay = true, controls = true, className = "", startOffset, filename, onDownload }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [speed, setSpeed] = useState(1);
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(true);
   const { scale, zoomIn, zoomOut, reset, transformStyle, onWheel, onMouseDown, onMouseMove, onMouseUp, onDoubleClick } = useVideoZoom();
 
   useEffect(() => {
@@ -26,12 +28,12 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
     video.playbackRate = speed;
   }, [speed]);
 
-  const toggleMute = () => {
+  const toggleMute = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
     video.muted = !video.muted;
     setMuted(video.muted);
-  };
+  }, []);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -70,17 +72,20 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
 
   return (
     <div>
-      <div className="relative overflow-hidden rounded"
-        onWheel={onWheel} onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onDoubleClick={onDoubleClick}>
-        <video
-          ref={videoRef}
-          controls={controls}
-          poster={poster}
-          className={`w-full bg-black ${className}`}
-          playsInline
-          style={transformStyle}
-        />
-      </div>
+      <video
+        ref={videoRef}
+        controls={controls}
+        muted={muted}
+        poster={poster}
+        className={`w-full bg-black rounded ${className}`}
+        playsInline
+        style={transformStyle}
+        onWheel={onWheel}
+        onMouseDown={onMouseDown}
+        onMouseMove={onMouseMove}
+        onMouseUp={onMouseUp}
+        onDoubleClick={onDoubleClick}
+      />
       <div className="flex items-center gap-1 mt-2 flex-wrap">
         <button onClick={toggleMute}
           className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white mr-1"
@@ -101,6 +106,12 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
           className="p-1 rounded bg-gray-800 hover:bg-gray-700 disabled:opacity-30 text-gray-400 hover:text-white mr-1"
           title="Zoom in">
           <ZoomIn size={14} /></button>
+        {onDownload && (
+          <button onClick={onDownload}
+            className="p-1 rounded bg-gray-800 hover:bg-indigo-600 text-gray-400 hover:text-white mr-1"
+            title="Download">
+            <Download size={14} /></button>
+        )}
         <span className="text-xs text-gray-500">Speed:</span>
         {SPEEDS.map((s) => (
           <button
@@ -116,7 +127,7 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
                     : "bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
             }`}
           >
-            {s < 1 ? `${s}x` : `${s}x`}
+            {s}x
           </button>
         ))}
       </div>
