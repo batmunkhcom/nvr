@@ -18,7 +18,7 @@ export default function LiveView() {
   const [streamType, setStreamType] = useState<StreamType>("main");
   const cameraId = camera?.id || "";
 
-  const { state, retrySec, attachVideo, startStream } = useStreamPlayer({
+  const { state, retrySec, errorMsg, attachVideo, startStream } = useStreamPlayer({
     cameraId,
     streamType,
   });
@@ -93,9 +93,12 @@ export default function LiveView() {
               </>
             )}
             {state === "error" && (
-              <button onClick={startStream} className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1">
-                <RefreshCw size={14} /> Retry
-              </button>
+              <>
+                <p className="text-sm text-red-400">{errorMsg || "Stream failed"}</p>
+                <button onClick={startStream} className="text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1">
+                  <RefreshCw size={14} /> Retry
+                </button>
+              </>
             )}
           </div>
         )}
@@ -110,12 +113,12 @@ export default function LiveView() {
 
       {camera.has_ptz && isPlaying && (
         <div className="flex flex-wrap items-center justify-center gap-1 mt-2">
-          <button onClick={() => doPtz("up")} className="p-2 bg-gray-800 hover:bg-gray-700 rounded"><ChevronUp size={18} /></button>
-          <button onClick={() => doPtz("down")} className="p-2 bg-gray-800 hover:bg-gray-700 rounded"><ChevronDown size={18} /></button>
-          <button onClick={() => doPtz("left")} className="p-2 bg-gray-800 hover:bg-gray-700 rounded"><ChevronLeft size={18} /></button>
-          <button onClick={() => doPtz("right")} className="p-2 bg-gray-800 hover:bg-gray-700 rounded"><ChevronRight size={18} /></button>
-          <button onClick={() => doZoom("in")} className="p-2 bg-gray-800 hover:bg-gray-700 rounded"><ZoomIn size={18} /></button>
-          <button onClick={() => doZoom("out")} className="p-2 bg-gray-800 hover:bg-gray-700 rounded"><ZoomOut size={18} /></button>
+          <button onClick={() => doPtz("up")} title="Pan Up" className="p-2 bg-gray-800 hover:bg-gray-700 rounded"><ChevronUp size={18} /></button>
+          <button onClick={() => doPtz("down")} title="Pan Down" className="p-2 bg-gray-800 hover:bg-gray-700 rounded"><ChevronDown size={18} /></button>
+          <button onClick={() => doPtz("left")} title="Pan Left" className="p-2 bg-gray-800 hover:bg-gray-700 rounded"><ChevronLeft size={18} /></button>
+          <button onClick={() => doPtz("right")} title="Pan Right" className="p-2 bg-gray-800 hover:bg-gray-700 rounded"><ChevronRight size={18} /></button>
+          <button onClick={() => doZoom("in")} title="Zoom In" className="p-2 bg-gray-800 hover:bg-gray-700 rounded"><ZoomIn size={18} /></button>
+          <button onClick={() => doZoom("out")} title="Zoom Out" className="p-2 bg-gray-800 hover:bg-gray-700 rounded"><ZoomOut size={18} /></button>
         </div>
       )}
     </div>

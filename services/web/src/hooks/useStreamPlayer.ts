@@ -26,6 +26,7 @@ export function useStreamPlayer({
 
   const [state, setState] = useState<StreamState>("connecting");
   const [retrySec, setRetrySec] = useState(0);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const finalUrlRef = useRef<string | null>(null);
 
   const suffix = streamType === "sub" ? "_sub" : "";
@@ -73,13 +74,25 @@ export function useStreamPlayer({
     if (abortRef.current || !cameraId) return;
     cleanupHls();
     clearTimers();
+    setErrorMsg(null);
     setState("connecting");
 
+    let startFailed = false;
     try {
       const res = await apiClient.post(`/cameras/${cameraId}/live/start?stream=${streamType}`);
       const d = res.data?.data;
       if (d?.status === "cooldown") { setRetrySec(Math.ceil(d.cooldown_remaining_s || 10)); scheduleRetry(); return; }
-    } catch { /* try HLS regardless */ }
+      if (d?.error && !d?.hls_url) {
+        // explicit failure (e.g. camera has no stream URI configured)
+        setErrorMsg(d.error);
+        setState("error");
+        return;
+      }
+    } catch {
+      // live/start unreachable — the stream may already be running from
+      // another session, so we still try HLS below
+      startFailed = true;
+    }
 
     if (abortRef.current) return;
     setState("loading");
@@ -87,7 +100,10 @@ export function useStreamPlayer({
     // give FFmpeg time to connect to MediaMTX before polling HLS
     await new Promise((r) => setTimeout(r, 2000));
 
-    for (let i = 0; i < pollAttempts; i++) {
+    // when the start call itself failed, only a couple of probes are needed
+    // to confirm no already-running stream exists — fail fast
+    const attempts = startFailed ? Math.min(pollAttempts, 3) : pollAttempts;
+    for (let i = 0; i < attempts; i++) {
       if (abortRef.current) return;
       try {
         const resp = await fetch(hlsPath, { cache: "no-store" });
@@ -100,7 +116,13 @@ export function useStreamPlayer({
       await new Promise((r) => setTimeout(r, 500));
     }
 
-    if (!abortRef.current) scheduleRetry();
+    if (abortRef.current) return;
+    if (startFailed) {
+      setErrorMsg("Failed to start stream");
+      setState("error");
+    } else {
+      scheduleRetry();
+    }
   }, [cameraId, streamType, hlsPath, pollAttempts, cleanupHls, clearTimers, initHls, scheduleRetry]);
 
   const attachVideo = useCallback((el: HTMLVideoElement | null) => { videoRef.current = el; }, []);
@@ -111,5 +133,5 @@ export function useStreamPlayer({
     return () => { abortRef.current = true; cleanupHls(); clearTimers(); };
   }, [cameraId, streamType]);
 
-  return { state, retrySec, attachVideo, startStream };
+  return { state, retrySec, errorMsg, attachVideo, startStream };
 }

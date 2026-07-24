@@ -18,11 +18,20 @@ vi.mock("hls.js", () => {
     static ErrorTypes = { NETWORK_ERROR: "networkError" };
     loadSource() {}
     attachMedia() {}
-    on() {}
+    on(event: string, cb: () => void) {
+      // simulate a successful manifest load so the player reaches "playing"
+      if (event === MockHls.Events.MANIFEST_PARSED) {
+        setTimeout(cb, 0);
+      }
+    }
     destroy() {}
   }
   return { default: MockHls };
 });
+
+// jsdom does not implement HTMLMediaElement playback
+window.HTMLMediaElement.prototype.play = vi.fn().mockResolvedValue(undefined);
+window.HTMLMediaElement.prototype.pause = vi.fn();
 
 const ptzCamera = {
   id: "c1",
@@ -155,12 +164,14 @@ describe("LiveViewPage", () => {
   it("shows error state when live/start request fails", async () => {
     vi.mocked(apiClient.post).mockRejectedValue(new Error("network down"));
     renderPage();
+    // HLS unreachable too — no existing stream to fall back to
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404 }));
 
     await waitFor(() => {
       expect(screen.getByText(/Failed to start stream/i)).toBeInTheDocument();
-    });
+    }, { timeout: 10000 });
     expect(screen.getByText(/Retry/i)).toBeInTheDocument();
-  });
+  }, 15000);
 
   it("shows 'Camera not found' for unknown id", () => {
     vi.mocked(apiClient.get).mockImplementation((url: string) => {
