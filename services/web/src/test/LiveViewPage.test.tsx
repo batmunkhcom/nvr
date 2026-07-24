@@ -97,8 +97,8 @@ describe("LiveViewPage", () => {
       },
       { timeout: 5000 }
     );
-    expect(screen.getByTitle("Zoom In")).toBeInTheDocument();
-    expect(screen.getByTitle("Zoom Out")).toBeInTheDocument();
+    expect(screen.getByTitle("PTZ Zoom In")).toBeInTheDocument();
+    expect(screen.getByTitle("PTZ Zoom Out")).toBeInTheDocument();
   });
 
   it("PTZ button calls ptz API with direction", async () => {
@@ -133,12 +133,12 @@ describe("LiveViewPage", () => {
 
     await waitFor(
       () => {
-        expect(screen.getByTitle("Zoom In")).toBeInTheDocument();
+        expect(screen.getByTitle("PTZ Zoom In")).toBeInTheDocument();
       },
       { timeout: 5000 }
     );
 
-    fireEvent.click(screen.getByTitle("Zoom In"));
+    fireEvent.click(screen.getByTitle("PTZ Zoom In"));
 
     await waitFor(() => {
       expect(apiClient.post).toHaveBeenCalledWith(

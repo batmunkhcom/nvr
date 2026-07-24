@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useStreamPlayer, type StreamType } from "../../hooks/useStreamPlayer";
-import { Loader2, WifiOff, RefreshCw } from "lucide-react";
+import { useVideoAudio } from "../../hooks/useVideoAudio";
+import { Loader2, WifiOff, RefreshCw, Volume2, VolumeX } from "lucide-react";
 
 interface Props {
   cameraId: string;
@@ -9,11 +10,12 @@ interface Props {
 export default function MiniLivePreview({ cameraId }: Props) {
   const [streamType, setStreamType] = useState<StreamType>("sub");
   const { state, retrySec, attachVideo, startStream } = useStreamPlayer({ cameraId, streamType });
+  const { muted, toggleMute, attachVideo: attachWithAudio } = useVideoAudio(attachVideo);
 
   return (
     <div className="absolute inset-0">
       <video
-        ref={attachVideo}
+        ref={attachWithAudio}
         muted autoPlay playsInline
         className={`absolute inset-0 w-full h-full object-cover ${state === "playing" ? "opacity-80" : "opacity-0"}`}
       />
@@ -42,6 +44,13 @@ export default function MiniLivePreview({ cameraId }: Props) {
 
       {state === "playing" && (
         <div className="absolute bottom-1 right-1 z-20 flex gap-1 pointer-events-auto">
+          <button
+            onClick={(e) => { e.stopPropagation(); toggleMute(); }}
+            className="text-[10px] px-1 py-0.5 rounded bg-black/50 text-gray-400 hover:text-white hover:bg-black/60"
+            title={muted ? "Unmute" : "Mute"}
+          >
+            {muted ? <VolumeX size={12} /> : <Volume2 size={12} />}
+          </button>
           <button onClick={(e) => { e.stopPropagation(); setStreamType("sub"); }}
             className={`text-[10px] px-1.5 py-0.5 rounded ${streamType === "sub" ? "bg-blue-600 text-white" : "bg-black/50 text-gray-500 hover:text-gray-300"}`}>
             SUB

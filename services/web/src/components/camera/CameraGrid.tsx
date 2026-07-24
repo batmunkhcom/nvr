@@ -4,8 +4,11 @@ import { useCameras, useCameraMutations } from "../../hooks/useCameras";
 import { useUiPreference } from "../../hooks/useUiPreference";
 import { useEvents } from "../../hooks/useEvents";
 import { Camera } from "../../types/camera";
-import { LayoutGrid, Play, MoreVertical, Wifi, Pencil, Trash2, MonitorPlay, GripVertical, X, Loader2, RefreshCw } from "lucide-react";
+import { LayoutGrid, Play, MoreVertical, Wifi, Pencil, Trash2, MonitorPlay, GripVertical, X, Loader2, RefreshCw, Volume2, VolumeX, ZoomIn, ZoomOut, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { useStreamPlayer, type StreamType } from "../../hooks/useStreamPlayer";
+import { useVideoAudio } from "../../hooks/useVideoAudio";
+import { useVideoZoom } from "../../hooks/useVideoZoom";
+import apiClient from "../../api/client";
 import MiniLivePreview from "./MiniLivePreview";
 import EmptyState from "../ui/EmptyState";
 import { useConfirm } from "../ui/ConfirmDialog";
@@ -326,12 +329,22 @@ export default function CameraGrid() {
 function ExpandedView({ camera, onClose }: { camera: Camera; onClose: () => void }) {
   const [streamType, setStreamType] = useState<StreamType>("main");
   const { state, retrySec, attachVideo, startStream } = useStreamPlayer({ cameraId: camera.id, streamType });
+  const { muted, toggleMute, attachVideo: attachWithAudio } = useVideoAudio(attachVideo);
+  const { scale, zoomIn, zoomOut, reset, transformStyle, onWheel, onMouseDown, onMouseMove, onMouseUp, onDoubleClick } = useVideoZoom();
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
   }, [onClose]);
+
+  const doPtz = async (direction: string) => {
+    try { await apiClient.post(`/cameras/${camera.id}/ptz`, null, { params: { action: "move", direction, speed: 0.5 } }); } catch {}
+  };
+
+  const doPtzZoom = async (zoom: "in" | "out") => {
+    try { await apiClient.post(`/cameras/${camera.id}/ptz`, null, { params: { action: "zoom", zoom } }); } catch {}
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center" onClick={onClose}>
@@ -340,9 +353,17 @@ function ExpandedView({ camera, onClose }: { camera: Camera; onClose: () => void
           <X size={24} />
         </button>
         <div className="bg-gray-900 rounded overflow-hidden">
-          <div className="relative aspect-video bg-black">
-            <video ref={attachVideo} muted autoPlay playsInline
-              className={`absolute inset-0 w-full h-full object-contain ${state === "playing" ? "" : "hidden"}`} />
+          <div
+            className="relative aspect-video bg-black overflow-hidden"
+            onWheel={onWheel}
+            onMouseDown={onMouseDown}
+            onMouseMove={onMouseMove}
+            onMouseUp={onMouseUp}
+            onDoubleClick={onDoubleClick}
+          >
+            <video ref={attachWithAudio} muted autoPlay playsInline
+              className={`absolute inset-0 w-full h-full object-contain ${state === "playing" ? "" : "hidden"}`}
+              style={transformStyle} />
             {state === "connecting" && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
                 <Loader2 size={32} className="text-gray-400 animate-spin" />
@@ -374,13 +395,53 @@ function ExpandedView({ camera, onClose }: { camera: Camera; onClose: () => void
               </div>
             )}
           </div>
-          <div className="px-4 py-2 flex items-center justify-between">
-            <div className="flex items-center gap-3">
+          <div className="px-4 py-2 flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2">
               <span className="text-sm font-medium text-gray-200">{camera.name}</span>
+              <button onClick={toggleMute}
+                className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white"
+                title={muted ? "Unmute" : "Mute"}>
+                {muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+              </button>
               <button onClick={(e) => { e.stopPropagation(); setStreamType((p) => (p === "main" ? "sub" : "main")); }}
                 className="text-[10px] px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-300">
-                {streamType === "main" ? "MAIN STREAM" : "SUB STREAM"}
+                {streamType === "main" ? "MAIN" : "SUB"}
               </button>
+            </div>
+            <div className="flex items-center gap-1">
+              {scale > 1 && (
+                <button onClick={reset}
+                  className="text-[10px] px-2 py-0.5 rounded bg-blue-600 text-white hover:bg-blue-500">
+                  {scale.toFixed(1)}x
+                </button>
+              )}
+              <button onClick={zoomOut} disabled={scale <= 1}
+                className="p-1 rounded bg-gray-800 hover:bg-gray-700 disabled:opacity-30 text-gray-400 hover:text-white"
+                title="Zoom out">
+                <ZoomOut size={14} />
+              </button>
+              <button onClick={zoomIn} disabled={scale >= 4}
+                className="p-1 rounded bg-gray-800 hover:bg-gray-700 disabled:opacity-30 text-gray-400 hover:text-white"
+                title="Zoom in">
+                <ZoomIn size={14} />
+              </button>
+              {camera.has_ptz && (
+                <>
+                  <span className="w-px h-5 bg-gray-700 mx-1" />
+                  <button onClick={() => doPtz("up")} className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white" title="Pan Up">
+                    <ChevronUp size={14} /></button>
+                  <button onClick={() => doPtz("down")} className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white" title="Pan Down">
+                    <ChevronDown size={14} /></button>
+                  <button onClick={() => doPtz("left")} className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white" title="Pan Left">
+                    <ChevronLeft size={14} /></button>
+                  <button onClick={() => doPtz("right")} className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white" title="Pan Right">
+                    <ChevronRight size={14} /></button>
+                  <button onClick={() => doPtzZoom("in")} className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white" title="PTZ Zoom In">
+                    <ZoomIn size={14} /></button>
+                  <button onClick={() => doPtzZoom("out")} className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white" title="PTZ Zoom Out">
+                    <ZoomOut size={14} /></button>
+                </>
+              )}
             </div>
             <span className="text-xs text-gray-500">{camera.ip_address}</span>
           </div>

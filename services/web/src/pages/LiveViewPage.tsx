@@ -1,12 +1,14 @@
 import { useCallback, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Maximize, Minimize, Square,
+  ArrowLeft, Maximize, Minimize, Square, Volume2, VolumeX,
   ChevronUp, ChevronDown, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RefreshCw,
 } from "lucide-react";
 import { useCameras } from "../hooks/useCameras";
 import apiClient from "../api/client";
 import { useStreamPlayer, type StreamType } from "../hooks/useStreamPlayer";
+import { useVideoAudio } from "../hooks/useVideoAudio";
+import { useVideoZoom } from "../hooks/useVideoZoom";
 import type { Camera as CameraType } from "../types/camera";
 
 export default function LiveView() {
@@ -22,6 +24,9 @@ export default function LiveView() {
     cameraId,
     streamType,
   });
+
+  const { muted, toggleMute, attachVideo: attachWithAudio } = useVideoAudio(attachVideo);
+  const { scale, zoomIn: digiZoomIn, zoomOut: digiZoomOut, reset, transformStyle, onWheel, onMouseDown, onMouseMove, onMouseUp, onDoubleClick } = useVideoZoom();
 
   const stopStream = useCallback(async () => {
     if (!camera) return;
@@ -74,9 +79,11 @@ export default function LiveView() {
         </div>
       )}
 
-      <div className={`relative bg-black rounded-lg overflow-hidden ${fullscreen ? "h-full" : "aspect-video"}`}>
-        <video ref={attachVideo} autoPlay muted playsInline
-          className={`w-full h-full object-contain ${isPlaying ? "" : "hidden"}`} />
+      <div className={`relative bg-black rounded-lg overflow-hidden ${fullscreen ? "h-full" : "aspect-video"}`}
+        onWheel={onWheel} onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onDoubleClick={onDoubleClick}>
+        <video ref={attachWithAudio} autoPlay muted playsInline
+          className={`w-full h-full object-contain ${isPlaying ? "" : "hidden"}`}
+          style={transformStyle} />
 
         {!isPlaying && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-600 gap-3">
@@ -111,16 +118,35 @@ export default function LiveView() {
         )}
       </div>
 
-      {camera.has_ptz && isPlaying && (
-        <div className="flex flex-wrap items-center justify-center gap-1 mt-2">
+      <div className="flex flex-wrap items-center justify-center gap-1 mt-2">
+        <button onClick={toggleMute}
+          className="p-2 bg-gray-800 hover:bg-gray-700 rounded text-gray-400 hover:text-white"
+          title={muted ? "Unmute" : "Mute"}>
+          {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+        </button>
+        {scale > 1 && (
+          <button onClick={reset}
+            className="px-2 py-1 bg-blue-600 rounded text-white text-xs hover:bg-blue-500"
+            title="Reset zoom">
+            {scale.toFixed(1)}x
+          </button>
+        )}
+        <button onClick={digiZoomOut} disabled={scale <= 1}
+          className="p-2 bg-gray-800 hover:bg-gray-700 rounded disabled:opacity-30" title="Digital zoom out">
+          <ZoomOut size={18} /></button>
+        <button onClick={digiZoomIn} disabled={scale >= 4}
+          className="p-2 bg-gray-800 hover:bg-gray-700 rounded disabled:opacity-30" title="Digital zoom in">
+          <ZoomIn size={18} /></button>
+        {camera.has_ptz && isPlaying && (
+          <><span className="w-px h-5 bg-gray-700 mx-2" />
           <button onClick={() => doPtz("up")} title="Pan Up" className="p-2 bg-gray-800 hover:bg-gray-700 rounded"><ChevronUp size={18} /></button>
           <button onClick={() => doPtz("down")} title="Pan Down" className="p-2 bg-gray-800 hover:bg-gray-700 rounded"><ChevronDown size={18} /></button>
           <button onClick={() => doPtz("left")} title="Pan Left" className="p-2 bg-gray-800 hover:bg-gray-700 rounded"><ChevronLeft size={18} /></button>
           <button onClick={() => doPtz("right")} title="Pan Right" className="p-2 bg-gray-800 hover:bg-gray-700 rounded"><ChevronRight size={18} /></button>
-          <button onClick={() => doZoom("in")} title="Zoom In" className="p-2 bg-gray-800 hover:bg-gray-700 rounded"><ZoomIn size={18} /></button>
-          <button onClick={() => doZoom("out")} title="Zoom Out" className="p-2 bg-gray-800 hover:bg-gray-700 rounded"><ZoomOut size={18} /></button>
-        </div>
-      )}
+          <button onClick={() => doZoom("in")} title="PTZ Zoom In" className="p-2 bg-gray-800 hover:bg-gray-700 rounded"><ZoomIn size={18} /></button>
+          <button onClick={() => doZoom("out")} title="PTZ Zoom Out" className="p-2 bg-gray-800 hover:bg-gray-700 rounded"><ZoomOut size={18} /></button></>
+        )}
+      </div>
     </div>
   );
 }
