@@ -57,6 +57,14 @@ def test_rtsp_url_embeds_credentials(recorder):
     assert url == "rtsp://admin:pass123@10.0.0.5:554/stream1"
 
 
+def test_rtsp_url_preserves_query_string(recorder):
+    """Dahua-style URIs need ?channel=1&subtype=1 preserved."""
+    url = recorder.build_rtsp_url(
+        "rtsp://10.0.0.5:554/cam/realmonitor?channel=1&subtype=1", "admin", "pw"
+    )
+    assert url == "rtsp://admin:pw@10.0.0.5:554/cam/realmonitor?channel=1&subtype=1"
+
+
 def test_rtsp_url_quotes_special_chars(recorder):
     url = recorder.build_rtsp_url("rtsp://10.0.0.5/stream", "admin", "p@ss/word")
     assert "p%40ss%2Fword" in url

@@ -77,6 +77,7 @@
 ## Phase 4 — Performance & tuning ⬜
 
 - [x] **4.1** `health_check_loop` `probe_ip(port=)` баг зассан + live_relay тестүүд шинэчилсэн (59/59 pass)
+- [ ] **4.1b** LiveViewPage тест 5 ширхэг timeout fail (миний өөрчлөлтөөс өмнөх — hls.js mock timing) засах
 - [ ] **4.2** stream-manager CPU аудит: 15 идэвхтэй стрим 131% — dashboard зөвхөн sub татаж байгаа шалгах, relay auto-stop хугацаа тохируулах
 - [ ] **4.3** DB индекс: `events(camera_id, start_time)`, `recordings(camera_id, start_time)` шалгах/нэмэх; PostgreSQL tuning (shared_buffers 512MB, effective_cache_size 4GB)
 - [ ] **4.4** Compose: бүх app service-д `restart: unless-stopped`, healthcheck нэмэх (api, stream-manager, recording, ai)

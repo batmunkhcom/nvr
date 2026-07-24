@@ -66,6 +66,21 @@ async def get_system_config(
     return {"data": {c.key: c.value for c in configs}}
 
 
+@router.get("/config/entries")
+async def get_system_config_entries(
+    current_user: Annotated[dict, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Config entries with human-readable descriptions (for Settings UI help text)."""
+    result = await db.execute(select(SystemConfig).order_by(SystemConfig.key))
+    return {
+        "data": [
+            {"key": c.key, "value": c.value, "description": c.description}
+            for c in result.scalars().all()
+        ]
+    }
+
+
 @router.patch("/config")
 async def update_system_config(
     current_user: Annotated[dict, Depends(require_admin)],

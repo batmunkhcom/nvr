@@ -25,6 +25,21 @@ logger = structlog.get_logger()
 STDERR_TAIL_LINES = 20
 
 
+def _ensure_date_dirs(camera_dir: str) -> None:
+    """Pre-create YYYY/MM/DD dirs for today and tomorrow (UTC).
+
+    FFmpeg's segment muxer does not create strftime directories itself.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    for offset in (0, 1):
+        day = datetime.now(UTC) + timedelta(days=offset)
+        os.makedirs(
+            os.path.join(camera_dir, day.strftime("%Y/%m/%d")),
+            exist_ok=True,
+        )
+
+
 def build_rtsp_url(stream_uri: str, username: str | None, password: str | None) -> str:
     """Embed credentials into the RTSP URL if not already present."""
     if not username or not password or not stream_uri.startswith("rtsp://"):
@@ -34,8 +49,10 @@ def build_rtsp_url(stream_uri: str, username: str | None, password: str | None) 
         return stream_uri
     user = urllib.parse.quote(username, safe="")
     pw = urllib.parse.quote(password, safe="")
-    port = f":{parsed.port}" if parsed.port else ""
-    return f"rtsp://{user}:{pw}@{parsed.hostname}{port}{parsed.path}"
+    netloc = f"{user}:{pw}@{parsed.hostname}"
+    if parsed.port:
+        netloc += f":{parsed.port}"
+    return urllib.parse.urlunparse(parsed._replace(netloc=netloc))
 
 
 def build_ffmpeg_args(stream_url: str, camera_dir: str, segment_seconds: int) -> list[str]:
@@ -48,8 +65,8 @@ def build_ffmpeg_args(stream_url: str, camera_dir: str, segment_seconds: int) ->
         "warning",
         "-rtsp_transport",
         "tcp",
-        "-rw_timeout",
-        "15000000",  # 15s IO timeout -> exit so supervisor restarts
+        "-timeout",
+        "15000000",  # 15s socket timeout -> exit so supervisor restarts
         "-i",
         stream_url,
         "-c:v",
@@ -141,7 +158,7 @@ class CameraRecorder:
 
     async def _run_once(self) -> None:
         camera_dir = os.path.join(self.output_base, self.camera_id)
-        os.makedirs(camera_dir, exist_ok=True)
+        _ensure_date_dirs(camera_dir)
         args = build_ffmpeg_args(self.stream_url, camera_dir, self.segment_seconds)
 
         self._process = await asyncio.create_subprocess_exec(

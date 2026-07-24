@@ -98,11 +98,17 @@ class SegmentCatalog:
 
     def _walk_segments(self, base: str) -> set[str]:
         """All .mp4 segment paths on disk (absolute)."""
+        from datetime import timedelta
+
         found: set[str] = set()
         for camera_dir in os.listdir(base):
             cam_path = os.path.join(base, camera_dir)
             if camera_dir == "snapshots" or not os.path.isdir(cam_path):
                 continue
+            # keep date dirs available for long-running ffmpeg processes
+            for offset in (0, 1):
+                day = datetime.now(UTC) + timedelta(days=offset)
+                os.makedirs(os.path.join(cam_path, day.strftime("%Y/%m/%d")), exist_ok=True)
             for root, _dirs, files in os.walk(cam_path):
                 for name in files:
                     if name.endswith(".mp4"):

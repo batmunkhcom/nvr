@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Save, RotateCw, Bell, Monitor, Camera, Radio, Disc, MessageSquare, Brain } from "lucide-react";
+import { Save, RotateCw, Bell, Monitor, Camera, Radio, Disc, HardDrive, MessageSquare, Brain } from "lucide-react";
 import apiClient from "../../api/client";
 import { useToast } from "../ui/Toast";
 
@@ -8,7 +8,9 @@ interface ConfigEntry {
   value: string | number | boolean;
   label: string;
   description?: string;
-  type: "text" | "number" | "toggle";
+  help?: string;
+  type: "text" | "number" | "toggle" | "select";
+  options?: string[];
 }
 
 const CATEGORIES: { key: string; label: string; icon: typeof Monitor }[] = [
@@ -16,35 +18,42 @@ const CATEGORIES: { key: string; label: string; icon: typeof Monitor }[] = [
   { key: "camera.", label: "Camera", icon: Camera },
   { key: "mediamtx.", label: "MediaMTX", icon: Radio },
   { key: "recording.", label: "Recording", icon: Disc },
+  { key: "storage.", label: "Storage", icon: HardDrive },
   { key: "notification.", label: "Notifications", icon: MessageSquare },
   { key: "ai.", label: "AI", icon: Brain },
 ];
 
-const LABELS: Record<string, [string, string | undefined, "text" | "number" | "toggle"]> = {
-  "ui.refresh_interval_s": ["Refresh Interval (s)", "Camera list auto-refresh period", "number"],
-  "ui.theme": ["Theme", "UI color theme (dark/light)", "text"],
-  "ui.language": ["Language", "Interface language (mn/en)", "text"],
-  "camera.test_timeout_s": ["Test Timeout (s)", "RTSP auth check timeout", "number"],
-  "camera.health_check_interval_s": ["Health Check Interval (s)", "Auto health-check loop period", "number"],
-  "mediamtx.rtsp_url": ["RTSP URL", "Relay target for FFmpeg", "text"],
-  "mediamtx.hls_url": ["HLS URL", "HLS base URL for web players", "text"],
-  "recording.retention_days": ["Retention (days)", "Days to keep recordings", "number"],
-  "notification.channels_enabled": ["Enabled Channels", 'JSON list, e.g. ["telegram","webhook"]', "text"],
-  "notification.telegram_bot_token": ["Telegram Bot Token", "Create via @BotFather", "text"],
-  "notification.telegram_chat_id": ["Telegram Chat ID", "Your user/group chat ID", "text"],
-  "notification.webhook_url": ["Webhook URL", "HTTP endpoint for POST notifications", "text"],
-  "ai.enabled": ["AI Detection", "Enable AI engine (OpenAI-compatible or Ollama)", "toggle"],
-  "ai.provider": ["AI Provider", "openai or ollama", "text"],
-  "ai.base_url": ["AI Base URL", "API endpoint URL", "text"],
-  "ai.api_key": ["AI API Key", "Bearer token (empty for local Ollama)", "text"],
-  "ai.model": ["AI Model", "gpt-4o-mini / llama3.2-vision / etc.", "text"],
-  "ai.motion_detection_enabled": ["Motion Detection", "OpenCV pixel-change detection", "toggle"],
-  "ai.confidence_threshold": ["Confidence Threshold", "Minimum detection confidence (0–1)", "number"],
+// [label, fallback help text, type, options?]
+const LABELS: Record<string, [string, string | undefined, "text" | "number" | "toggle" | "select", string[]?]> = {
+  "ui.refresh_interval_s": ["Refresh Interval (s)", "How often the camera list reloads. Lower = more up-to-date, higher = less server load. Recommended: 30.", "number"],
+  "ui.theme": ["Theme", "UI color theme. Currently only 'dark' is supported.", "text"],
+  "ui.language": ["Language", "Interface language: 'mn' (Монгол) or 'en' (English).", "select", ["mn", "en"]],
+  "camera.test_timeout_s": ["Test Timeout (s)", "How long to wait for a camera RTSP auth check before marking it failed. Increase to 10+ for slow networks.", "number"],
+  "camera.health_check_interval_s": ["Health Check Interval (s)", "How often the background loop pings every camera and updates its status. 60–120s recommended; minimum 30.", "number"],
+  "mediamtx.rtsp_url": ["MediaMTX RTSP URL", "Internal relay target for FFmpeg transcoded streams. Only change if MediaMTX runs on a different host.", "text"],
+  "mediamtx.hls_url": ["MediaMTX HLS URL", "Base URL used by browsers to play HLS streams. Must be reachable from client machines.", "text"],
+  "recording.retention_days": ["Retention (days)", "Maximum days to keep recordings. Circular cleanup deletes earlier when the disk watermark is hit, whichever comes first.", "number"],
+  "recording.segment_seconds": ["Segment Length (s)", "Length of one recording file. 300s is a good balance: shorter = finer deletion granularity, longer = fewer files.", "number"],
+  "recording.stream": ["Recording Stream", "'sub' = low bitrate sub-stream (~10x less disk, good for evidence). 'main' = full quality.", "select", ["sub", "main"]],
+  "storage.max_usage_percent": ["Disk Max Usage (%)", "When the recordings disk exceeds this, the oldest recordings are deleted automatically. Keeps the system from ever filling the disk.", "number"],
+  "storage.min_free_gb": ["Disk Min Free (GB)", "Always keep at least this much free space. If free space drops below, oldest recordings are deleted until it recovers.", "number"],
+  "notification.channels_enabled": ["Enabled Channels", 'JSON list of notification channels, e.g. ["telegram","webhook"]', "text"],
+  "notification.telegram_bot_token": ["Telegram Bot Token", "Create a bot via @BotFather in Telegram and paste its token here.", "text"],
+  "notification.telegram_chat_id": ["Telegram Chat ID", "Your user or group chat ID that receives alerts.", "text"],
+  "notification.webhook_url": ["Webhook URL", "HTTP endpoint that receives POST notifications (camera offline, AI detections).", "text"],
+  "ai.enabled": ["AI Detection", "Enable the AI engine (object detection on camera streams). Disable to save CPU.", "toggle"],
+  "ai.provider": ["AI Provider", "Summarization backend: 'openai' or 'ollama' (local).", "text"],
+  "ai.base_url": ["AI Base URL", "API endpoint of the summarization provider.", "text"],
+  "ai.api_key": ["AI API Key", "Bearer token (leave empty for local Ollama).", "text"],
+  "ai.model": ["AI Model", "Model name, e.g. gpt-4o-mini / llama3.2-vision.", "text"],
+  "ai.motion_detection_enabled": ["Motion Detection", "Run the OpenCV motion gate before AI inference — saves ~80% CPU. Keep enabled.", "toggle"],
+  "ai.confidence_threshold": ["Confidence Threshold", "Minimum AI detection confidence, 0–1. Higher = fewer false alarms, lower = catches more. Recommended: 0.5.", "number"],
 };
 
 export default function ConfigSection() {
   const { toast } = useToast();
   const [configs, setConfigs] = useState<Record<string, string>>({});
+  const [dbDescriptions, setDbDescriptions] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [loaded, setLoaded] = useState(false);
@@ -58,6 +67,16 @@ export default function ConfigSection() {
       setEditing({});
     } catch {
       toast("error", "Failed to load configuration");
+    }
+    try {
+      const entriesRes = await apiClient.get("/system/config/entries");
+      const descs: Record<string, string> = {};
+      for (const e of entriesRes.data?.data || []) {
+        if (e.description) descs[e.key] = e.description;
+      }
+      setDbDescriptions(descs);
+    } catch {
+      // descriptions are optional — fall back to built-in help text
     }
     setLoaded(true);
   };
@@ -95,8 +114,8 @@ export default function ConfigSection() {
   const changed = (key: string) => key in editing && editing[key] !== (configs[key] ?? "");
 
   const entries: ConfigEntry[] = Object.keys(LABELS).map((key) => {
-    const [label, desc, type] = LABELS[key];
-    return { key, value: "", label, description: desc, type };
+    const [label, help, type, options] = LABELS[key];
+    return { key, value: "", label, help, description: dbDescriptions[key], type, options };
   });
 
   if (!loaded) {
@@ -160,8 +179,11 @@ export default function ConfigSection() {
             >
               <div className="min-w-0 flex-1">
                 <div className="text-[13px] text-gray-200">{entry.label}</div>
-                {entry.description && (
-                  <div className="text-[11px] text-gray-500 mt-0.5">{entry.description}</div>
+                <div className="text-[11px] text-gray-500 mt-0.5">
+                  {entry.description || entry.help}
+                </div>
+                {entry.description && entry.help && (
+                  <div className="text-[11px] text-gray-600 mt-0.5">{entry.help}</div>
                 )}
                 <div className="text-[10px] text-gray-700 font-mono mt-0.5">{entry.key}</div>
               </div>
@@ -184,6 +206,26 @@ export default function ConfigSection() {
                       }`}
                     />
                   </button>
+                ) : entry.type === "select" ? (
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={val}
+                      onChange={(e) => setEditing((prev) => ({ ...prev, [entry.key]: e.target.value }))}
+                      className="w-44 px-2 py-1 bg-gray-700/70 border border-gray-600 rounded text-[13px] text-white outline-none focus:border-blue-500"
+                    >
+                      {entry.options?.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => save(entry.key)}
+                      disabled={isSaving || !isChanged}
+                      className="p-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-30 disabled:hover:bg-blue-600 transition-opacity"
+                      title="Save"
+                    >
+                      {isSaving ? <RotateCw size={13} className="animate-spin" /> : <Save size={13} />}
+                    </button>
+                  </div>
                 ) : (
                   <div className="flex items-center gap-1.5">
                     <input
