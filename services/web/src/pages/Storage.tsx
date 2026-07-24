@@ -214,10 +214,8 @@ export default function Storage() {
       {analysis.data && (
         <div className="bg-gray-900 rounded border border-gray-800 p-4 mb-6">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-gray-200">Recording Disk Analysis</h3>
-            <span className="text-[11px] text-gray-500">
-              updated {new Date(analysis.data.computed_at).toLocaleTimeString()}
-            </span>
+            <h3 className="text-sm font-semibold text-gray-200" title="GB/day = өдөрт бичигдэх хэмжээ (урьдчилсан хурд). Stored = одоо диск дээр хадгалагдаж буй хэмжээ.">Recording Disk Analysis</h3>
+            <span className="text-[11px] text-gray-500">updated {new Date(analysis.data.computed_at).toLocaleTimeString()}</span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
             <div className="bg-gray-800/60 rounded p-3">
@@ -244,7 +242,8 @@ export default function Storage() {
               <thead>
                 <tr className="text-gray-500 text-left">
                   <th className="py-1 font-medium">Camera</th>
-                  <th className="py-1 font-medium text-right">GB/day</th>
+                  <th className="py-1 font-medium text-right" title="Одоо диск дээр хадгалагдаж буй хэмжээ">Stored now</th>
+                  <th className="py-1 font-medium text-right" title="Өдөрт бичигдэх хэмжээ (урьдчилсан хурд)">GB/day</th>
                   <th className="py-1 font-medium text-right">Segments (24h)</th>
                 </tr>
               </thead>
@@ -252,6 +251,7 @@ export default function Storage() {
                 {analysis.data.per_camera.map((c) => (
                   <tr key={c.camera_id} className="border-t border-gray-800 text-gray-300">
                     <td className="py-1">{c.camera}</td>
+                    <td className="py-1 text-right font-medium text-gray-100">{c.stored_gb >= 1 ? `${c.stored_gb.toFixed(2)} GB` : `${Math.round(c.stored_gb * 1024)} MB`}</td>
                     <td className="py-1 text-right">{c.gb_per_day.toFixed(2)}</td>
                     <td className="py-1 text-right">{c.segments_24h}</td>
                   </tr>

@@ -54,6 +54,21 @@ class DiskAnalytics:
             )
             rows = result.fetchall()
 
+            # current stored totals per camera (all time) — shown as "stored now"
+            stored_result = await session.execute(
+                text(
+                    """
+                    SELECT c.name, r.camera_id,
+                           SUM(r.file_size_bytes) AS bytes,
+                           COUNT(*) AS segments
+                    FROM recordings r
+                    JOIN cameras c ON c.id = r.camera_id
+                    GROUP BY r.camera_id, c.name
+                    """
+                )
+            )
+            stored_rows = stored_result.fetchall()
+
             # coverage: how many distinct hours have data (for partial-day scaling)
             coverage = await session.execute(
                 text(
@@ -65,19 +80,46 @@ class DiskAnalytics:
             hours_covered = max(1, coverage.scalar() or 1)
 
         scale = WINDOW_HOURS / min(hours_covered, WINDOW_HOURS)
-        per_camera = []
+        window_by_cam: dict[str, dict] = {}
         total_bytes_day = 0.0
         for name, camera_id, total_b, segments in rows:
             gb_day = round(float(total_b or 0) / (1024**3) * scale, 2)
             total_bytes_day += gb_day
+            window_by_cam[str(camera_id)] = {
+                "camera": name,
+                "gb_per_day": gb_day,
+                "segments_24h": segments,
+            }
+
+        per_camera = []
+        total_stored_gb = 0.0
+        for name, camera_id, total_b, segments in stored_rows:
+            stored_gb = round(float(total_b or 0) / (1024**3), 2)
+            total_stored_gb += stored_gb
+            win = window_by_cam.pop(str(camera_id), {})
             per_camera.append(
                 {
                     "camera_id": str(camera_id),
                     "camera": name,
-                    "gb_per_day": gb_day,
-                    "segments_24h": segments,
+                    "stored_gb": stored_gb,
+                    "stored_segments": segments,
+                    "gb_per_day": win.get("gb_per_day", 0.0),
+                    "segments_24h": win.get("segments_24h", 0),
                 }
             )
+        # cameras with recent writes but no stored rows (edge case)
+        for camera_id, win in window_by_cam.items():
+            per_camera.append(
+                {
+                    "camera_id": camera_id,
+                    "camera": win["camera"],
+                    "stored_gb": 0.0,
+                    "stored_segments": 0,
+                    "gb_per_day": win["gb_per_day"],
+                    "segments_24h": win["segments_24h"],
+                }
+            )
+        per_camera.sort(key=lambda c: c["stored_gb"], reverse=True)
 
         free_bytes = usage.free
         days_fit = round(free_bytes / (total_bytes_day * 1024**3), 1) if total_bytes_day else None
@@ -87,6 +129,7 @@ class DiskAnalytics:
             "window_hours": WINDOW_HOURS,
             "per_camera": per_camera,
             "total_gb_per_day": round(total_bytes_day, 2),
+            "total_stored_gb": round(total_stored_gb, 2),
             "disk": {
                 "path": config.STORAGE_LOCAL_PATH,
                 "total_gb": round(usage.total / (1024**3), 1),
