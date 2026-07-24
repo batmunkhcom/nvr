@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from uuid import UUID
 
@@ -185,7 +186,7 @@ class NetworkAlertService:
                     "alert_type": alert_type,
                     "severity": severity,
                     "message": message,
-                    "metadata": metadata,
+                    "metadata": json.dumps(metadata),
                 },
             )
             row = result.fetchone()
@@ -198,7 +199,7 @@ class NetworkAlertService:
                 "severity": row[3],
                 "message": row[4],
                 "triggered_at": row[5].isoformat(),
-                "metadata": dict(row[6]) if row[6] else None,
+                "metadata": json.loads(row[6]) if isinstance(row[6], str) else (dict(row[6]) if row[6] else None),
             }
 
     async def _resolve_related_alerts(self, camera_id: UUID, new_alert_type: str, engine):
@@ -244,7 +245,7 @@ class NetworkAlertService:
                     "message": row[5],
                     "triggered_at": row[6].isoformat(),
                     "acknowledged_at": row[7].isoformat() if row[7] else None,
-                    "metadata": dict(row[8]) if row[8] else None,
+                    "metadata": json.loads(row[8]) if isinstance(row[8], str) else (dict(row[8]) if row[8] else None),
                 }
                 for row in rows
             ]
