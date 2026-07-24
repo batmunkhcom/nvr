@@ -58,9 +58,9 @@
 - [x] **2.4** **Circular retention**: дискийн watermark (85% эсвэл <2GB чөлөө) хэтэрвэл хамгийн хуучин сегментээс устгана; 10 минутаас шинэ файл хамгаалагдсан; DB sync
 - [x] **2.5** Recorder → `recordings` table: SegmentCatalog 60с тутам scan → шинэ сегмент DB-д бүртгэнэ (ffprobe duration), устсан файлуудын мөрийг цэвэрлэнэ
 - [x] **2.6** Sub-stream бичлэг + `-c:v copy` + 300с сегмент (config-аас уншина)
-- [ ] **2.7** Recording container асаах, сегмент бичигдэж байгааг баталгаажуулах (image build хүлээж байна)
-- [ ] **2.8** **Диск хэрэглээний анализ**: analytics.py бичигдсэн (GB/хоног, days_fit → `storage.analysis` config) — ажиллаж байгааг баталгаажуулах + UI-д харуулах
-- [x] **2.9** Тест: test_recording_engine.py 11 тест (RTSP URL, ffmpeg args, filename parse, retention protection) ✅
+- [x] **2.7** Recording container ажиллаж байна ✅ — 10/10 камер бичиж байна (live баталгаажуулсан: query string, date dirs, ffmpeg timeout засварууд хийгдсэн). API-аар тоглуулалт ажиллана (token query param нэмсэн)
+- [x] **2.8** **Диск хэрэглээний анализ**: `storage.analysis` config-д цаг тутам тооцдог (GB/хоног, days_fit). Хэмжилт: ~26GB/хоног (10 камер sub-stream). Storage UI-д харуулах үлдлээ
+- [x] **2.9** Тест: test_recording_engine.py 12 тест pass ✅
 
 ## Phase 3 — AI танилт бүрэн ажиллагаатай 🟡
 

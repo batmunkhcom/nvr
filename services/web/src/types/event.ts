@@ -1,5 +1,6 @@
 export interface NvrEvent {
   id: string;
+  snapshot_path: string | null;
   camera_id: string;
   event_type: string;
   severity: string;

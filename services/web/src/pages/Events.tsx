@@ -1,5 +1,8 @@
+import { useMemo, useState } from "react";
 import { useEvents, useAcknowledgeEvent } from "../hooks/useEvents";
-import { Check, AlertTriangle, Info, XCircle, Bell } from "lucide-react";
+import { useCameras } from "../hooks/useCameras";
+import { NvrEvent } from "../types/event";
+import { Check, AlertTriangle, Info, XCircle, Bell, Car, PersonStanding, Dog, Package } from "lucide-react";
 import EmptyState from "../components/ui/EmptyState";
 
 const severityIcons: Record<string, typeof AlertTriangle> = {
@@ -14,9 +17,42 @@ const severityColors: Record<string, string> = {
   info: "text-blue-400",
 };
 
+const objectIcons: Record<string, typeof Car> = {
+  car: Car,
+  truck: Car,
+  bus: Car,
+  motorcycle: Car,
+  bicycle: Car,
+  person: PersonStanding,
+  dog: Dog,
+  cat: Dog,
+};
+
+function eventSnapshotUrl(eventId: string): string {
+  const token = localStorage.getItem("access_token") || "";
+  return `/api/v1/events/${eventId}/snapshot?token=${encodeURIComponent(token)}`;
+}
+
+function detectedObjects(event: NvrEvent): string[] {
+  const objects = event.metadata?.objects;
+  if (objects && typeof objects === "object") return Object.keys(objects);
+  return [];
+}
+
 export default function Events() {
-  const { data: events, isLoading } = useEvents();
+  const [cameraFilter, setCameraFilter] = useState("");
+  const filters: Record<string, string> = {};
+  if (cameraFilter) filters.camera_id = cameraFilter;
+
+  const { data: events, isLoading } = useEvents(filters);
+  const { data: cameras } = useCameras();
   const ack = useAcknowledgeEvent();
+
+  const cameraNames = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const c of cameras || []) map[c.id] = c.name;
+    return map;
+  }, [cameras]);
 
   if (isLoading) {
     return (
@@ -31,55 +67,90 @@ export default function Events() {
     );
   }
 
-  if (!events?.length) {
-    return (
-      <div className="page-enter">
-        <h1 className="text-2xl font-bold mb-4">Events</h1>
-        <EmptyState
-          icon={<Bell size={28} />}
-          title="No events detected yet"
-          description="Motion and AI-detected events will appear here. Enable AI detection in Settings to get started."
-        />
-      </div>
-    );
-  }
-
   return (
     <div className="page-enter">
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold">Events</h1>
-        <span className="text-sm text-gray-400">{events.length} events</span>
+        <div className="flex items-center gap-2">
+          <select
+            value={cameraFilter}
+            onChange={(e) => setCameraFilter(e.target.value)}
+            className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-sm text-gray-300"
+          >
+            <option value="">All Cameras</option>
+            {(cameras || []).map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          <span className="text-sm text-gray-400">{events?.length || 0} events</span>
+        </div>
       </div>
-      <div className="space-y-2">
-        {events.map((event) => {
-          const Icon = severityIcons[event.severity] || Info;
-          const color = severityColors[event.severity] || "text-gray-400";
-          return (
-            <div
-              key={event.id}
-              className={`flex items-center gap-3 p-3 rounded border ${
-                event.is_acknowledged ? "bg-gray-900 border-gray-800" : "bg-gray-800 border-gray-700"
-              }`}
-            >
-              <Icon className={color} size={18} />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{event.event_type.replace(/_/g, " ")}</p>
-                <p className="text-xs text-gray-500">
-                  {new Date(event.created_at).toLocaleString()} &middot; {event.severity}
-                </p>
+
+      {!events?.length ? (
+        <EmptyState
+          icon={<Bell size={28} />}
+          title="No events detected yet"
+          description="AI-detected objects (cars, people) and motion events will appear here with snapshots."
+        />
+      ) : (
+        <div className="space-y-2">
+          {events.map((event) => {
+            const Icon = severityIcons[event.severity] || Info;
+            const color = severityColors[event.severity] || "text-gray-400";
+            const objects = detectedObjects(event);
+            return (
+              <div
+                key={event.id}
+                className={`flex items-center gap-3 p-3 rounded border ${
+                  event.is_acknowledged ? "bg-gray-900 border-gray-800" : "bg-gray-800 border-gray-700"
+                }`}
+              >
+                {event.snapshot_path ? (
+                  <img
+                    src={eventSnapshotUrl(event.id)}
+                    alt="detection"
+                    loading="lazy"
+                    className="w-24 h-14 object-cover rounded bg-gray-900 flex-shrink-0"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  />
+                ) : (
+                  <div className="w-24 h-14 rounded bg-gray-900 flex items-center justify-center flex-shrink-0">
+                    <Icon className={color} size={18} />
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-medium">{event.event_type.replace(/_/g, " ")}</p>
+                    {objects.map((obj) => {
+                      const ObjIcon = objectIcons[obj] || Package;
+                      return (
+                        <span
+                          key={obj}
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-blue-900/50 text-blue-300 rounded text-[11px]"
+                        >
+                          <ObjIcon size={11} /> {obj}
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {cameraNames[event.camera_id] || "Camera"} &middot;{" "}
+                    {new Date(event.start_time || event.created_at).toLocaleString()} &middot; {event.severity}
+                  </p>
+                </div>
+                {!event.is_acknowledged && (
+                  <button
+                    onClick={() => ack.mutate(event.id)}
+                    className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded text-white flex-shrink-0"
+                  >
+                    <Check size={12} /> Ack
+                  </button>
+                )}
               </div>
-              {!event.is_acknowledged && (
-                <button
-                  onClick={() => ack.mutate(event.id)}
-                  className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded text-white"
-                >
-                  <Check size={12} /> Ack
-                </button>
-              )}
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

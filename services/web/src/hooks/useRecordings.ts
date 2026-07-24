@@ -30,7 +30,9 @@ export function useTimeline(cameraId: string, date: string) {
 }
 
 export function useRecordingStreamUrl(recordingId: string) {
-  return `/api/v1/recordings/${recordingId}/stream`;
+  if (!recordingId) return "";
+  const token = localStorage.getItem("access_token") || "";
+  return `/api/v1/recordings/${recordingId}/stream?token=${encodeURIComponent(token)}`;
 }
 
 export function useStorageUsage() {

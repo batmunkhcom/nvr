@@ -59,6 +59,25 @@ async def get_event_by_id(
     return {"data": event}
 
 
+@router.get("/{event_id}/snapshot")
+async def get_event_snapshot(
+    event_id: uuid.UUID,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Serve the AI detection snapshot JPEG (supports ?token= for <img> tags)."""
+    import os
+
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+
+    event = await get_event(event_id, db)
+    snapshot_path = event.get("snapshot_path")
+    if not snapshot_path or not os.path.exists(snapshot_path):
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    return FileResponse(snapshot_path, media_type="image/jpeg")
+
+
 @router.patch("/{event_id}/acknowledge")
 async def ack_event(
     event_id: uuid.UUID,
