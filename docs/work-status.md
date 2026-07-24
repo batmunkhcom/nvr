@@ -1,7 +1,55 @@
 # NVR Project — Work Status & Plan
 
-> Last updated: 2026-07-23 (session)
+> Last updated: 2026-07-24 (session)
 > Source of truth for what is completed vs. what remains.
+
+---
+
+## Phase R — Recording + AI Activation ✅ DONE (2026-07-24)
+
+**Full detail: [`docs/todo-improvements.md`](todo-improvements.md)**
+
+### R1. Recording Engine — from zero to fully operational
+Was: container never ran; code had fatal bugs (env mismatch, Fernet vs AES-GCM,
+retention TypeError, cross-service model imports that can't resolve).
+Now:
+- Per-camera FFmpeg supervisor, auto-restart + circuit breaker (60s→600s)
+- Sub-stream recording, `-c:v copy`, 300s MP4 segments (`recording.segment_seconds`)
+- `SegmentCatalog` registers closed segments → `recordings` table (ffprobe duration)
+- **Circular retention**: disk ≥85% or <2GB free → oldest segments deleted first.
+  Live-verified: deleted 76 oldest segments, freed 1.08GB, disk can never fill up.
+- Age retention 7 days, files <10 min protected, DB/files kept in sync
+- `DiskAnalytics` hourly → `system_config.storage.analysis` (GB/day, days-fit)
+- **Verified: 10/10 cameras recording** (~26GB/day measured)
+
+### R2. AI Engine — cars & people now detected
+Was: container never ran; no model file; YOLOv8 output parsed as YOLOv5 format.
+Now:
+- `yolov8n.onnx` exported on host (ultralytics+torch CPU) → `ai_models` volume
+- Correct YOLOv8 `(1,84,8400)` post-processing: transpose → argmax → NMS → unletterbox
+- Shared ONNX session, MOG2 motion gate, 2fps per camera, thread-offloaded reads
+- **Position-aware dedup**: static car = 1 event/5min (not every 15s), moved = immediate
+- Events + JPEG snapshots + Redis broadcast — **live-verified car (0.55) + person (0.73)**
+- Plain-SQL DB layer (`app/db.py`) — no cross-service imports anywhere
+
+### R3. Performance & reliability
+- Stream idle reaper: relays with 0 MediaMTX readers for 10min stop (CPU savings)
+- MediaMTX v1.19 API auth fixed (internal users config) — paths API usable
+- Alembic 0008: events/recordings DESC time indexes
+- `restart: unless-stopped` on all core services
+- health_check_loop `probe_ip(port=)` bug fixed; Docker log rotation (10m×3) everywhere
+- Docker build cache pruned: 9.6GB → 13GB free
+- recording_mode `never` now actually skips recording
+
+### R4. UX & docs
+- Media auth `?token=` query param (recording playback + event snapshots work in browser)
+- `GET /events/{id}/snapshot` endpoint; Events page: snapshots, object badges, camera filter
+- `GET /system/config/entries` with descriptions; Settings: storage category,
+  select inputs, Mongolian DB descriptions + English help on every setting
+- Storage page: Recording Disk Analysis card (GB/day, days-fit, per-camera table)
+- Camera Add/Edit forms: hint text on every field
+- LiveViewPage: error message + Retry state, PTZ button titles
+- Tests: 59 backend + 34 frontend all passing; 25 new tests added
 
 ---
 

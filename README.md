@@ -11,10 +11,10 @@ mBm NVR is developed with **mBm AI Assistant** — an AI-powered engineering and
 
 ## Features
 
-- **Live Monitoring** — Real-time HLS streaming with sub-stream support for bandwidth-efficient dashboard previews
-- **Recording** — Continuous and event-based recording with configurable retention policies
-- **AI Object Detection** — YOLO-based detection pipeline for people, vehicles, and other objects
-- **Motion Detection** — Camera-side and server-side motion detection
+- **Live Monitoring** — Real-time HLS streaming with sub-stream support for bandwidth-efficient dashboard previews; idle streams stop automatically to save CPU
+- **Recording** — Continuous recording in 5-minute MP4 segments with **circular retention** (oldest recordings are overwritten when the disk watermark is hit — the disk can never fill up) and per-camera GB/day analytics
+- **AI Object Detection** — YOLOv8 (ONNX) detection pipeline for people, vehicles, and 80 COCO classes, with motion gating and position-aware event deduplication
+- **Motion Detection** — Camera-side (ONVIF) and server-side (OpenCV MOG2) motion detection
 - **IP Camera Discovery** — Auto-discover ONVIF/RTSP cameras on local subnets
 - **PTZ Control** — Pan, tilt, and zoom control for supported cameras
 - **Multi-User** — Role-based access (admin, operator, viewer)

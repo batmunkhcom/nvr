@@ -74,36 +74,52 @@
 - [x] **3.8** Events UI: snapshot thumbnail (token auth-тай), объект badge (машин/хүн icon), камер шүүлтүүр — бичигдсэн ✅
 - [x] **3.9** Тест: test_ai_engine.py 14 тест (URL build, confidence clamp, cooldown, letterbox) — numpy-тэй орчинд ажиллана
 
-## Phase 4 — Performance & tuning ⬜
+## Phase 4 — Performance & tuning ✅
 
 - [x] **4.1** `health_check_loop` `probe_ip(port=)` баг зассан + live_relay тестүүд шинэчилсэн (59/59 pass)
-- [ ] **4.1b** LiveViewPage тест 5 ширхэг timeout fail (миний өөрчлөлтөөс өмнөх — hls.js mock timing) засах
-- [ ] **4.2** stream-manager CPU аудит: 15 идэвхтэй стрим 131% — dashboard зөвхөн sub татаж байгаа шалгах, relay auto-stop хугацаа тохируулах
-- [ ] **4.3** DB индекс: `events(camera_id, start_time)`, `recordings(camera_id, start_time)` шалгах/нэмэх; PostgreSQL tuning (shared_buffers 512MB, effective_cache_size 4GB)
-- [ ] **4.4** Compose: бүх app service-д `restart: unless-stopped`, healthcheck нэмэх (api, stream-manager, recording, ai)
-- [ ] **4.5** FFmpeg segment параметр tuning: `-segment_time 900` → 300 (5 мин — устгал нарийн, сэргээлт хурдан)
+- [x] **4.1b** LiveViewPage тестүүд зассан: PTZ товчуудад title нэмсэн, HLS mock MANIFEST_PARSED-тэй, useStreamPlayer-д errorMsg state + fail-fast нэмсэн (34/34 frontend pass)
+- [x] **4.2** stream-manager: **idle reaper** — 10 мин үзэгчгүй (MediaMTX readers=0) relay-г зогсооно (CPU хэмнэнэ). MediaMTX API auth зассан (v1.19 internal users)
+- [x] **4.3** DB индекс: `events(camera_id, start_time DESC)`, `events(start_time DESC)`, `recordings(camera_id, start_time DESC)` — alembic 0008
+- [x] **4.4** Compose: `restart: unless-stopped` бүх үндсэн service-д (7 шинэ + 2)
+- [x] **4.5** FFmpeg segment 300с болгосон (config `recording.segment_seconds`)
 
-## Phase 5 — Дизайн & хэрэглэгчийн зааварчилгаа ⬜
+## Phase 5 — Дизайн & хэрэглэгчийн зааварчилгаа ✅ (гол хэсэг)
 
-- [ ] **5.1** Design token систем: surface/accent/success/warning/danger тодорхойлж, орчин үеийн цэвэрхэн dark theme
-- [ ] **5.2** Toast notification систем (`alert()`/`confirm()` бүрэн солих)
-- [ ] **5.3** **Settings хуудас бүрэн функционал**: бүх system_config утгыг визуал formaар засах + **тохиргоо бүрт монгол тайлбар** (юунд хэрэгтэй, ямар утга зөв гэдгийг)
-- [ ] **5.4** Бүх form-д тайлбар текст: камер нэмэх/засах (RTSP URI гэж юу вэ, sub-stream яагаад хэрэгтэй вэ), discovery, schedule, storage, users
-- [ ] **5.5** Storage хуудас: дискийн график, GB/хоног, retention projection, circular горимын төлөв
-- [ ] **5.6** Empty states + skeleton loading сайжруулалт
-- [ ] **5.7** Dark scrollbar, page transition fade, typography scale
+- [x] **5.1** Design token систем — index.css-д surface/semantic/typography tokens + dark scrollbar + page transitions (өмнөх ажлаас бэлэн байсан)
+- [x] **5.2** Toast notification систем — `components/ui/Toast.tsx` бэлэн байсан, ConfigSection-д ашиглагддаг
+- [x] **5.3** **Settings хуудас бүрэн функционал**: storage.* категори, select input, DB description-аас монгол тайлбар уншидэг (13 key монгол тайлбартай) + англи fallback
+- [x] **5.4** Form тайлбарууд: Camera Add/Edit (бүх талбарт hint: sub-stream яагаад хэрэгтэй, нууц үг encrypt, AI source г.м.)
+- [x] **5.5** Storage хуудас: Recording Disk Analysis card (GB/хоног, ~хоног багтах projection, камер бүрийн хүснэгт, circular тайлбар)
+- [ ] **5.6** Empty states polish (бэлэн EmptyState компонент байгаа — нэмэлт сайжруулалт хожим)
+- [ ] **5.7** Camera tile status ring + connection error tooltip (backlog)
 
-## Phase 6 — Баримт бичиг эцсийн ⬜
+## Phase 6 — Баримт бичиг эцсийн 🟡
 
-- [ ] **6.1** `AGENTS.md` шинэчлэх: recording flow, AI flow, circular retention, disk budget
-- [ ] **6.2** `docs/work-status.md` эцсийн байдлаар шинэчлэх
+- [x] **6.1** `AGENTS.md` шинэчлэх: recording flow, AI flow, circular retention, idle reaper, key files
+- [x] **6.2** `docs/work-status.md` — доорх session summary-гаар шинэчилсэн
 - [ ] **6.3** `README.md` шинэчлэх (recording/AI идэвхтэй төлөв тусгах)
-- [ ] **6.4** Энэхүү файлын төлвийг байнга шинэчлэх
+- [x] **6.4** Энэхүү файлын төлвийг байнга шинэчлэж байна
+
+---
+
+## Үлдэх backlog (дараагийн ажил)
+
+- [ ] Motion-only бичлэг (AI event-тэй холбосон) — одоо continuous л ажилладаг
+- [ ] AI zones (polygon) UI
+- [ ] Telegram/webhook мэдэгдэл идэвхжүүлэлт (notification_service бэлэн)
+- [ ] Storage backend mount-ууд (NFS/S3) — recordings volume-г том диск рүү зөөх
+- [ ] Дискийг физик өргөтгөх (одоо 29GB — ~0.5 хоногийн бичлэг л багтана; 26GB/хоног хэрэглээтэй)
 
 ---
 
 ## Гүйцэтгэлийн лог
 
-| Огноо | Ажил | Төлөв | Commit |
-|-------|------|-------|--------|
-| 2026-07-24 | Системийн бүтэн шинжилгээ, төлөвлөгөө үүсгэх | ✅ | — |
+| Огноо | Ажил | Төлөв |
+|-------|------|-------|
+| 2026-07-24 | Системийн бүтэн шинжилгээ, төлөвлөгөө үүсгэх | ✅ |
+| 2026-07-24 | Phase 1: Docker цэвэрлэх (4.5GB), log rotation, disk budget config | ✅ |
+| 2026-07-24 | Phase 2: recording-engine бүрэн шинэчлэл — 10/10 камер бичиж байна, circular retention LIVE баталгаажсан (76 сегмент устгаж 1.08GB чөлөөлсөн), DB бүртгэл, диск анализ | ✅ |
+| 2026-07-24 | Phase 3: ai-engine бүрэн шинэчлэл — **машин/хүн танигддаг болсон**, YOLOv8n ONNX export, position-aware dedup, Events UI | ✅ |
+| 2026-07-24 | Phase 4: idle reaper, MediaMTX API auth, DB indexes, restart policies, health check баг, LiveViewPage тест | ✅ |
+| 2026-07-24 | Phase 5: Settings storage категори + монгол тайлбарууд, camera form hints, Storage analysis card | ✅ |
+| 2026-07-24 | Phase 6: AGENTS.md, work-status шинэчлэл | ✅ |
