@@ -56,7 +56,14 @@ export function useStreamPlayer({
   const initHls = useCallback(() => {
     if (!videoRef.current || !Hls.isSupported()) { setState("error"); return; }
     cleanupHls();
-    const hls = new Hls({ enableWorker: false, maxBufferLength: 10, maxMaxBufferLength: 15, lowLatencyMode: false, liveDurationInfinity: true });
+    const hls = new Hls({
+      enableWorker: false,
+      maxBufferLength: 2,
+      maxMaxBufferLength: 4,
+      lowLatencyMode: true,
+      liveDurationInfinity: false,
+      liveSyncDurationCount: 2,
+    });
     hlsRef.current = hls;
 
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -98,7 +105,7 @@ export function useStreamPlayer({
     setState("loading");
 
     // give FFmpeg time to connect to MediaMTX before polling HLS
-    await new Promise((r) => setTimeout(r, 2000));
+    await new Promise((r) => setTimeout(r, 600));
 
     // when the start call itself failed, only a couple of probes are needed
     // to confirm no already-running stream exists — fail fast

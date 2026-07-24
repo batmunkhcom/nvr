@@ -3,6 +3,10 @@ api: yes
 apiAddress: :9997
 hls: yes
 hlsAddress: :8888
+hlsVariant: lowLatency
+hlsSegmentDuration: 500ms
+hlsSegmentCount: 7
+hlsPartDuration: 200ms
 webrtc: yes
 webrtcAddress: :8889
 
