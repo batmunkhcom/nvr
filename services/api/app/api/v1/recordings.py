@@ -128,8 +128,12 @@ async def stream_recording(
     current_user: Annotated[dict, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     range: Annotated[str | None, Header()] = None,
+    download: bool = Query(False),
 ):
-    """Stream a recording with HTTP Range support (seekable playback)."""
+    """Stream a recording with HTTP Range support (seekable playback).
+
+    Set ?download=true to force Content-Disposition: attachment.
+    """
     recording = await get_recording(recording_id, db)
     file_path = recording.file_path
     if not file_path or not os.path.exists(file_path):
@@ -137,6 +141,10 @@ async def stream_recording(
 
     file_size = os.path.getsize(file_path)
     start, end = _parse_range(range, file_size)
+
+    ts = recording.start_time.strftime("%Y-%m-%d_%H%M%S") if recording.start_time else str(recording_id)[:8]
+    disp_type = "attachment" if download else "inline"
+    filename = f"recording_{recording.camera_id}_{ts}.mp4" if hasattr(recording, "camera_id") else f"recording_{recording_id}.mp4"
 
     def file_iterator(path: str, offset: int, remaining: int, chunk_size: int = 1024 * 1024):
         with open(path, "rb") as f:
@@ -151,7 +159,7 @@ async def stream_recording(
 
     headers = {
         "Accept-Ranges": "bytes",
-        "Content-Disposition": f'inline; filename="recording_{recording_id}.mp4"',
+        "Content-Disposition": f'{disp_type}; filename="{filename}"',
     }
     if start == 0 and end == file_size - 1:
         return StreamingResponse(

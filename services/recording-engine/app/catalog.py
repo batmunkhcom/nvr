@@ -50,7 +50,10 @@ async def _probe_duration(path: str) -> float | None:
 
 
 async def _make_thumbnail(segment_path: str) -> str | None:
-    """Extract a frame at ~2s as a sidecar JPEG next to the segment."""
+    """Extract a frame at ~2s as a sidecar JPEG next to the segment.
+
+    Falls back to -ss 0 for very short segments (< 2s).
+    """
     thumb_path = os.path.splitext(segment_path)[0] + ".jpg"
     if os.path.exists(thumb_path):
         return thumb_path
@@ -76,7 +79,35 @@ async def _make_thumbnail(segment_path: str) -> str | None:
             stderr=asyncio.subprocess.DEVNULL,
         )
         await asyncio.wait_for(proc.wait(), timeout=10)
-        if proc.returncode == 0 and os.path.getsize(thumb_path) > 0:
+        if proc.returncode == 0 and os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 0:
+            return thumb_path
+        if os.path.exists(thumb_path):
+            os.unlink(thumb_path)
+    except Exception:
+        pass
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            config.FFMPEG_PATH,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-ss",
+            "0",
+            "-i",
+            segment_path,
+            "-vframes",
+            "1",
+            "-vf",
+            "scale=320:-1",
+            "-q:v",
+            "5",
+            "-y",
+            thumb_path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(proc.wait(), timeout=10)
+        if proc.returncode == 0 and os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 0:
             return thumb_path
     except Exception:
         pass
@@ -113,7 +144,7 @@ class SegmentCatalog:
             camera_modes = await self._load_camera_modes(session)
             disk_files = self._walk_segments(base)
 
-            thumb_budget = 20  # backfill limit per scan
+            thumb_budget = 200  # backfill limit per scan
             for path in sorted(disk_files):
                 if path in known_paths:
                     if (
@@ -204,7 +235,8 @@ class SegmentCatalog:
             return False
 
         recording_type = "motion" if camera_modes.get(camera_id) == "motion" else "continuous"
-        await _make_thumbnail(path)
+        if await _make_thumbnail(path) is None:
+            logger.warning("thumbnail_generation_failed", path=path)
         await session.execute(
             text(
                 """

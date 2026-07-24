@@ -4,7 +4,7 @@ import { useCameras } from "../hooks/useCameras";
 import { TimelinePlayer, RecordingPlayer } from "../components/recording";
 import RecordingSchedulesSection from "../components/config/RecordingSchedulesSection";
 import { Recording } from "../types/recording";
-import { Film, Play, Trash2, X, ChevronLeft, ChevronRight, Clock, CalendarClock } from "lucide-react";
+import { Film, Play, Trash2, X, ChevronLeft, ChevronRight, Clock, CalendarClock, Download } from "lucide-react";
 import EmptyState from "../components/ui/EmptyState";
 import { useToast } from "../components/ui/Toast";
 import { useConfirm } from "../components/ui/ConfirmDialog";
@@ -342,6 +342,14 @@ export default function Recordings() {
                         >
                           <Play size={14} />
                         </button>
+                        <a
+                          href={downloadUrl(rec.id)}
+                          download={`recording_${rec.camera_id}_${rec.start_time}.mp4`}
+                          className="p-1.5 bg-gray-800 hover:bg-indigo-600 rounded text-gray-400 hover:text-white"
+                          title="Download"
+                        >
+                          <Download size={14} />
+                        </a>
                         <button
                           onClick={() => handleDelete(rec.id)}
                           disabled={deleteRecording.isPending}
@@ -386,6 +394,11 @@ export default function Recordings() {
 
 function today(): string {
   return new Date().toISOString().split("T")[0];
+}
+
+function downloadUrl(recordingId: string): string {
+  const token = localStorage.getItem("access_token") || "";
+  return `/api/v1/recordings/${recordingId}/stream?download=true&token=${encodeURIComponent(token)}`;
 }
 
 function RecordingThumb({ id }: { id: string }) {

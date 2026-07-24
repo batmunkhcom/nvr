@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import Hls from "hls.js";
 
 interface Props {
@@ -7,11 +7,20 @@ interface Props {
   autoPlay?: boolean;
   controls?: boolean;
   className?: string;
-  startOffset?: number; // seconds — seek position once metadata is loaded
+  startOffset?: number;
 }
+
+const SPEEDS = [0.5, 0.75, 1, 1.5, 2, 4, 8];
 
 export default function RecordingPlayer({ src, poster, autoPlay = true, controls = true, className = "", startOffset }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [speed, setSpeed] = useState(1);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.playbackRate = speed;
+  }, [speed]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -49,12 +58,30 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
   }, [src, autoPlay, startOffset]);
 
   return (
-    <video
-      ref={videoRef}
-      controls={controls}
-      poster={poster}
-      className={`w-full bg-black rounded ${className}`}
-      playsInline
-    />
+    <div>
+      <video
+        ref={videoRef}
+        controls={controls}
+        poster={poster}
+        className={`w-full bg-black rounded ${className}`}
+        playsInline
+      />
+      <div className="flex items-center gap-1 mt-2 flex-wrap">
+        <span className="text-xs text-gray-500 mr-1">Speed:</span>
+        {SPEEDS.map((s) => (
+          <button
+            key={s}
+            onClick={() => setSpeed(s)}
+            className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+              speed === s
+                ? "bg-blue-600 text-white"
+                : "bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
+            }`}
+          >
+            {s}x
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
