@@ -152,6 +152,7 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
               onChange={(e) => setStreamMain(e.target.value)}
               className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-gray-100 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none font-mono"
             />
+            <p className="text-[11px] text-gray-500 mt-1">Full-quality RTSP address used for the live view.</p>
           </div>
           <div>
             <label className="block text-xs text-gray-400 mb-1">Sub Stream URI</label>
@@ -161,6 +162,7 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
               onChange={(e) => setStreamSub(e.target.value)}
               className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-gray-100 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none font-mono"
             />
+            <p className="text-[11px] text-gray-500 mt-1">Lower-resolution stream for dashboard tiles, AI detection and recording — saves bandwidth and disk.</p>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -174,6 +176,7 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
                 <option value="motion">Motion only</option>
                 <option value="never">Never</option>
               </select>
+              <p className="text-[11px] text-gray-500 mt-1">Continuous = 24/7 recording. Never = recording off (live view only).</p>
             </div>
             <div>
               <label className="block text-xs text-gray-400 mb-1">Active</label>
@@ -215,6 +218,7 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
                   <option value="server">NVR Engine (YOLO)</option>
                   <option value="camera">Camera Built-in (ONVIF)</option>
                 </select>
+                <p className="text-[11px] text-gray-500 mt-1">NVR Engine = server-side YOLO detection (works with any camera). Camera Built-in = use the camera's own AI events via ONVIF.</p>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3 mt-2">
@@ -229,6 +233,7 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
                   <option value="medium">Medium</option>
                   <option value="high">High</option>
                 </select>
+                <p className="text-[11px] text-gray-500 mt-1">Motion gate sensitivity — how much pixel change triggers AI analysis. High = catches subtle motion, more CPU.</p>
               </div>
               <div>
                 <label className="block text-xs text-gray-400 mb-1">Min Confidence</label>
@@ -242,6 +247,7 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
                   <option value="0.7">70%</option>
                   <option value="0.9">90%</option>
                 </select>
+                <p className="text-[11px] text-gray-500 mt-1">Minimum AI confidence to record an event. Higher = fewer false alarms; 50% is a good default.</p>
               </div>
             </div>
           </div>

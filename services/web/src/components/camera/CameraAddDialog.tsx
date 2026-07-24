@@ -119,6 +119,10 @@ export default function CameraAddDialog({ open, onClose }: Props) {
             {probe.isPending ? "Scanning..." : "Detect"}
           </button>
         </div>
+        <p className="text-[11px] text-gray-500 -mt-1">
+          Enter the camera IP and press Detect — the system finds the brand, model and
+          stream addresses automatically via ONVIF/RTSP probing.
+        </p>
 
         {r && isDetected && (
           <div className="bg-gray-800 border border-gray-700 rounded p-3 space-y-1.5 text-xs">
@@ -151,6 +155,7 @@ export default function CameraAddDialog({ open, onClose }: Props) {
             value={name}
             onChange={setName}
             placeholder="Camera name"
+            hint="A short name shown on the dashboard, e.g. 'Entrance' or 'Parking East'."
             required
           />
           <div className="grid grid-cols-2 gap-3">
@@ -159,6 +164,7 @@ export default function CameraAddDialog({ open, onClose }: Props) {
               value={username}
               onChange={setUsername}
               placeholder="Camera username"
+              hint="Login of the camera itself (usually 'admin')."
             />
             <Field
               label="Password"
@@ -166,6 +172,7 @@ export default function CameraAddDialog({ open, onClose }: Props) {
               onChange={setPassword}
               placeholder="Camera password"
               type="password"
+              hint="Stored encrypted (AES-256) — never shown again."
             />
           </div>
           <Field
@@ -173,12 +180,14 @@ export default function CameraAddDialog({ open, onClose }: Props) {
             value={streamMain}
             onChange={setStreamMain}
             placeholder="rtsp://192.168.1.100:554/Streaming/Channels/101"
+            hint="Full-quality RTSP address. Use Detect to fill this automatically. Hikvision: /Streaming/Channels/101, Dahua: /cam/realmonitor?channel=1&subtype=0"
           />
           <Field
             label="Sub Stream URI"
             value={streamSub}
             onChange={setStreamSub}
             placeholder="rtsp://192.168.1.100:554/Streaming/Channels/102"
+            hint="Lower-resolution stream used for the dashboard grid, AI detection and recording — saves bandwidth and disk. Highly recommended."
           />
           <LocationSelect value={locationId} onChange={setLocationId} />
           <StorageBackendSelect value={storageBackendId} onChange={setStorageBackendId} />
@@ -211,6 +220,7 @@ function Field({
   placeholder,
   type = "text",
   required,
+  hint,
 }: {
   label: string;
   value: string;
@@ -218,6 +228,7 @@ function Field({
   placeholder: string;
   type?: string;
   required?: boolean;
+  hint?: string;
 }) {
   return (
     <div>
@@ -230,6 +241,7 @@ function Field({
         required={required}
         className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-gray-100 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
       />
+      {hint && <p className="text-[11px] text-gray-500 mt-1 leading-snug">{hint}</p>}
     </div>
   );
 }

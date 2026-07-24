@@ -43,7 +43,8 @@ async def _load_cameras() -> list[dict]:
                 SELECT id, name, recording_mode, stream_main_uri, stream_sub_uri,
                        username, encrypted_password
                 FROM cameras
-                WHERE is_active AND recording_mode != 'disabled'
+                WHERE is_active
+                  AND recording_mode NOT IN ('disabled', 'never')
                   AND (stream_main_uri IS NOT NULL OR stream_sub_uri IS NOT NULL)
                 """
             )
