@@ -33,6 +33,7 @@ from ...services.discovery_service import (
     get_discovery_status,
     start_discovery,
 )
+from ...services.snapshot_service import capture_snapshot_b64
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/api/v1/cameras", tags=["cameras"])
@@ -141,6 +142,19 @@ async def test_camera(
 ):
     result = await test_camera_connection(camera_id, db)
     return {"data": result}
+
+
+@router.post("/{camera_id}/snapshot")
+async def camera_snapshot(
+    camera_id: uuid.UUID,
+    current_user: Annotated[dict, Depends(get_current_user)],
+):
+    """Capture one JPEG frame from the sub-stream; return as a data URL.
+
+    Used by the zone editor (and other UI) to draw overlays on a real frame.
+    """
+    b64 = await capture_snapshot_b64(camera_id)
+    return {"data": {"snapshot_url": f"data:image/jpeg;base64,{b64}"}}
 
 
 @router.post("/discover", status_code=status.HTTP_202_ACCEPTED)

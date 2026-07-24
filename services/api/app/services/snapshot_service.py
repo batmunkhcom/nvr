@@ -63,6 +63,8 @@ async def capture_snapshot_b64(camera_id: uuid.UUID) -> str:
             "error",
             "-rtsp_transport",
             (camera.stream_transport if hasattr(camera, "stream_transport") else "tcp"),
+            "-timeout",
+            "15000000",  # 15s socket timeout — Dahua stalls without it
             "-i",
             authed_uri,
             "-vframes",
@@ -77,7 +79,7 @@ async def capture_snapshot_b64(camera_id: uuid.UUID) -> str:
         )
 
         try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=8.0)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=12.0)
         except TimeoutError:
             proc.kill()
             raise HTTPException(
