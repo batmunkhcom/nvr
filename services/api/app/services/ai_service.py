@@ -142,14 +142,18 @@ async def analyze_image(
 
 async def ollama_chat(messages: list[dict], snapshot_b64: str | None = None) -> str:
     """Chat with Ollama using native /api/chat endpoint."""
-    formatted: list[dict] = [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in messages]
+    formatted: list[dict] = [
+        {"role": m.get("role", "user"), "content": m.get("content", "")} for m in messages
+    ]
 
     if snapshot_b64:
-        formatted.append({
-            "role": "user",
-            "content": "Analyze the attached security camera snapshot in context of the conversation above.",
-            "images": [snapshot_b64],
-        })
+        formatted.append(
+            {
+                "role": "user",
+                "content": "Analyze the attached security camera snapshot in context of the conversation above.",
+                "images": [snapshot_b64],
+            }
+        )
 
     try:
         async with httpx.AsyncClient(timeout=60) as client:
@@ -175,7 +179,9 @@ async def ollama_summarize(camera_id: UUID, date_str: str) -> str:
             from ..models.camera import Camera
             from ..models.event import Event
 
-            camera = (await db.execute(select(Camera).where(Camera.id == camera_id))).scalar_one_or_none()
+            camera = (
+                await db.execute(select(Camera).where(Camera.id == camera_id))
+            ).scalar_one_or_none()
             if not camera:
                 return "Camera not found"
 

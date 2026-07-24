@@ -61,9 +61,73 @@ async def get_recording(recording_id: uuid.UUID, db: AsyncSession) -> Recording:
 
 async def delete_recording(recording_id: uuid.UUID, db: AsyncSession) -> None:
     recording = await get_recording(recording_id, db)
+    _delete_files(recording.file_path)
     await db.delete(recording)
     await db.flush()
     logger.info("recording_deleted", recording_id=str(recording_id))
+
+
+def _delete_files(file_path: str) -> int:
+    """Delete segment + sidecar thumbnail. Returns bytes freed (best effort)."""
+    import os
+
+    freed = 0
+    for path in (file_path, os.path.splitext(file_path)[0] + ".jpg"):
+        try:
+            freed += os.path.getsize(path)
+            os.unlink(path)
+        except OSError:
+            pass
+    return freed
+
+
+async def bulk_delete_recordings(
+    db: AsyncSession,
+    ids: list[uuid.UUID] | None = None,
+    delete_all: bool = False,
+    before: datetime | None = None,
+    camera_id: uuid.UUID | None = None,
+) -> dict:
+    """Delete many recordings at once (files + rows).
+
+    Selectors: explicit ids, delete_all (optionally per camera), or
+    before=<datetime> (optionally per camera). Files still being written
+    (modified <60s ago) are skipped.
+    """
+    import os
+    import time
+
+    query = select(Recording)
+    if ids:
+        query = query.where(Recording.id.in_(ids))
+    elif delete_all:
+        if camera_id:
+            query = query.where(Recording.camera_id == camera_id)
+    elif before is not None:
+        query = query.where(Recording.end_time < before)
+        if camera_id:
+            query = query.where(Recording.camera_id == camera_id)
+    else:
+        return {"deleted": 0, "freed_bytes": 0}
+
+    result = await db.execute(query.limit(5000))
+    recordings = result.scalars().all()
+
+    deleted = 0
+    freed = 0
+    now = time.time()
+    for rec in recordings:
+        try:
+            if os.path.exists(rec.file_path) and now - os.path.getmtime(rec.file_path) < 60:
+                continue  # still being written
+        except OSError:
+            pass
+        freed += _delete_files(rec.file_path)
+        await db.delete(rec)
+        deleted += 1
+    await db.flush()
+    logger.info("recordings_bulk_deleted", deleted=deleted, freed_bytes=freed)
+    return {"deleted": deleted, "freed_bytes": freed}
 
 
 async def list_storage_backends(db: AsyncSession) -> dict:
@@ -219,6 +283,7 @@ async def get_timeline_segments(
     for r in recordings:
         segments.append(
             {
+                "id": str(r.id),
                 "camera_id": str(r.camera_id),
                 "start_time": r.start_time.isoformat(),
                 "end_time": r.end_time.isoformat() if r.end_time else None,

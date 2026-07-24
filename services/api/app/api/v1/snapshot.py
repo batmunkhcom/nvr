@@ -74,7 +74,7 @@ async def capture_snapshot(
             "-loglevel",
             "error",
             "-rtsp_transport",
-            (camera.stream_transport if hasattr(camera, 'stream_transport') else "tcp"),
+            (camera.stream_transport if hasattr(camera, "stream_transport") else "tcp"),
             "-i",
             authed_uri,
             "-vframes",

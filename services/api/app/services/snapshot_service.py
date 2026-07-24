@@ -62,7 +62,7 @@ async def capture_snapshot_b64(camera_id: uuid.UUID) -> str:
             "-loglevel",
             "error",
             "-rtsp_transport",
-            (camera.stream_transport if hasattr(camera, 'stream_transport') else "tcp"),
+            (camera.stream_transport if hasattr(camera, "stream_transport") else "tcp"),
             "-i",
             authed_uri,
             "-vframes",

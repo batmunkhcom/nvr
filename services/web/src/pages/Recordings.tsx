@@ -1,38 +1,86 @@
-import { useState } from "react";
-import { useRecordings, useTimeline, useRecordingStreamUrl, useDeleteRecording } from "../hooks/useRecordings";
+import { useMemo, useState } from "react";
+import { useRecordings, useTimeline, useRecordingStreamUrl, useDeleteRecording, useBulkDeleteRecordings, recordingThumbnailUrl } from "../hooks/useRecordings";
 import { useCameras } from "../hooks/useCameras";
 import { TimelinePlayer, RecordingPlayer } from "../components/recording";
 import RecordingSchedulesSection from "../components/config/RecordingSchedulesSection";
 import { Recording } from "../types/recording";
-import { Film, Play, Trash2, X, ChevronLeft, ChevronRight, Clock } from "lucide-react";
+import { Film, Play, Trash2, X, ChevronLeft, ChevronRight, Clock, CalendarClock } from "lucide-react";
 import EmptyState from "../components/ui/EmptyState";
 import { useToast } from "../components/ui/Toast";
 import { useConfirm } from "../components/ui/ConfirmDialog";
+
+function fmtBytes(bytes: number): string {
+  if (bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  let val = bytes;
+  while (val >= 1024 && i < units.length - 1) { val /= 1024; i++; }
+  return `${val.toFixed(val < 10 ? 1 : 0)} ${units[i]}`;
+}
 
 export default function Recordings() {
   const [activeTab, setActiveTab] = useState<"recordings" | "schedules">("recordings");
   const { confirm } = useConfirm();
   const [selectedCameraId, setSelectedCameraId] = useState<string>("");
   const [selectedDate, setSelectedDate] = useState<string>(today());
+  const [fromTime, setFromTime] = useState<string>("");
+  const [toTime, setToTime] = useState<string>("");
   const [activePlaybackId, setActivePlaybackId] = useState<string | null>(null);
-  const [activePlaybackTime, setActivePlaybackTime] = useState<string | null>(null);
+  const [seekOffset, setSeekOffset] = useState<number | undefined>(undefined);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [olderThan, setOlderThan] = useState<string>("");
   const [page, setPage] = useState(1);
   const { toast } = useToast();
 
   const filters: Record<string, string> = { page: String(page), per_page: "25" };
   if (selectedCameraId) filters.camera_id = selectedCameraId;
+  if (fromTime) filters.from_time = new Date(fromTime).toISOString();
+  if (toTime) filters.to_time = new Date(toTime).toISOString();
 
   const { data: recordings } = useRecordings(filters);
   const { data: cameras } = useCameras();
   const { data: segments = [] } = useTimeline(selectedCameraId, selectedDate);
   const streamUrl = useRecordingStreamUrl(activePlaybackId || "");
   const deleteRecording = useDeleteRecording();
+  const bulkDelete = useBulkDeleteRecordings();
 
-  const handleSeek = (time: string) => setActivePlaybackTime(time);
+  const recList = useMemo(() => recordings?.data || [], [recordings]);
+  const allSelected = recList.length > 0 && recList.every((r) => selected.has(r.id));
+
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(recList.map((r) => r.id)));
+    }
+  };
+
+  const toggleOne = (id: string) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setSelected(next);
+  };
+
+  /** Click on timeline: play the segment covering that moment, seeked. */
+  const handleSeek = (time: string) => {
+    const target = new Date(`${selectedDate}T${time}`);
+    if (Number.isNaN(target.getTime())) return;
+    const seg = segments.find((s) => {
+      const start = new Date(s.start_time);
+      const end = s.end_time ? new Date(s.end_time) : new Date(start.getTime() + 5 * 60_000);
+      return target >= start && target <= end;
+    });
+    if (seg) {
+      setActivePlaybackId(seg.id);
+      setSeekOffset(Math.max(0, (target.getTime() - new Date(seg.start_time).getTime()) / 1000));
+    } else {
+      toast("warning", "No recording at that time");
+    }
+  };
 
   const handlePlayRecording = (recording: Recording) => {
     setActivePlaybackId(recording.id);
-    setActivePlaybackTime(null);
+    setSeekOffset(undefined);
   };
 
   const handleDelete = async (id: string) => {
@@ -40,15 +88,45 @@ export default function Recordings() {
     if (!ok) return;
     try {
       await deleteRecording.mutateAsync(id);
+      setSelected((prev) => { const n = new Set(prev); n.delete(id); return n; });
       toast("success", "Recording deleted");
     } catch {
       toast("error", "Failed to delete recording");
     }
   };
 
+  const handleBulkDelete = async (mode: "selected" | "all" | "older") => {
+    let payload: Parameters<typeof bulkDelete.mutateAsync>[0];
+    let question: string;
+    if (mode === "selected") {
+      if (selected.size === 0) return;
+      question = `Delete ${selected.size} selected recording(s)? This cannot be undone.`;
+      payload = { ids: [...selected] };
+    } else if (mode === "all") {
+      question = selectedCameraId
+        ? "Delete ALL recordings of this camera? This cannot be undone."
+        : "Delete ALL recordings of ALL cameras? This cannot be undone.";
+      payload = { delete_all: true, camera_id: selectedCameraId || undefined };
+    } else {
+      if (!olderThan) { toast("warning", "Pick a date first"); return; }
+      question = `Delete every recording before ${olderThan}? This cannot be undone.`;
+      payload = { before: new Date(olderThan).toISOString(), camera_id: selectedCameraId || undefined };
+    }
+    const ok = await confirm(question);
+    if (!ok) return;
+    try {
+      const res = await bulkDelete.mutateAsync(payload);
+      setSelected(new Set());
+      toast("success", `Deleted ${res.deleted} recordings (${fmtBytes(res.freed_bytes)} freed)`);
+    } catch {
+      toast("error", "Bulk delete failed");
+    }
+  };
+
   const handleCameraChange = (id: string) => {
     setSelectedCameraId(id);
     setPage(1);
+    setSelected(new Set());
   };
 
   const meta = recordings?.metadata;
@@ -58,13 +136,14 @@ export default function Recordings() {
     <div className="page-enter">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold">Recordings</h1>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
             {activeTab === "recordings" && (
               <>
                 <select
                  value={selectedCameraId}
                  onChange={(e) => handleCameraChange(e.target.value)}
                  className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-sm text-gray-300"
+                 title="Filter by camera"
                 >
                   <option value="">All Cameras</option>
                   {(cameras || []).map((c) => (
@@ -76,7 +155,32 @@ export default function Recordings() {
                  value={selectedDate}
                  onChange={(e) => setSelectedDate(e.target.value)}
                  className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-sm text-gray-300"
+                 title="Timeline date"
                 />
+                <input
+                 type="datetime-local"
+                 value={fromTime}
+                 onChange={(e) => { setFromTime(e.target.value); setPage(1); }}
+                 className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300"
+                 title="From (start of time range)"
+                />
+                <span className="text-gray-600 text-xs">–</span>
+                <input
+                 type="datetime-local"
+                 value={toTime}
+                 onChange={(e) => { setToTime(e.target.value); setPage(1); }}
+                 className="px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300"
+                 title="To (end of time range)"
+                />
+                {(fromTime || toTime) && (
+                  <button
+                    onClick={() => { setFromTime(""); setToTime(""); }}
+                    className="p-1.5 bg-gray-800 hover:bg-gray-700 rounded text-gray-400"
+                    title="Clear time filter"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -112,43 +216,97 @@ export default function Recordings() {
                   date={selectedDate}
                   segments={segments}
                   onSeek={handleSeek}
-                  currentTime={activePlaybackTime}
                 />
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Click anywhere on the timeline to play the recording from that moment.
+                </p>
               </div>
             )}
 
             {activePlaybackId && (
               <div className="mb-4 relative">
                 <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-semibold text-gray-300">Now Playing</h3>
+                  <h3 className="text-sm font-semibold text-gray-300">
+                    Now Playing {seekOffset !== undefined && `(from ${Math.floor(seekOffset / 60)}:${String(Math.floor(seekOffset % 60)).padStart(2, "0")})`}
+                  </h3>
                   <button
-                    onClick={() => { setActivePlaybackId(null); setActivePlaybackTime(null); }}
+                    onClick={() => { setActivePlaybackId(null); setSeekOffset(undefined); }}
                     className="p-1 bg-gray-800 hover:bg-gray-700 rounded text-gray-400"
                   >
                     <X size={16} />
                   </button>
                 </div>
-                <RecordingPlayer src={streamUrl} className="max-h-96" />
+                <RecordingPlayer src={streamUrl} startOffset={seekOffset} className="max-h-96" />
               </div>
             )}
 
-            {!recordings?.data?.length ? (
+            {/* Bulk actions */}
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
+              <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleAll}
+                  className="rounded border-gray-600 bg-gray-800 text-blue-600"
+                />
+                Select all
+              </label>
+              <button
+                onClick={() => handleBulkDelete("selected")}
+                disabled={selected.size === 0 || bulkDelete.isPending}
+                className="flex items-center gap-1 px-2.5 py-1.5 bg-red-700/80 hover:bg-red-600 disabled:opacity-40 rounded text-xs text-white"
+              >
+                <Trash2 size={12} /> Delete selected{selected.size > 0 && ` (${selected.size})`}
+              </button>
+              <button
+                onClick={() => handleBulkDelete("all")}
+                disabled={bulkDelete.isPending || recList.length === 0}
+                className="flex items-center gap-1 px-2.5 py-1.5 bg-gray-800 hover:bg-red-700 disabled:opacity-40 rounded text-xs text-gray-300 hover:text-white"
+              >
+                <Trash2 size={12} /> Delete all{selectedCameraId ? " (this camera)" : ""}
+              </button>
+              <div className="flex items-center gap-1.5 ml-auto">
+                <CalendarClock size={14} className="text-gray-500" />
+                <input
+                  type="date"
+                  value={olderThan}
+                  onChange={(e) => setOlderThan(e.target.value)}
+                  className="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-gray-300"
+                  title="Delete recordings before this date"
+                />
+                <button
+                  onClick={() => handleBulkDelete("older")}
+                  disabled={!olderThan || bulkDelete.isPending}
+                  className="px-2.5 py-1.5 bg-gray-800 hover:bg-red-700 disabled:opacity-40 rounded text-xs text-gray-300 hover:text-white"
+                >
+                  Delete older
+                </button>
+              </div>
+            </div>
+
+            {!recList.length ? (
               <EmptyState
                 icon={<Film size={28} />}
                 title="No recordings found"
-                description="Select a camera and date to browse recorded segments."
+                description="Recordings appear here once the recording engine writes segments. Adjust the camera or time filter."
               />
             ) : (
               <>
                 <div className="space-y-2">
-                  {recordings.data.map((rec: Recording) => (
+                  {recList.map((rec: Recording) => (
                     <div
                       key={rec.id}
-                      className="flex items-center gap-4 p-3 bg-gray-900 rounded border border-gray-800 hover:border-gray-700"
+                      className={`flex items-center gap-4 p-3 bg-gray-900 rounded border transition-colors ${
+                        selected.has(rec.id) ? "border-blue-600/60 bg-blue-900/10" : "border-gray-800 hover:border-gray-700"
+                      }`}
                     >
-                      <div className="w-24 h-14 bg-gray-800 rounded flex items-center justify-center shrink-0">
-                        <Film size={20} className="text-gray-600" />
-                      </div>
+                      <input
+                        type="checkbox"
+                        checked={selected.has(rec.id)}
+                        onChange={() => toggleOne(rec.id)}
+                        className="rounded border-gray-600 bg-gray-800 text-blue-600 flex-shrink-0"
+                      />
+                      <RecordingThumb id={rec.id} />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm truncate">
                           {new Date(rec.start_time).toLocaleDateString()}{" "}
@@ -228,4 +386,23 @@ export default function Recordings() {
 
 function today(): string {
   return new Date().toISOString().split("T")[0];
+}
+
+function RecordingThumb({ id }: { id: string }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div className="w-24 h-14 bg-gray-800 rounded overflow-hidden flex items-center justify-center shrink-0">
+      {failed ? (
+        <Film size={20} className="text-gray-600" />
+      ) : (
+        <img
+          src={recordingThumbnailUrl(id)}
+          alt=""
+          loading="lazy"
+          className="w-full h-full object-cover"
+          onError={() => setFailed(true)}
+        />
+      )}
+    </div>
+  );
 }

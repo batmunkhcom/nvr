@@ -14,8 +14,10 @@ from .ws_manager import ws_manager
 
 async def broadcast_metric(camera_id: UUID | str, metrics: dict[str, Any]) -> None:
     """Broadcast network metric via existing ws_manager."""
-    await ws_manager.broadcast({
-         "type": "network_metric",
-         "camera_id": str(camera_id),
-         "metrics": metrics,
-     })
+    await ws_manager.broadcast(
+        {
+            "type": "network_metric",
+            "camera_id": str(camera_id),
+            "metrics": metrics,
+        }
+    )

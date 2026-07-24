@@ -35,6 +35,33 @@ export function useRecordingStreamUrl(recordingId: string) {
   return `/api/v1/recordings/${recordingId}/stream?token=${encodeURIComponent(token)}`;
 }
 
+export function recordingThumbnailUrl(recordingId: string) {
+  const token = localStorage.getItem("access_token") || "";
+  return `/api/v1/recordings/${recordingId}/thumbnail?token=${encodeURIComponent(token)}`;
+}
+
+export interface BulkDeletePayload {
+  ids?: string[];
+  delete_all?: boolean;
+  before?: string;
+  camera_id?: string;
+}
+
+export function useBulkDeleteRecordings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: BulkDeletePayload) => {
+      const res = await apiClient.post("/recordings/bulk-delete", payload);
+      return res.data?.data as { deleted: number; freed_bytes: number };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["recordings"] });
+      qc.invalidateQueries({ queryKey: ["timeline"] });
+      qc.invalidateQueries({ queryKey: ["storage"] });
+    },
+  });
+}
+
 export function useStorageUsage() {
   return useQuery({
     queryKey: ["storage", "usage"],

@@ -18,6 +18,7 @@ export interface Recording {
 }
 
 export interface TimelineSegment {
+  id: string;
   camera_id: string;
   start_time: string;
   end_time: string;

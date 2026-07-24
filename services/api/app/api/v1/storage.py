@@ -106,18 +106,16 @@ async def get_analysis(
 
     from ...models.system_config import SystemConfig
 
-    result = await db.execute(
-        select(SystemConfig).where(SystemConfig.key == "storage.analysis")
-    )
+    result = await db.execute(select(SystemConfig).where(SystemConfig.key == "storage.analysis"))
     row = result.scalar_one_or_none()
     if not row:
         return {"data": None}
     value = row.value
     if isinstance(value, str):
-        try:
+        import contextlib
+
+        with contextlib.suppress(ValueError, TypeError):
             value = json.loads(value)
-        except (ValueError, TypeError):
-            pass
     return {"data": value}
 
 

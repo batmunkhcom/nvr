@@ -23,10 +23,11 @@ async def lifespan(app: FastAPI):
     logger.info("app_starting", version="0.1.0", env=settings.api_log_level)
     await get_redis()
     from .services.health_check_loop import start_health_check, stop_health_check
+    from .services.network_alerts import network_alert_service
 
     # Initialize and start network monitor
     from .services.network_monitor import network_monitor
-    from .services.network_alerts import network_alert_service
+
     network_monitor.init(settings.database_url)
     network_alert_service.init(settings.database_url)
     await network_monitor.start()

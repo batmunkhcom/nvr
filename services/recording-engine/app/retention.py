@@ -29,6 +29,16 @@ PROTECT_SECONDS = 600  # never delete segments newer than 10 minutes
 MAX_DELETES_PER_RUN = 500
 
 
+def _delete_sidecar(segment_path: str) -> None:
+    """Remove the thumbnail JPEG belonging to a segment (if any)."""
+    thumb = os.path.splitext(segment_path)[0] + ".jpg"
+    try:
+        if os.path.exists(thumb):
+            os.unlink(thumb)
+    except OSError:
+        pass
+
+
 class RetentionManager:
     """Keeps recordings within age and disk-space watermarks."""
 
@@ -137,6 +147,7 @@ class RetentionManager:
             try:
                 size = os.path.getsize(file_path)
                 os.unlink(file_path)
+                _delete_sidecar(file_path)
             except FileNotFoundError:
                 pass
             except OSError:

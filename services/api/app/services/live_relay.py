@@ -51,12 +51,16 @@ async def start_relay(
     logger.info("relay_delegating", camera_id=cid, rtsp_uri=rtsp_uri)
 
     try:
-        result = await _call_stream_manager("POST", "/relay/start", {
-            "relay_key": cid,
-            "rtsp_uri": rtsp_uri,
-            "transport": rtsp_transport,
-            "target": target,
-        })
+        result = await _call_stream_manager(
+            "POST",
+            "/relay/start",
+            {
+                "relay_key": cid,
+                "rtsp_uri": rtsp_uri,
+                "transport": rtsp_transport,
+                "target": target,
+            },
+        )
         status = result.get("status", "")
         if status == "cooldown":
             STREAM_DICT.pop(cid, None)

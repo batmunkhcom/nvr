@@ -79,6 +79,8 @@ def build_ffmpeg_args(stream_url: str, camera_dir: str, segment_seconds: int) ->
         "segment",
         "-segment_format",
         "mp4",
+        "-segment_format_options",
+        "movflags=+faststart",
         "-segment_time",
         str(segment_seconds),
         "-segment_atclocktime",

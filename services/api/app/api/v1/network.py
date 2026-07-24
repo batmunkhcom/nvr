@@ -4,7 +4,7 @@ import uuid
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,7 +42,8 @@ async def get_latest_metrics(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Latest metrics for all cameras."""
-    result = await db.execute(text("""
+    result = await db.execute(
+        text("""
         SELECT c.id, c.name, c.location, nm.status, nm.outbound_mbps, nm.rtt_ms,
                nm.packet_loss_pct, nm.fps_current, nm.bitrate_current,
                nm.ffmpeg_cpu, nm.ffmpeg_memory_mb, nm.recorded_at
@@ -55,26 +56,29 @@ async def get_latest_metrics(
         ) nm ON true
         WHERE c.is_active = true
         ORDER BY c.display_order ASC
-    """))
+    """)
+    )
     rows = result.fetchall()
 
-    return {"data": [
-        {
-            "camera_id": str(row[0]),
-            "camera_name": row[1],
-            "location": row[2],
-            "status": row[3] or "unknown",
-            "outbound_mbps": row[4],
-            "rtt_ms": row[5],
-            "packet_loss_pct": row[6],
-            "fps_current": row[7],
-            "bitrate_current": row[8],
-            "ffmpeg_cpu": row[9],
-            "ffmpeg_memory_mb": row[10],
-            "recorded_at": row[11].isoformat() if row[11] else None,
-        }
-        for row in rows
-    ]}
+    return {
+        "data": [
+            {
+                "camera_id": str(row[0]),
+                "camera_name": row[1],
+                "location": row[2],
+                "status": row[3] or "unknown",
+                "outbound_mbps": row[4],
+                "rtt_ms": row[5],
+                "packet_loss_pct": row[6],
+                "fps_current": row[7],
+                "bitrate_current": row[8],
+                "ffmpeg_cpu": row[9],
+                "ffmpeg_memory_mb": row[10],
+                "recorded_at": row[11].isoformat() if row[11] else None,
+            }
+            for row in rows
+        ]
+    }
 
 
 @router.get("/metrics/{camera_id}")
@@ -84,7 +88,8 @@ async def get_camera_metrics(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Latest metrics for single camera."""
-    result = await db.execute(text("""
+    result = await db.execute(
+        text("""
         SELECT c.name, c.location, nm.*
         FROM cameras c
         LEFT JOIN LATERAL (
@@ -94,35 +99,39 @@ async def get_camera_metrics(
             LIMIT 1
         ) nm ON true
         WHERE c.id = :camera_id
-    """), {"camera_id": camera_id})
+    """),
+        {"camera_id": camera_id},
+    )
     row = result.fetchone()
 
     if not row:
         return {"data": None}
 
-    return {"data": {
-        "camera_name": row[0],
-        "location": row[1],
-        "id": str(row[2]),
-        "camera_id": str(row[3]),
-        "recorded_at": row[4].isoformat() if row[4] else None,
-        "inbound_mbps": row[5],
-        "outbound_mbps": row[6],
-        "rtt_ms": row[7],
-        "jitter_ms": row[8],
-        "rtsp_latency": row[9],
-        "packets_sent": row[10],
-        "packets_recv": row[11],
-        "packet_loss_pct": row[12],
-        "fps_current": row[13],
-        "bitrate_current": row[14],
-        "rtsp_reconnect_cnt": row[15],
-        "ffmpeg_pid": row[16],
-        "ffmpeg_cpu": row[17],
-        "ffmpeg_memory_mb": row[18],
-        "status": row[19] or "unknown",
-        "error_message": row[20],
-    }}
+    return {
+        "data": {
+            "camera_name": row[0],
+            "location": row[1],
+            "id": str(row[2]),
+            "camera_id": str(row[3]),
+            "recorded_at": row[4].isoformat() if row[4] else None,
+            "inbound_mbps": row[5],
+            "outbound_mbps": row[6],
+            "rtt_ms": row[7],
+            "jitter_ms": row[8],
+            "rtsp_latency": row[9],
+            "packets_sent": row[10],
+            "packets_recv": row[11],
+            "packet_loss_pct": row[12],
+            "fps_current": row[13],
+            "bitrate_current": row[14],
+            "rtsp_reconnect_cnt": row[15],
+            "ffmpeg_pid": row[16],
+            "ffmpeg_cpu": row[17],
+            "ffmpeg_memory_mb": row[18],
+            "status": row[19] or "unknown",
+            "error_message": row[20],
+        }
+    }
 
 
 @router.get("/metrics/{camera_id}/history")
@@ -135,16 +144,25 @@ async def get_camera_history(
     per_page: int = Query(100, ge=1, le=500),
 ):
     """Historical metrics for single camera with time range."""
-    interval_map = {"1h": "1 hour", "6h": "6 hours", "12h": "12 hours", "24h": "24 hours", "7d": "7 days"}
+    interval_map = {
+        "1h": "1 hour",
+        "6h": "6 hours",
+        "12h": "12 hours",
+        "24h": "24 hours",
+        "7d": "7 days",
+    }
     interval = interval_map.get(range, "24 hours")
 
-    cam_result = await db.execute(text("SELECT name, location FROM cameras WHERE id = :cid"), {"cid": camera_id})
+    cam_result = await db.execute(
+        text("SELECT name, location FROM cameras WHERE id = :cid"), {"cid": camera_id}
+    )
     cam_row = cam_result.fetchone()
     if not cam_row:
         return {"data": None}
 
     offset = (page - 1) * per_page
-    result = await db.execute(text("""
+    result = await db.execute(
+        text("""
         SELECT id, recorded_at, inbound_mbps, outbound_mbps, rtt_ms, jitter_ms,
                rtsp_latency, packets_sent, packets_recv, packet_loss_pct,
                fps_current, bitrate_current, rtsp_reconnect_cnt,
@@ -154,14 +172,19 @@ async def get_camera_history(
           AND recorded_at > NOW() - INTERVAL ':interval'
         ORDER BY recorded_at DESC
         LIMIT :limit OFFSET :offset
-    """), {"camera_id": camera_id, "interval": interval, "limit": per_page, "offset": offset})
+    """),
+        {"camera_id": camera_id, "interval": interval, "limit": per_page, "offset": offset},
+    )
     rows = result.fetchall()
 
-    count_result = await db.execute(text("""
+    count_result = await db.execute(
+        text("""
         SELECT COUNT(1) FROM network_metrics
         WHERE camera_id = :camera_id
           AND recorded_at > NOW() - INTERVAL ':interval'
-    """), {"camera_id": camera_id, "interval": interval})
+    """),
+        {"camera_id": camera_id, "interval": interval},
+    )
     total_count = count_result.scalar() or 0
 
     return {
@@ -206,7 +229,8 @@ async def get_network_summary(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Summary: total online/offline, avg bandwidth, active alerts."""
-    cam_result = await db.execute(text("""
+    cam_result = await db.execute(
+        text("""
         SELECT nm.status, COUNT(*)::int
         FROM cameras c
         LEFT JOIN LATERAL (
@@ -217,7 +241,8 @@ async def get_network_summary(
         ) nm ON true
         WHERE c.is_active = true
         GROUP BY nm.status
-    """))
+    """)
+    )
 
     status_counts = {"online": 0, "offline": 0, "degraded": 0, "unknown": 0}
     for row in cam_result.fetchall():
@@ -227,7 +252,8 @@ async def get_network_summary(
 
     total_cameras = sum(status_counts.values())
 
-    avg_result = await db.execute(text("""
+    avg_result = await db.execute(
+        text("""
         SELECT AVG(nm.outbound_mbps)::numeric(10,2), AVG(nm.rtt_ms)::numeric(8,2)
         FROM cameras c
         JOIN LATERAL (
@@ -237,19 +263,23 @@ async def get_network_summary(
             LIMIT 1
         ) nm ON true
         WHERE c.is_active = true AND nm.outbound_mbps IS NOT NULL AND nm.rtt_ms IS NOT NULL
-    """))
+    """)
+    )
     avg_row = avg_result.fetchone()
 
-    alert_result = await db.execute(text("""
+    alert_result = await db.execute(
+        text("""
         SELECT COUNT(*)::int,
                SUM(CASE WHEN severity = 'warning' THEN 1 ELSE 0 END)::int,
                SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END)::int
         FROM network_alerts
         WHERE acknowledged_at IS NULL AND resolved_at IS NULL
-    """))
+    """)
+    )
     alert_row = alert_result.fetchone()
 
-    loc_result = await db.execute(text("""
+    loc_result = await db.execute(
+        text("""
         SELECT c.location, nm.status, COUNT(*)::int
         FROM cameras c
         LEFT JOIN LATERAL (
@@ -261,13 +291,20 @@ async def get_network_summary(
         WHERE c.is_active = true AND c.location IS NOT NULL
         GROUP BY c.location, nm.status
         ORDER BY c.location, nm.status
-    """))
+    """)
+    )
 
     cameras_by_location: dict[str, dict] = {}
     for row in loc_result.fetchall():
         loc = row[0]
         if loc not in cameras_by_location:
-            cameras_by_location[loc] = {"total": 0, "online": 0, "degraded": 0, "offline": 0, "avg_bw": None}
+            cameras_by_location[loc] = {
+                "total": 0,
+                "online": 0,
+                "degraded": 0,
+                "offline": 0,
+                "avg_bw": None,
+            }
         cameras_by_location[loc]["total"] += 1
         status_key = row[1] or "unknown"
         if status_key == "online":
@@ -303,14 +340,16 @@ async def get_active_alerts(
     if network_alert_service._engine:
         alerts = await network_alert_service.get_active_alerts(network_alert_service._engine)
     else:
-        result = await db.execute(text("""
+        result = await db.execute(
+            text("""
             SELECT na.id, na.camera_id, c.name as camera_name, na.alert_type, na.severity,
                    na.message, na.triggered_at, na.acknowledged_at, na.metadata
             FROM network_alerts na
             JOIN cameras c ON na.camera_id = c.id
             WHERE na.acknowledged_at IS NULL
             ORDER BY na.triggered_at DESC
-        """))
+        """)
+        )
         rows = result.fetchall()
         alerts = [
             {
@@ -352,7 +391,8 @@ async def get_all_alerts(
 
     where_clause = " AND ".join(conditions) if conditions else "1=1"
 
-    result = await db.execute(text(f"""
+    result = await db.execute(
+        text(f"""
         SELECT na.id, na.camera_id, c.name as camera_name, c.location, na.alert_type, na.severity,
                na.message, na.triggered_at, na.acknowledged_at, na.metadata
         FROM network_alerts na
@@ -360,14 +400,19 @@ async def get_all_alerts(
         WHERE {where_clause}
         ORDER BY na.triggered_at DESC
         LIMIT :limit OFFSET :offset
-    """), {**params, "limit": per_page, "offset": offset})
+    """),
+        {**params, "limit": per_page, "offset": offset},
+    )
     rows = result.fetchall()
 
-    count_result = await db.execute(text(f"""
+    count_result = await db.execute(
+        text(f"""
         SELECT COUNT(1) FROM network_alerts na
         JOIN cameras c ON na.camera_id = c.id
         WHERE {where_clause}
-    """), params)
+    """),
+        params,
+    )
     total_count = count_result.scalar() or 0
 
     return {
@@ -406,19 +451,22 @@ async def acknowledge_alert(
             alert_id, current_user["id"], network_alert_service._engine
         )
     else:
-        result_obj = await db.execute(text("""
+        result_obj = await db.execute(
+            text("""
             UPDATE network_alerts
             SET acknowledged_at = NOW(), acknowledged_by = :user_id
             WHERE id = :alert_id AND acknowledged_at IS NULL
             RETURNING id, acknowledged_at
-        """), {"alert_id": alert_id, "user_id": current_user["id"]})
+        """),
+            {"alert_id": alert_id, "user_id": current_user["id"]},
+        )
         row = result_obj.fetchone()
         await db.commit()
 
         if row:
-            result = {'id': str(row[0]), 'acknowledged_at': row[1].isoformat()}
+            result = {"id": str(row[0]), "acknowledged_at": row[1].isoformat()}
         else:
-            result = {'error': 'Alert not found or already acknowledged'}
+            result = {"error": "Alert not found or already acknowledged"}
 
     return {"data": result}
 
@@ -430,13 +478,16 @@ async def get_camera_config(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Get per-camera monitoring config."""
-    result = await db.execute(text("""
+    result = await db.execute(
+        text("""
         SELECT poll_interval, ping_enabled, ping_count, ping_timeout, rtsp_check_enabled,
                bandwidth_warn_mbps, bandwidth_crit_mbps, latency_warn_ms, latency_crit_ms,
                packet_loss_warn_pct, packet_loss_crit_pct, retention_days
         FROM camera_network_config
         WHERE camera_id = :camera_id
-    """), {"camera_id": camera_id})
+    """),
+        {"camera_id": camera_id},
+    )
     row = result.fetchone()
 
     if not row:
@@ -470,9 +521,18 @@ async def update_camera_config(
 ):
     """Update per-camera monitoring config."""
     allowed_fields = {
-        "poll_interval", "ping_enabled", "ping_count", "ping_timeout", "rtsp_check_enabled",
-        "bandwidth_warn_mbps", "bandwidth_crit_mbps", "latency_warn_ms", "latency_crit_ms",
-        "packet_loss_warn_pct", "packet_loss_crit_pct", "retention_days",
+        "poll_interval",
+        "ping_enabled",
+        "ping_count",
+        "ping_timeout",
+        "rtsp_check_enabled",
+        "bandwidth_warn_mbps",
+        "bandwidth_crit_mbps",
+        "latency_warn_ms",
+        "latency_crit_ms",
+        "packet_loss_warn_pct",
+        "packet_loss_crit_pct",
+        "retention_days",
     }
     updates = {k: v for k, v in body.items() if k in allowed_fields}
 
@@ -482,11 +542,14 @@ async def update_camera_config(
     set_clause = ", ".join(f"{k} = :{k}" for k in updates)
     updates["camera_id"] = camera_id
 
-    await db.execute(text(f"""
-        INSERT INTO camera_network_config (camera_id, {', '.join(updates.keys())})
-        VALUES (:camera_id, {', '.join(f':{k}' for k in updates.keys())})
+    await db.execute(
+        text(f"""
+        INSERT INTO camera_network_config (camera_id, {", ".join(updates.keys())})
+        VALUES (:camera_id, {", ".join(f":{k}" for k in updates)})
         ON CONFLICT (camera_id) DO UPDATE SET {set_clause}
-    """), updates)
+    """),
+        updates,
+    )
     await db.commit()
 
     return {"data": {"status": "updated", "fields": list(updates.keys())}}

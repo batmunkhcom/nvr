@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 from typing import Any
 from uuid import UUID
@@ -40,10 +41,8 @@ class NetworkMonitor:
         self.running = False
         if self._task:
             self._task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
         logger.info("network_monitor_stopped")
 
     async def _collect_loop(self):
@@ -61,9 +60,14 @@ class NetworkMonitor:
                 poll_interval = 30
                 total = len(cameras)
                 for i, cam in enumerate(cameras):
-                    self._camera_offsets[cam['id']] = (i * poll_interval / total) if total > 1 else 0
+                    self._camera_offsets[cam["id"]] = (
+                        (i * poll_interval / total) if total > 1 else 0
+                    )
 
-                tasks = [self._collect_single_camera(cam, offset) for cam, offset in self._camera_offsets.items()]
+                tasks = [
+                    self._collect_single_camera(cam, offset)
+                    for cam, offset in self._camera_offsets.items()
+                ]
                 await asyncio.gather(*tasks, return_exceptions=True)
 
             except Exception:
@@ -77,27 +81,29 @@ class NetworkMonitor:
     async def _get_monitored_cameras(self) -> list[dict[str, Any]]:
         """Get all active cameras with monitoring enabled + their configs."""
         async with AsyncSession(self._engine) as db:
-            result = await db.execute(text("""
+            result = await db.execute(
+                text("""
                 SELECT c.id, c.name, c.ip_address, c.location, c.stream_main_uri, c.stream_sub_uri,
                        cnc.poll_interval, cnc.ping_enabled, cnc.rtsp_check_enabled
                 FROM cameras c
                 JOIN camera_network_config cnc ON c.id = cnc.camera_id
                 WHERE c.is_active = true
                 ORDER BY c.display_order ASC
-            """))
+            """)
+            )
             rows = result.fetchall()
 
             return [
                 {
-                    'id': row[0],
-                    'name': row[1],
-                    'ip_address': row[2],
-                    'location': row[3],
-                    'stream_main_uri': row[4],
-                    'stream_sub_uri': row[5],
-                    'poll_interval': row[6],
-                    'ping_enabled': row[7],
-                    'rtsp_check_enabled': row[8],
+                    "id": row[0],
+                    "name": row[1],
+                    "ip_address": row[2],
+                    "location": row[3],
+                    "stream_main_uri": row[4],
+                    "stream_sub_uri": row[5],
+                    "poll_interval": row[6],
+                    "ping_enabled": row[7],
+                    "rtsp_check_enabled": row[8],
                 }
                 for row in rows
             ]
@@ -115,19 +121,23 @@ class NetworkMonitor:
 
                     try:
                         from .ws_manager import ws_manager
-                        await ws_manager.broadcast({
-                            "type": "network_metric",
-                            "camera_id": str(camera['id']),
-                            "metrics": metrics,
-                        })
+
+                        await ws_manager.broadcast(
+                            {
+                                "type": "network_metric",
+                                "camera_id": str(camera["id"]),
+                                "metrics": metrics,
+                            }
+                        )
                     except Exception as ws_err:
                         logger.warning("network_ws_broadcast_failed", error=str(ws_err))
 
                     try:
                         from .network_alerts import network_alert_service
+
                         if network_alert_service:
                             await network_alert_service.evaluate(
-                                camera['id'], metrics, self._engine
+                                camera["id"], metrics, self._engine
                             )
                     except Exception as alert_err:
                         logger.warning("network_alert_eval_failed", error=str(alert_err))
@@ -135,58 +145,65 @@ class NetworkMonitor:
             except Exception as e:
                 logger.error(
                     "network_collect_error",
-                    camera_id=str(camera.get('id', 'unknown')),
-                    camera_name=camera.get('name', 'unknown'),
+                    camera_id=str(camera.get("id", "unknown")),
+                    camera_name=camera.get("name", "unknown"),
                     error=str(e),
                 )
 
     async def collect_metrics(self, camera: dict[str, Any]) -> dict[str, Any] | None:
         """Collect all metrics for one camera. Returns None if collection failed."""
         results: dict[str, Any] = {
-            'camera_id': str(camera['id']),
+            "camera_id": str(camera["id"]),
         }
 
-        if camera.get('ping_enabled', True):
+        if camera.get("ping_enabled", True):
             try:
-                ping_result = await self.ping_camera(camera['ip_address'])
+                ping_result = await self.ping_camera(camera["ip_address"])
                 results.update(ping_result)
             except Exception as e:
-                logger.debug("ping_failed", camera_id=str(camera['id']), error=str(e))
-                results['rtt_ms'] = None
-                results['jitter_ms'] = None
-                results['packet_loss_pct'] = 100.0
+                logger.debug("ping_failed", camera_id=str(camera["id"]), error=str(e))
+                results["rtt_ms"] = None
+                results["jitter_ms"] = None
+                results["packet_loss_pct"] = 100.0
         else:
-            results['rtt_ms'] = None
-            results['jitter_ms'] = None
-            results['packet_loss_pct'] = None
+            results["rtt_ms"] = None
+            results["jitter_ms"] = None
+            results["packet_loss_pct"] = None
 
-        if camera.get('rtsp_check_enabled', True):
+        if camera.get("rtsp_check_enabled", True):
             try:
-                mtmx_stats = await self.get_mediamtx_stats(camera['id'])
+                mtmx_stats = await self.get_mediamtx_stats(camera["id"])
                 if mtmx_stats:
                     results.update(mtmx_stats)
                 else:
-                    proc_stats = await self.parse_proc_stats(camera['id'])
+                    proc_stats = await self.parse_proc_stats(camera["id"])
                     if proc_stats:
                         results.update(proc_stats)
             except Exception as e:
-                logger.debug("stats_fetch_failed", camera_id=str(camera['id']), error=str(e))
+                logger.debug("stats_fetch_failed", camera_id=str(camera["id"]), error=str(e))
 
-        results['status'] = self._determine_status(results)
+        results["status"] = self._determine_status(results)
 
         return results if results else None
 
     async def ping_camera(self, ip_address: str) -> dict[str, Any]:
         """ICMP ping via subprocess. Returns rtt_ms, jitter_ms, packet_loss_pct."""
         proc = await asyncio.create_subprocess_exec(
-            "ping", "-c", "3", "-W", "5", ip_address,
+            "ping",
+            "-c",
+            "3",
+            "-W",
+            "5",
+            ip_address,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, _ = await proc.communicate()
         output = stdout.decode("utf-8", errors="replace")
 
-        rtt_match = re.search(r"rtt\s+min/avg/max/mdev\s+=\s+([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)", output)
+        rtt_match = re.search(
+            r"rtt\s+min/avg/max/mdev\s+=\s+([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)", output
+        )
 
         if rtt_match:
             avg_rtt = float(rtt_match.group(2))
@@ -252,7 +269,9 @@ class NetworkMonitor:
 
                 if total_bitrate_mbps > 0:
                     stats["outbound_mbps"] = round(total_bitrate_mbps, 2)
-                    stats["fps_current"] = round(sum(fps_values) / len(fps_values), 1) if fps_values else None
+                    stats["fps_current"] = (
+                        round(sum(fps_values) / len(fps_values), 1) if fps_values else None
+                    )
 
                     for pid in pids:
                         proc_stats = await self._read_proc_stats(pid)
@@ -271,7 +290,9 @@ class NetworkMonitor:
         """Fallback: find FFmpeg PID from running processes, then read /proc/[pid]/stat."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "pgrep", "-f", f"ffmpeg.*{camera_id}",
+                "pgrep",
+                "-f",
+                f"ffmpeg.*{camera_id}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -294,14 +315,14 @@ class NetworkMonitor:
     async def _read_proc_stats(self, pid: int) -> dict[str, Any] | None:
         """Read /proc/{pid}/stat and /proc/{pid}/status for CPU + memory."""
         try:
-            with open(f"/proc/{pid}/stat", "r") as f:
+            with open(f"/proc/{pid}/stat") as f:
                 stat_fields = f.read().split()
 
             utime = int(stat_fields[13])
             stime = int(stat_fields[14])
             total_ticks = utime + stime
 
-            with open(f"/proc/{pid}/status", "r") as f:
+            with open(f"/proc/{pid}/status") as f:
                 for line in f:
                     if line.startswith("VmRSS:"):
                         memory_kb = int(line.split()[1])
@@ -317,21 +338,22 @@ class NetworkMonitor:
 
     def _determine_status(self, metrics: dict[str, Any]) -> str:
         """Determine camera status from collected metrics."""
-        if not metrics.get('rtt_ms') and metrics.get('packet_loss_pct', 0) >= 100:
-            return 'offline'
-        if metrics.get('packet_loss_pct', 0) > 5.0:
-            return 'degraded'
-        return 'online'
+        if not metrics.get("rtt_ms") and metrics.get("packet_loss_pct", 0) >= 100:
+            return "offline"
+        if metrics.get("packet_loss_pct", 0) > 5.0:
+            return "degraded"
+        return "online"
 
     async def store_metrics(self, metrics: dict[str, Any]) -> None:
         """Insert metrics into database."""
-        camera_id = metrics.pop('camera_id', None)
+        camera_id = metrics.pop("camera_id", None)
         if not camera_id:
             return
 
         async with AsyncSession(self._engine) as db:
             try:
-                await db.execute(text("""
+                await db.execute(
+                    text("""
                     INSERT INTO network_metrics
                        (camera_id, recorded_at, inbound_mbps, outbound_mbps, rtt_ms, jitter_ms,
                         rtsp_latency, packets_sent, packets_recv, packet_loss_pct,
@@ -341,25 +363,27 @@ class NetworkMonitor:
                               :rtsp_latency, :packets_sent, :packets_recv, :packet_loss_pct,
                               :fps_current, :bitrate_current, :rtsp_reconnect_cnt,
                               :ffmpeg_pid, :ffmpeg_cpu, :ffmpeg_memory_mb, :status, :error_message)
-                """), {
-                    "camera_id": camera_id,
-                    "inbound_mbps": metrics.get("inbound_mbps"),
-                    "outbound_mbps": metrics.get("outbound_mbps"),
-                    "rtt_ms": metrics.get("rtt_ms"),
-                    "jitter_ms": metrics.get("jitter_ms"),
-                    "rtsp_latency": metrics.get("rtsp_latency"),
-                    "packets_sent": metrics.get("packets_sent"),
-                    "packets_recv": metrics.get("packets_recv"),
-                    "packet_loss_pct": metrics.get("packet_loss_pct"),
-                    "fps_current": metrics.get("fps_current"),
-                    "bitrate_current": metrics.get("bitrate_current"),
-                    "rtsp_reconnect_cnt": metrics.get("rtsp_reconnect_cnt"),
-                    "ffmpeg_pid": metrics.get("ffmpeg_pid"),
-                    "ffmpeg_cpu": metrics.get("ffmpeg_cpu"),
-                    "ffmpeg_memory_mb": metrics.get("ffmpeg_memory_mb"),
-                    "status": metrics.get("status", "unknown"),
-                    "error_message": metrics.get("error_message"),
-                })
+                """),
+                    {
+                        "camera_id": camera_id,
+                        "inbound_mbps": metrics.get("inbound_mbps"),
+                        "outbound_mbps": metrics.get("outbound_mbps"),
+                        "rtt_ms": metrics.get("rtt_ms"),
+                        "jitter_ms": metrics.get("jitter_ms"),
+                        "rtsp_latency": metrics.get("rtsp_latency"),
+                        "packets_sent": metrics.get("packets_sent"),
+                        "packets_recv": metrics.get("packets_recv"),
+                        "packet_loss_pct": metrics.get("packet_loss_pct"),
+                        "fps_current": metrics.get("fps_current"),
+                        "bitrate_current": metrics.get("bitrate_current"),
+                        "rtsp_reconnect_cnt": metrics.get("rtsp_reconnect_cnt"),
+                        "ffmpeg_pid": metrics.get("ffmpeg_pid"),
+                        "ffmpeg_cpu": metrics.get("ffmpeg_cpu"),
+                        "ffmpeg_memory_mb": metrics.get("ffmpeg_memory_mb"),
+                        "status": metrics.get("status", "unknown"),
+                        "error_message": metrics.get("error_message"),
+                    },
+                )
                 await db.commit()
             except Exception:
                 await db.rollback()

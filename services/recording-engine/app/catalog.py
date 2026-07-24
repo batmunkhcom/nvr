@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -48,6 +49,42 @@ async def _probe_duration(path: str) -> float | None:
         return None
 
 
+async def _make_thumbnail(segment_path: str) -> str | None:
+    """Extract a frame at ~2s as a sidecar JPEG next to the segment."""
+    thumb_path = os.path.splitext(segment_path)[0] + ".jpg"
+    if os.path.exists(thumb_path):
+        return thumb_path
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            config.FFMPEG_PATH,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-ss",
+            "2",
+            "-i",
+            segment_path,
+            "-vframes",
+            "1",
+            "-vf",
+            "scale=320:-1",
+            "-q:v",
+            "5",
+            "-y",
+            thumb_path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(proc.wait(), timeout=10)
+        if proc.returncode == 0 and os.path.getsize(thumb_path) > 0:
+            return thumb_path
+    except Exception:
+        pass
+    if os.path.exists(thumb_path):
+        os.unlink(thumb_path)
+    return None
+
+
 def _parse_start_time(filename: str) -> datetime | None:
     match = FILENAME_RE.search(filename)
     if not match:
@@ -76,8 +113,15 @@ class SegmentCatalog:
             camera_modes = await self._load_camera_modes(session)
             disk_files = self._walk_segments(base)
 
+            thumb_budget = 20  # backfill limit per scan
             for path in sorted(disk_files):
                 if path in known_paths:
+                    if (
+                        thumb_budget > 0
+                        and self._needs_thumbnail(path)
+                        and await _make_thumbnail(path)
+                    ):
+                        thumb_budget -= 1
                     continue
                 try:
                     if await self._register(session, path, base, camera_modes):
@@ -100,6 +144,17 @@ class SegmentCatalog:
     async def _load_camera_modes(self, session: AsyncSession) -> dict[str, str]:
         result = await session.execute(text("SELECT id, recording_mode FROM cameras"))
         return {str(row[0]): row[1] for row in result.fetchall()}
+
+    @staticmethod
+    def _needs_thumbnail(segment_path: str) -> bool:
+        """Segment is closed but has no sidecar thumbnail yet."""
+        thumb = os.path.splitext(segment_path)[0] + ".jpg"
+        if os.path.exists(thumb):
+            return False
+        try:
+            return time.time() - os.path.getmtime(segment_path) >= STABLE_SECONDS
+        except OSError:
+            return False
 
     def _walk_segments(self, base: str) -> set[str]:
         """All .mp4 segment paths on disk (absolute)."""
@@ -149,6 +204,7 @@ class SegmentCatalog:
             return False
 
         recording_type = "motion" if camera_modes.get(camera_id) == "motion" else "continuous"
+        await _make_thumbnail(path)
         await session.execute(
             text(
                 """
