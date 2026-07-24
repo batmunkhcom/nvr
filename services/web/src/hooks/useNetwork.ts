@@ -35,6 +35,15 @@ export function useCameraHistory(
   });
 }
 
+export function useAggregateHistory(range = "24h") {
+  return useQuery({
+    queryKey: ["network", "history", "all", range],
+    queryFn: () =>
+      networkApi.getAggregateHistory(range).then((r) => r.data.data),
+    refetchInterval: 30_000,
+  });
+}
+
 export function useMonitorStatus() {
   return useQuery({
     queryKey: ["network", "monitor", "status"],

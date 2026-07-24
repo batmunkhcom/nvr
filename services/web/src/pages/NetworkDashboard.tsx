@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   useLatestMetrics,
   useCameraHistory,
+  useAggregateHistory,
   useNetworkSummary,
   useActiveAlerts,
   useToggleMonitoring,
@@ -12,7 +13,7 @@ import NetworkChart from "../components/network/NetworkChart";
 import NetworkAlertPanel from "../components/network/NetworkAlertPanel";
 import NetworkSummaryBar from "../components/network/NetworkSummaryBar";
 import { useNvrWebSocket } from "../hooks/useWebSocket";
-import { Activity, Play, Pause } from "lucide-react";
+import { Activity, Play, Pause, TrendingUp } from "lucide-react";
 
 const RANGE_OPTIONS = ["1h", "6h", "12h", "24h", "7d"] as const;
 
@@ -25,6 +26,7 @@ export default function NetworkDashboard() {
   const { data: summary } = useNetworkSummary();
   const { data: metrics } = useLatestMetrics();
   const { data: history } = useCameraHistory(selectedCam, timeRange);
+  const { data: allHistory } = useAggregateHistory(timeRange);
   const { data: alerts } = useActiveAlerts();
   const { data: monStatus } = useMonitorStatus();
   const toggle = useToggleMonitoring();
@@ -40,7 +42,7 @@ export default function NetworkDashboard() {
 
   const locations = useMemo(() => {
     if (!summary?.cameras_by_location) return [];
-    return Object.keys(summary.cameras_by_location);
+    return Object.keys(summary.cameras_by_location).filter((l) => l !== null);
   }, [summary]);
 
   const filtered = useMemo(() => {
@@ -51,19 +53,32 @@ export default function NetworkDashboard() {
   }, [metrics, selectedLoc]);
 
   const running = monStatus?.running ?? false;
-  const onlineCount = summary?.online_cameras ?? 0;
-  const totalCount = summary?.total_cameras ?? 0;
 
   const chartPoints = useMemo(() => {
-    if (!history?.metrics?.length) return [];
-    return [...history.metrics].reverse().map((m) => ({
-      recorded_at: m.recorded_at,
-      inbound_mbps: m.inbound_mbps,
-      outbound_mbps: m.outbound_mbps,
-      rtt_ms: m.rtt_ms,
-      packet_loss_pct: m.packet_loss_pct,
-    }));
-  }, [history]);
+    if (selectedCam && history?.metrics?.length) {
+      return [...history.metrics].reverse().map((m) => ({
+        recorded_at: m.recorded_at,
+        inbound_mbps: m.inbound_mbps,
+        outbound_mbps: m.outbound_mbps,
+        rtt_ms: m.rtt_ms,
+        packet_loss_pct: m.packet_loss_pct,
+      }));
+    }
+    if (!selectedCam && allHistory?.metrics?.length) {
+      return [...allHistory.metrics].reverse().map((m) => ({
+        recorded_at: m.recorded_at,
+        inbound_mbps: m.inbound_mbps,
+        outbound_mbps: m.outbound_mbps,
+        rtt_ms: m.rtt_ms,
+        packet_loss_pct: null,
+      }));
+    }
+    return [];
+  }, [selectedCam, history, allHistory]);
+
+  const chartTitle = selectedCam
+    ? history?.camera_name ?? selectedCam
+    : "All Cameras — Total Bandwidth";
 
   return (
     <div className="page-enter">
@@ -91,8 +106,8 @@ export default function NetworkDashboard() {
       {/* alerts */}
       {alerts && alerts.length > 0 && <NetworkAlertPanel />}
 
-      {/* location filter */}
-      {locations.length > 1 && (
+      {/* location filter — only if 2+ locations */}
+      {locations.length >= 2 && (
         <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-2">
           <button
             onClick={() => setSelectedLoc(null)}
@@ -120,68 +135,68 @@ export default function NetworkDashboard() {
         </div>
       )}
 
-      {/* chart */}
-      {selectedCam ? (
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
-              <Activity size={16} className="text-purple-400" />
-              {history?.camera_name ?? selectedCam}
-            </h3>
-            <div className="flex items-center gap-1">
-              {RANGE_OPTIONS.map((r) => (
+      {/* chart — always visible */}
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
+            <TrendingUp size={16} className="text-purple-400" />
+            {selectedCam ? (
+              <>
+                {chartTitle}
                 <button
-                  key={r}
-                  onClick={() => setTimeRange(r)}
-                  className={`px-2 py-0.5 rounded text-xs font-medium ${
-                    timeRange === r
-                      ? "bg-blue-600 text-white"
-                      : "bg-gray-800 text-gray-400 hover:bg-gray-700"
-                  }`}
+                  onClick={() => setSelectedCam(null)}
+                  className="text-[10px] text-blue-400 hover:text-blue-300 ml-1"
                 >
-                  {r}
+                  ← All cameras
                 </button>
-              ))}
-            </div>
+              </>
+            ) : (
+              chartTitle
+            )}
+          </h3>
+          <div className="flex items-center gap-1">
+            {RANGE_OPTIONS.map((r) => (
+              <button
+                key={r}
+                onClick={() => setTimeRange(r)}
+                className={`px-2 py-0.5 rounded text-xs font-medium ${
+                  timeRange === r
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-800 text-gray-400 hover:bg-gray-700"
+                }`}
+              >
+                {r}
+              </button>
+            ))}
           </div>
-          {chartPoints.length > 0 && (
-            <NetworkChart
-              points={chartPoints}
-              title={`Inbound / Outbound (Mbps)`}
-              height={240}
-            />
-          )}
         </div>
-      ) : !!(filtered.length) ? (
-        <div className="mb-6 bg-gray-900 rounded border border-gray-800 p-3 text-center text-xs text-gray-500">
-          Select a camera below to view bandwidth chart
-        </div>
-      ) : null}
+        {chartPoints.length > 0 ? (
+          <NetworkChart points={chartPoints} title="" height={240} />
+        ) : (
+          <div className="bg-gray-900 rounded border border-gray-800 p-6 text-center text-xs text-gray-500">
+            {running
+              ? "Collecting data... chart appears after first 2 minutes"
+              : "Monitor is paused. Press Start to begin."}
+          </div>
+        )}
+      </div>
 
       {/* camera list */}
       {!filtered.length ? (
-        <div className="bg-gray-900 rounded border border-gray-800 p-8 text-center text-sm text-gray-500">
+        <div className="bg-gray-900 rounded border border-gray-800 p-6 text-center text-xs text-gray-500">
           {running
-            ? "Collecting data... first metrics appear in ~30s"
-            : "Monitor is paused. Press Start to begin collecting."}
+            ? "Waiting for camera metrics..."
+            : "Monitor is paused"}
         </div>
       ) : (
         <div className="space-y-1">
           <div className="flex items-center gap-3 px-3 py-1.5 text-[11px] text-gray-500 font-medium">
             <span className="w-3" />
             <span className="flex-1">Camera</span>
-            <span className="w-14 text-right" title="Камер → сервер inbound bandwidth">
-              In
-            </span>
-            <span className="w-14 text-right" title="Сервер → хэрэглэгч outbound bandwidth">
-              Out
-            </span>
-            <span className="w-12 text-right" title="Round-trip latency">
-              RTT
-            </span>
-            <span className="w-10 text-right" title="Packet loss %">
-              Loss
-            </span>
+            <span className="w-14 text-right" title="Камер → сервер inbound bandwidth">In</span>
+            <span className="w-14 text-right" title="Сервер → хэрэглэгч outbound bandwidth">Out</span>
+            <span className="w-12 text-right" title="Round-trip latency">RTT</span>
+            <span className="w-10 text-right" title="Packet loss %">Loss</span>
           </div>
           {filtered.map((m) => (
             <button
@@ -201,15 +216,19 @@ export default function NetworkDashboard() {
                     ? "bg-green-400 shadow-[0_0_6px_#4ade80]"
                     : m.status === "degraded"
                       ? "bg-yellow-400"
-                      : "bg-red-400"
+                      : m.status === "unknown"
+                        ? "bg-gray-500"
+                        : "bg-red-400"
                 }`}
+                title={m.status}
               />
               <div className="flex-1 min-w-0">
                 <span className="text-sm text-gray-200">{m.camera_name}</span>
                 {m.location && (
-                  <span className="text-[10px] text-gray-500 ml-2">
-                    {m.location}
-                  </span>
+                  <span className="text-[10px] text-gray-500 ml-1.5">{m.location}</span>
+                )}
+                {!m.location && (
+                  <span className="text-[10px] text-gray-600 ml-1.5" title="Set location in Camera → Edit">{m.status === "unknown" ? "no data" : ""}</span>
                 )}
               </div>
               <span className="w-14 text-right text-xs tabular-nums text-blue-300">
@@ -242,5 +261,6 @@ export default function NetworkDashboard() {
 
 function fmtMbps(v: number): string {
   if (v >= 1) return `${v.toFixed(1)} Mbps`;
-  return `${Math.round(v * 1000)} Kbps`;
+  if (v > 0) return `${Math.round(v * 1000)} Kbps`;
+  return "0";
 }

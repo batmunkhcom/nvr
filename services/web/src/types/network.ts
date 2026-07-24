@@ -24,8 +24,8 @@ export interface NetworkDashboardSummary {
   online_cameras: number;
   degraded_cameras: number;
   offline_cameras: number;
-  avg_inbound_mbps: number | null;
-  avg_outbound_mbps: number | null;
+  total_inbound_mbps: number;
+  total_outbound_mbps: number;
   avg_latency_ms: number | null;
   active_alerts: number;
   alerts_by_severity: { warning: number; critical: number };

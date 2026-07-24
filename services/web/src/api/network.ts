@@ -17,6 +17,11 @@ export const networkApi = {
       { params: { range, page, per_page: perPage } },
     ),
 
+  getAggregateHistory: (range = "24h") =>
+    apiClient.get<{ data: CameraHistory }>("/network/metrics/all/history", {
+      params: { range },
+    }),
+
   getSummary: () =>
     apiClient.get<{ data: NetworkDashboardSummary }>("/network/summary"),
 

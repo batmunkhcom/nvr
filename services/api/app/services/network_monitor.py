@@ -45,7 +45,28 @@ class NetworkMonitor:
             return
         self.running = True
         logger.info("network_monitor_starting")
+        # auto-create config rows for cameras that were added after the migration
+        await self._ensure_config_rows()
         self._task = asyncio.create_task(self._collect_loop())
+
+    async def _ensure_config_rows(self):
+        """Create default camera_network_config rows for active cameras missing one."""
+        try:
+            async with AsyncSession(self._engine) as db:
+                await db.execute(
+                    text("""
+                    INSERT INTO camera_network_config (camera_id, poll_interval, ping_enabled, retention_days)
+                    SELECT c.id, 30, true, 30
+                    FROM cameras c
+                    WHERE c.is_active = true
+                      AND NOT EXISTS (
+                          SELECT 1 FROM camera_network_config cnc WHERE cnc.camera_id = c.id
+                      )
+                """)
+                )
+                await db.commit()
+        except Exception:
+            await db.rollback()
 
     async def stop(self):
         self.running = False
