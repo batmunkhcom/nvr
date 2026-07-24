@@ -10,6 +10,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..models.camera import Camera
 from ..models.recording import Recording
 from ..models.storage_backend import StorageBackend
 
@@ -45,8 +46,14 @@ async def list_recordings(
     )
     recordings = result.scalars().all()
 
+    cam_ids = {r.camera_id for r in recordings}
+    cam_map: dict[uuid.UUID, str] = {}
+    if cam_ids:
+        cam_result = await db.execute(select(Camera.id, Camera.name).where(Camera.id.in_(cam_ids)))
+        cam_map = {row[0]: row[1] for row in cam_result.fetchall()}
+
     return {
-        "data": [_recording_to_dict(r) for r in recordings],
+        "data": [_recording_to_dict(r, cam_map.get(r.camera_id, str(r.camera_id))) for r in recordings],
         "metadata": {"page": page, "per_page": per_page, "total": total},
     }
 
@@ -222,10 +229,11 @@ async def delete_storage_backend(backend_id: uuid.UUID, db: AsyncSession) -> Non
     logger.info("storage_backend_deleted", backend_id=str(backend_id))
 
 
-def _recording_to_dict(r: Recording) -> dict:
+def _recording_to_dict(r: Recording, camera_name: str = "") -> dict:
     return {
         "id": str(r.id),
         "camera_id": str(r.camera_id),
+        "camera_name": camera_name,
         "file_path": r.file_path,
         "file_size_bytes": r.file_size_bytes,
         "duration_seconds": r.duration_seconds,

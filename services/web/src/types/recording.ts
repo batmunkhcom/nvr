@@ -1,6 +1,7 @@
 export interface Recording {
   id: string;
   camera_id: string;
+  camera_name?: string;
   storage_backend_id: string | null;
   file_path: string;
   file_size_bytes: number;

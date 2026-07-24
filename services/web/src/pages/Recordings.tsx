@@ -307,6 +307,11 @@ export default function Recordings() {
                         className="rounded border-gray-600 bg-gray-800 text-blue-600 flex-shrink-0"
                       />
                       <RecordingThumb id={rec.id} />
+                      {rec.camera_name && (
+                        <span className="text-xs px-2 py-1 rounded bg-gray-800 text-gray-300 flex-shrink-0 min-w-[60px] text-center truncate max-w-[120px]" title={rec.camera_name}>
+                          {rec.camera_name}
+                        </span>
+                      )}
                       <div className="flex-1 min-w-0">
                         <p className="text-sm truncate">
                           {new Date(rec.start_time).toLocaleDateString()}{" "}
