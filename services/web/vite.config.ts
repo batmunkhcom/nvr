@@ -10,6 +10,7 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: "autoUpdate",
+      devOptions: { enabled: false },
       includeAssets: ["favicon.svg", "apple-touch-icon.png"],
       manifest: {
         name: "mBm NVR System",

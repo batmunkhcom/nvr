@@ -9,7 +9,7 @@ from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -177,6 +177,26 @@ async def stream_recording(
             "Content-Range": f"bytes {start}-{end}/{file_size}",
         },
     )
+
+
+@router.head("/{recording_id}/stream")
+async def head_stream(
+    recording_id: uuid.UUID,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Return headers for a recording stream without the body (browser pre-flight)."""
+    recording = await get_recording(recording_id, db)
+    file_path = recording.file_path
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Recording file not found on disk")
+    file_size = os.path.getsize(file_path)
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(file_size),
+        "Content-Type": "video/mp4",
+    }
+    return Response(headers=headers)
 
 
 def _parse_range(range_header: str | None, file_size: int) -> tuple[int, int]:
