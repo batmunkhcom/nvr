@@ -5,6 +5,7 @@ import type {
   NetworkAlert,
   NetworkConfigUpdate,
   CameraHistory,
+  OverlaySeries,
 } from "../types/network";
 
 export const networkApi = {
@@ -19,6 +20,11 @@ export const networkApi = {
 
   getAggregateHistory: (range = "24h") =>
     apiClient.get<{ data: CameraHistory }>("/network/metrics/all/history", {
+      params: { range },
+    }),
+
+  getOverlayHistory: (range = "24h") =>
+    apiClient.get<{ data: OverlaySeries[] }>("/network/metrics/overlay", {
       params: { range },
     }),
 

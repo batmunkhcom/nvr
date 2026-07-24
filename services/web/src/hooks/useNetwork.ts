@@ -3,7 +3,7 @@ import { networkApi } from "../api/network";
 import type {
   NetworkDashboardSummary,
   LatestMetric,
-  NetworkAlert,
+  OverlaySeries,
 } from "../types/network";
 
 export function useNetworkSummary() {
@@ -18,6 +18,15 @@ export function useLatestMetrics() {
   return useQuery({
     queryKey: ["network", "metrics"],
     queryFn: () => networkApi.getLatestMetrics().then((r) => r.data.data),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useOverlayHistory(range = "24h") {
+  return useQuery({
+    queryKey: ["network", "overlay", range],
+    queryFn: () =>
+      networkApi.getOverlayHistory(range).then((r) => r.data.data),
     refetchInterval: 30_000,
   });
 }

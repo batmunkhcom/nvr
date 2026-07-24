@@ -11,12 +11,30 @@ export interface LatestMetric {
   camera_id: string;
   camera_name: string;
   location: string | null;
+  location_color: string | null;
   status: string;
   inbound_mbps: number | null;
   outbound_mbps: number | null;
   rtt_ms: number | null;
   packet_loss_pct: number | null;
   recorded_at: string | null;
+}
+
+export interface OverlaySeries {
+  camera_id: string;
+  camera_name: string;
+  location: string | null;
+  color: string;
+  points: NetworkMetricPoint[];
+}
+
+export interface LocationSummary {
+  total: number;
+  online: number;
+  degraded: number;
+  offline: number;
+  avg_bw: number | null;
+  color: string;
 }
 
 export interface NetworkDashboardSummary {

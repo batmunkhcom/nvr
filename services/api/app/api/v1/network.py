@@ -64,10 +64,11 @@ async def get_latest_metrics(
     """Latest metrics for all cameras."""
     result = await db.execute(
         text("""
-        SELECT c.id, c.name, c.location, nm.status,
-               nm.inbound_mbps, nm.outbound_mbps,
+        SELECT c.id, c.name, l.name AS location_name, l.color AS location_color,
+               nm.status, nm.inbound_mbps, nm.outbound_mbps,
                nm.rtt_ms, nm.packet_loss_pct, nm.recorded_at
         FROM cameras c
+        LEFT JOIN locations l ON l.id = c.location_id
         LEFT JOIN LATERAL (
             SELECT * FROM network_metrics nmc
             WHERE nmc.camera_id = c.id
@@ -86,12 +87,13 @@ async def get_latest_metrics(
                 "camera_id": str(row[0]),
                 "camera_name": row[1],
                 "location": row[2],
-                "status": row[3] or "unknown",
-                "inbound_mbps": row[4],
-                "outbound_mbps": row[5],
-                "rtt_ms": row[6],
-                "packet_loss_pct": row[7],
-                "recorded_at": row[8].isoformat() if row[8] else None,
+                "location_color": row[3],
+                "status": row[4] or "unknown",
+                "inbound_mbps": row[5],
+                "outbound_mbps": row[6],
+                "rtt_ms": row[7],
+                "packet_loss_pct": row[8],
+                "recorded_at": row[9].isoformat() if row[9] else None,
             }
             for row in rows
         ]
@@ -152,6 +154,65 @@ async def get_all_cameras_history(
     }
 
 
+@router.get("/metrics/overlay")
+async def get_overlay_history(
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    range: str = Query("24h", description="1h, 6h, 12h, 24h, 7d"),
+):
+    """Per-camera time-bucketed history for multi-line overlay chart."""
+    interval_map = {
+        "1h": "1 hour",
+        "6h": "6 hours",
+        "12h": "12 hours",
+        "24h": "24 hours",
+        "7d": "7 days",
+    }
+    interval = interval_map.get(range, "24 hours")
+    interval_sql = f"NOW() - INTERVAL '{interval}'"
+    bucket = "minute" if range in ("1h", "6h", "12h") else "hour"
+    if range == "7d":
+        bucket = "hour"
+
+    result = await db.execute(
+        text(f"""
+        SELECT c.id, c.name, l.name AS loc_name, l.color AS loc_color,
+               date_trunc('{bucket}', nm.recorded_at) AS bucket,
+               AVG(nm.inbound_mbps)::numeric(10,2),
+               AVG(nm.outbound_mbps)::numeric(10,2)
+        FROM cameras c
+        LEFT JOIN locations l ON l.id = c.location_id
+        JOIN network_metrics nm ON nm.camera_id = c.id
+        WHERE c.is_active = true
+          AND nm.recorded_at > {interval_sql}
+        GROUP BY c.id, c.name, l.name, l.color, bucket
+        ORDER BY bucket ASC, c.display_order ASC
+    """)
+    )
+    rows = result.fetchall()
+
+    series: dict[str, dict] = {}
+    for cid, cname, loc, color, bucket, inbound, outbound in rows:
+        cid_s = str(cid)
+        if cid_s not in series:
+            series[cid_s] = {
+                "camera_id": cid_s,
+                "camera_name": cname,
+                "location": loc,
+                "color": color or "#3b82f6",
+                "points": [],
+            }
+        series[cid_s]["points"].append(
+            {
+                "recorded_at": bucket.isoformat(),
+                "inbound_mbps": float(inbound) if inbound else 0,
+                "outbound_mbps": float(outbound) if outbound else 0,
+            }
+        )
+
+    return {"data": list(series.values())}
+
+
 @router.get("/metrics/{camera_id}")
 async def get_camera_metrics(
     camera_id: uuid.UUID,
@@ -161,10 +222,11 @@ async def get_camera_metrics(
     """Latest metrics for single camera."""
     result = await db.execute(
         text("""
-        SELECT c.name, c.location, nm.inbound_mbps, nm.outbound_mbps,
+        SELECT c.name, l.name AS loc_name, nm.inbound_mbps, nm.outbound_mbps,
                nm.rtt_ms, nm.jitter_ms, nm.packet_loss_pct,
                nm.status, nm.recorded_at
         FROM cameras c
+        LEFT JOIN locations l ON l.id = c.location_id
         LEFT JOIN LATERAL (
             SELECT * FROM network_metrics nmc
             WHERE nmc.camera_id = c.id
@@ -329,33 +391,33 @@ async def get_network_summary(
 
     loc_result = await db.execute(
         text("""
-        SELECT c.location, nm.status, COUNT(*)::int
+        SELECT COALESCE(l.name, 'Unknown'), l.color,
+               nm.status, COUNT(*)::int
         FROM cameras c
+        LEFT JOIN locations l ON l.id = c.location_id
         LEFT JOIN LATERAL (
             SELECT * FROM network_metrics nmc
             WHERE nmc.camera_id = c.id
             ORDER BY nmc.recorded_at DESC
             LIMIT 1
         ) nm ON true
-        WHERE c.is_active = true AND c.location IS NOT NULL
-        GROUP BY c.location, nm.status
-        ORDER BY c.location, nm.status
+        WHERE c.is_active = true
+        GROUP BY l.name, l.color, nm.status
+        ORDER BY l.name, nm.status
     """)
     )
 
     cameras_by_location: dict[str, dict] = {}
     for row in loc_result.fetchall():
         loc = row[0]
+        loc_color = row[1]
         if loc not in cameras_by_location:
             cameras_by_location[loc] = {
-                "total": 0,
-                "online": 0,
-                "degraded": 0,
-                "offline": 0,
-                "avg_bw": None,
+                "total": 0, "online": 0, "degraded": 0, "offline": 0,
+                "avg_bw": None, "color": loc_color or "#3b82f6",
             }
         cameras_by_location[loc]["total"] += 1
-        status_key = row[1] or "unknown"
+        status_key = row[2] or "unknown"
         if status_key == "online":
             cameras_by_location[loc]["online"] += 1
         elif status_key == "degraded":
@@ -440,9 +502,12 @@ async def get_all_alerts(
 
     result = await db.execute(
         text(f"""
-        SELECT na.id, na.camera_id, c.name as camera_name, c.location, na.alert_type, na.severity,
+        SELECT na.id, na.camera_id, c.name as camera_name, l.name as location,
+               l.color as location_color, na.alert_type, na.severity,
                na.message, na.triggered_at, na.acknowledged_at, na.metadata
-        FROM network_alerts na JOIN cameras c ON na.camera_id = c.id
+        FROM network_alerts na
+        JOIN cameras c ON na.camera_id = c.id
+        LEFT JOIN locations l ON l.id = c.location_id
         WHERE {where_clause}
         ORDER BY na.triggered_at DESC
         LIMIT :limit OFFSET :offset
@@ -467,12 +532,13 @@ async def get_all_alerts(
                 "camera_id": str(row[1]),
                 "camera_name": row[2],
                 "location": row[3],
-                "alert_type": row[4],
-                "severity": row[5],
-                "message": row[6],
-                "triggered_at": row[7].isoformat(),
-                "acknowledged_at": row[8].isoformat() if row[8] else None,
-                "metadata": dict(row[9]) if row[9] else None,
+                "location_color": row[4],
+                "alert_type": row[5],
+                "severity": row[6],
+                "message": row[7],
+                "triggered_at": row[8].isoformat(),
+                "acknowledged_at": row[9].isoformat() if row[9] else None,
+                "metadata": dict(row[10]) if row[10] else None,
             }
             for row in rows
         ],
