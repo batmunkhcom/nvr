@@ -349,7 +349,7 @@ export default function Recordings() {
                         </button>
                         <a
                           href={downloadUrl(rec.id)}
-                          download={`recording_${rec.camera_id}_${rec.start_time}.mp4`}
+                          download={rec.camera_name ? `${rec.camera_name}_${rec.start_time?.replace(/[:+T]/g, "_").slice(0, 19)}.mp4` : `recording_${rec.id?.slice(0, 8)}.mp4`}
                           className="p-1.5 bg-gray-800 hover:bg-indigo-600 rounded text-gray-400 hover:text-white"
                           title="Download"
                         >
