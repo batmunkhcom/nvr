@@ -98,6 +98,60 @@ async def get_latest_metrics(
     }
 
 
+@router.get("/metrics/all/history")
+async def get_all_cameras_history(
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    range: str = Query("24h", description="1h, 6h, 12h, 24h, 7d"),
+):
+    """Aggregated history across all cameras — summed per time bucket."""
+    interval_map = {
+        "1h": "1 hour",
+        "6h": "6 hours",
+        "12h": "12 hours",
+        "24h": "24 hours",
+        "7d": "7 days",
+    }
+    interval = interval_map.get(range, "24 hours")
+    interval_sql = f"NOW() - INTERVAL '{interval}'"
+
+    bucket = "minute" if range in ("1h", "6h", "12h") else "hour"
+    if range == "7d":
+        bucket = "hour"
+
+    result = await db.execute(
+        text(f"""
+        SELECT date_trunc('{bucket}', recorded_at) AS bucket,
+               COALESCE(SUM(inbound_mbps)::numeric(10,2), 0),
+               COALESCE(SUM(outbound_mbps)::numeric(10,2), 0),
+               AVG(rtt_ms)::numeric(8,2)
+        FROM network_metrics
+        WHERE recorded_at > {interval_sql}
+        GROUP BY bucket
+        ORDER BY bucket ASC
+    """)
+    )
+    rows = result.fetchall()
+
+    return {
+        "data": {
+            "camera_name": "All Cameras",
+            "time_range": {"start": f"Now - {interval}", "end": "now"},
+            "metrics": [
+                {
+                    "recorded_at": row[0].isoformat(),
+                    "inbound_mbps": float(row[1]),
+                    "outbound_mbps": float(row[2]),
+                    "rtt_ms": float(row[3]) if row[3] else None,
+                    "packet_loss_pct": None,
+                    "status": None,
+                }
+                for row in rows
+            ],
+        }
+    }
+
+
 @router.get("/metrics/{camera_id}")
 async def get_camera_metrics(
     camera_id: uuid.UUID,
@@ -136,60 +190,6 @@ async def get_camera_metrics(
             "packet_loss_pct": row[6],
             "status": row[7] or "unknown",
             "recorded_at": row[8].isoformat() if row[8] else None,
-        }
-    }
-
-
-@router.get("/metrics/all/history")
-async def get_all_cameras_history(
-    current_user: Annotated[dict, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-    range: str = Query("24h", description="1h, 6h, 12h, 24h, 7d"),
-):
-    """Aggregated history across all cameras — summed per time bucket."""
-    interval_map = {
-        "1h": "1 hour",
-        "6h": "6 hours",
-        "12h": "12 hours",
-        "24h": "24 hours",
-        "7d": "7 days",
-    }
-    interval = interval_map.get(range, "24 hours")
-    interval_sql = f"NOW() - INTERVAL '{interval}'"
-
-    bucket = "2 minutes" if range in ("1h", "6h") else "5 minutes"
-    if range == "7d":
-        bucket = "15 minutes"
-
-    result = await db.execute(
-        text(f"""
-        SELECT date_trunc('{bucket}', recorded_at) AS bucket,
-               COALESCE(SUM(inbound_mbps)::numeric(10,2), 0),
-               COALESCE(SUM(outbound_mbps)::numeric(10,2), 0),
-               AVG(rtt_ms)::numeric(8,2)
-        FROM network_metrics
-        WHERE recorded_at > {interval_sql}
-        GROUP BY bucket
-        ORDER BY bucket ASC
-    """)
-    )
-    rows = result.fetchall()
-
-    return {
-        "data": {
-            "camera_name": "All Cameras",
-            "time_range": {"start": f"Now - {interval}", "end": "now"},
-            "metrics": [
-                {
-                    "recorded_at": row[0].isoformat(),
-                    "inbound_mbps": float(row[1]),
-                    "outbound_mbps": float(row[2]),
-                    "rtt_ms": float(row[3]) if row[3] else None,
-                    "packet_loss_pct": None,
-                    "status": None,
-                }
-                for row in rows
-            ],
         }
     }
 
