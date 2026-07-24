@@ -18,9 +18,7 @@ async def run_self_test(db: AsyncSession) -> dict:
     Checks:
         - Database connectivity + latency
         - Redis connectivity + latency
-        - MinIO connectivity + latency
         - FFmpeg availability
-        - Disk space per storage backend
         - Active camera count
     """
     results = {}
@@ -49,27 +47,6 @@ async def run_self_test(db: AsyncSession) -> dict:
         }
     except Exception as e:
         results["redis"] = {"status": "error", "error": str(e)}
-
-    # MinIO
-    try:
-        import aiohttp
-
-        s3_start = time.monotonic()
-        async with (
-            aiohttp.ClientSession() as session,
-            session.get(
-                "http://nvr-minio:9000/minio/health/live", timeout=aiohttp.ClientTimeout(total=5)
-            ) as resp,
-        ):
-            if resp.status == 200:
-                results["minio"] = {
-                    "status": "ok",
-                    "latency_ms": round((time.monotonic() - s3_start) * 1000, 2),
-                }
-            else:
-                results["minio"] = {"status": "error", "http_status": resp.status}
-    except Exception as e:
-        results["minio"] = {"status": "error", "error": str(e)}
 
     # FFmpeg
     try:

@@ -46,7 +46,6 @@ async def health(db: Annotated[AsyncSession, Depends(get_db)]):
             "checks": {
                 "database": "ok",
                 "redis": "ok",
-                "minio": "ok",
                 "ffmpeg": "ok",
             },
             "cameras": {"total": total, "online": online, "offline": offline},

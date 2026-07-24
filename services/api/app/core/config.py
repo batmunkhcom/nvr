@@ -67,11 +67,6 @@ class Settings(BaseSettings):
 
     # Storage
     storage_local_path: str = "/data/recordings"
-    s3_endpoint: str = "nvr-minio:9000"
-    s3_access_key: str = "minioadmin"
-    s3_secret_key: str = "minioadmin_change_me"
-    s3_bucket: str = "nvr-recordings"
-    s3_secure: bool = False
 
     # Discovery
     discovery_subnets: str = "192.168.1.0/24,192.168.2.0/24"
