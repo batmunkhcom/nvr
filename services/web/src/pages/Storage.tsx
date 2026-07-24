@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { HardDrive, Plus, Trash2, Edit3, Server, Loader2 } from "lucide-react";
-import { useStorageUsage, useStorageBackends, useStorageMutations } from "../hooks/useRecordings";
+import { useStorageUsage, useStorageBackends, useStorageMutations, useStorageAnalysis } from "../hooks/useRecordings";
 import { useToast } from "../components/ui/Toast";
 import { useConfirm } from "../components/ui/ConfirmDialog";
 import EmptyState from "../components/ui/EmptyState";
@@ -53,6 +53,7 @@ const emptyForm: BackendForm = {
 
 export default function Storage() {
   const storage = useStorageUsage();
+  const analysis = useStorageAnalysis();
   const backends = useStorageBackends();
   const { create, update, remove } = useStorageMutations();
   const { toast } = useToast();
@@ -208,6 +209,58 @@ export default function Storage() {
           </div>
         </div>
       </div>
+
+      {/* Disk usage analysis (recording engine, hourly) */}
+      {analysis.data && (
+        <div className="bg-gray-900 rounded border border-gray-800 p-4 mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-200">Recording Disk Analysis</h3>
+            <span className="text-[11px] text-gray-500">
+              updated {new Date(analysis.data.computed_at).toLocaleTimeString()}
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+            <div className="bg-gray-800/60 rounded p-3">
+              <p className="text-[11px] text-gray-500">Daily usage</p>
+              <p className="text-lg font-bold text-blue-400">
+                {analysis.data.total_gb_per_day.toFixed(1)} GB/day
+              </p>
+            </div>
+            <div className="bg-gray-800/60 rounded p-3">
+              <p className="text-[11px] text-gray-500">Days that fit in free space</p>
+              <p className="text-lg font-bold text-green-400">
+                {analysis.data.days_fit !== null ? `~${analysis.data.days_fit} days` : "—"}
+              </p>
+            </div>
+            <div className="bg-gray-800/60 rounded p-3">
+              <p className="text-[11px] text-gray-500">Circular cleanup</p>
+              <p className="text-sm font-medium text-gray-300 mt-1">
+                Oldest recordings auto-delete at 85% disk usage — disk never fills up
+              </p>
+            </div>
+          </div>
+          {analysis.data.per_camera.length > 0 && (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-gray-500 text-left">
+                  <th className="py-1 font-medium">Camera</th>
+                  <th className="py-1 font-medium text-right">GB/day</th>
+                  <th className="py-1 font-medium text-right">Segments (24h)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {analysis.data.per_camera.map((c) => (
+                  <tr key={c.camera_id} className="border-t border-gray-800 text-gray-300">
+                    <td className="py-1">{c.camera}</td>
+                    <td className="py-1 text-right">{c.gb_per_day.toFixed(2)}</td>
+                    <td className="py-1 text-right">{c.segments_24h}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       {/* Backend list */}
       {isLoading ? (

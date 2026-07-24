@@ -12,6 +12,7 @@ COPY pyproject.toml .
 RUN pip install --no-cache-dir "redis>=5.2" "httpx>=0.28" \
     "structlog>=24.4" "pyyaml>=6.0" "aiohttp>=3.11" \
     "tenacity>=9.0" "pydantic>=2.10" \
+    "sqlalchemy[asyncio]>=2.0" "asyncpg>=0.30" \
     "cryptography>=43.0" "onnxruntime>=1.20" "opencv-python-headless>=4.10" \
     "numpy>=2.2"
 

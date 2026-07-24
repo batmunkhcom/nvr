@@ -94,6 +94,33 @@ async def get_usage(
     }
 
 
+@router.get("/analysis")
+async def get_analysis(
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Disk usage analysis computed by the recording engine (GB/day, projection)."""
+    import json
+
+    from sqlalchemy import select
+
+    from ...models.system_config import SystemConfig
+
+    result = await db.execute(
+        select(SystemConfig).where(SystemConfig.key == "storage.analysis")
+    )
+    row = result.scalar_one_or_none()
+    if not row:
+        return {"data": None}
+    value = row.value
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (ValueError, TypeError):
+            pass
+    return {"data": value}
+
+
 # ── get / update / delete by id ──
 @router.get("/backends/{backend_id}")
 async def get_backend(

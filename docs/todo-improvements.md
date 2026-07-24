@@ -70,8 +70,8 @@
 - [x] **3.4** Cooldown баг засах: `_apply_cooldown` одоо үнэхээр шүүдэг (class тус бүрээр, 15с)
 - [x] **3.5** Frame pipeline сайжруулалт: JPEG round-trip устгасан (numpy direct), cap.read/inference thread-д, reconnect backoff 5→120с
 - [x] **3.6** `ai.confidence_threshold` 2→0.5 зассан (DB) + кодод clamp validation (0.05–0.95)
-- [ ] **3.7** AI container асаах, машин/хүн танигдаж events + snapshots үүсэж байгааг баталгаажуулах (image build хүлээж байна)
-- [ ] **3.8** Events UI: snapshot thumbnail, объект төрлийн badge, шүүлтүүр (камер/төрөл/огноо)
+- [ ] **3.7** AI container асаах, танилт баталгаажуулах — **yolov8n.onnx экспортлогдон volume-д хуулсан** ✅; image-д sqlalchemy нэмж rebuild хийгдэж байна
+- [x] **3.8** Events UI: snapshot thumbnail (token auth-тай), объект badge (машин/хүн icon), камер шүүлтүүр — бичигдсэн ✅
 - [x] **3.9** Тест: test_ai_engine.py 14 тест (URL build, confidence clamp, cooldown, letterbox) — numpy-тэй орчинд ажиллана
 
 ## Phase 4 — Performance & tuning ⬜

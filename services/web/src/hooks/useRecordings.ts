@@ -46,6 +46,25 @@ export function useStorageUsage() {
   });
 }
 
+export interface StorageAnalysis {
+  computed_at: string;
+  total_gb_per_day: number;
+  days_fit: number | null;
+  disk: { total_gb: number; used_gb: number; free_gb: number; used_percent: number };
+  per_camera: { camera_id: string; camera: string; gb_per_day: number; segments_24h: number }[];
+}
+
+export function useStorageAnalysis() {
+  return useQuery({
+    queryKey: ["storage", "analysis"],
+    queryFn: async () => {
+      const res = await apiClient.get("/storage/analysis");
+      return (res.data?.data || null) as StorageAnalysis | null;
+    },
+    refetchInterval: 300_000,
+  });
+}
+
 export function useStorageBackends() {
   return useQuery({
     queryKey: ["storage", "backends"],
