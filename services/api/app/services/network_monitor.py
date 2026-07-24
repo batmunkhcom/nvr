@@ -1,12 +1,20 @@
-"""Network metrics collector - background task that polls cameras for bandwidth, latency, packet loss."""
+"""Network metrics collector — polls cameras for bandwidth, latency, packet loss.
+
+Runs as a background asyncio loop (started from app lifespan). Collects:
+  - ping (RTT / jitter / packet loss) — requires NET_RAW cap
+  - MediaMTX path stats (inbound/outbound bytes → Mbps delta)
+  - Status determination (online / degraded / offline)
+
+Auto-start on app boot; play/pause via API.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import re
+import time
 from typing import Any
-from uuid import UUID
 
 import httpx
 import structlog
@@ -15,21 +23,24 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 logger = structlog.get_logger()
 
+MEDIAMTX_HOST = "http://nvr-mediamtx:9997"
+DEFAULT_RETENTION_DAYS = 30
+POLL_INTERVAL_S = 30
+
 
 class NetworkMonitor:
     def __init__(self):
         self.running = False
         self._task: asyncio.Task | None = None
-        self._semaphore = asyncio.Semaphore(5)
-        self._camera_offsets: dict[UUID, float] = {}
         self._engine = None
+        self._byte_tracker: dict[
+            str, tuple[float, int, int]
+        ] = {}  # cam_id -> (ts, bytes_rcv, bytes_sent)
 
     def init(self, db_url: str):
-        """Initialize with database URL. Called from app lifespan."""
         self._engine = create_async_engine(db_url)
 
     async def start(self):
-        """Start background collection loop. Called from app lifespan."""
         if self.running or not self._engine:
             return
         self.running = True
@@ -37,7 +48,6 @@ class NetworkMonitor:
         self._task = asyncio.create_task(self._collect_loop())
 
     async def stop(self):
-        """Stop background collection. Called on app shutdown."""
         self.running = False
         if self._task:
             self._task.cancel()
@@ -46,45 +56,35 @@ class NetworkMonitor:
         logger.info("network_monitor_stopped")
 
     async def _collect_loop(self):
-        """Main polling loop with staggered offsets."""
         while self.running:
-            start_time = asyncio.get_event_loop().time()
+            t_start = time.monotonic()
 
             try:
                 cameras = await self._get_monitored_cameras()
-
                 if not cameras:
-                    await asyncio.sleep(30)
+                    await asyncio.sleep(POLL_INTERVAL_S)
                     continue
 
-                poll_interval = 30
-                total = len(cameras)
-                for i, cam in enumerate(cameras):
-                    self._camera_offsets[cam["id"]] = (
-                        (i * poll_interval / total) if total > 1 else 0
-                    )
+                mediamtx_data = await self._fetch_mediamtx_paths()
 
-                tasks = [
-                    self._collect_single_camera(cam, offset)
-                    for cam, offset in self._camera_offsets.items()
-                ]
+                tasks = [self._collect_single_camera(c, mediamtx_data) for c in cameras]
                 await asyncio.gather(*tasks, return_exceptions=True)
+
+                await self._cleanup_old_metrics()
 
             except Exception:
                 logger.error("network_monitor_loop_error", exc_info=True)
 
-            elapsed = asyncio.get_event_loop().time() - start_time
-            sleep_time = max(0, 30 - elapsed)
-            if sleep_time > 0:
-                await asyncio.sleep(sleep_time)
+            elapsed = time.monotonic() - t_start
+            if (sleep_sec := POLL_INTERVAL_S - elapsed) > 0:
+                await asyncio.sleep(sleep_sec)
 
     async def _get_monitored_cameras(self) -> list[dict[str, Any]]:
-        """Get all active cameras with monitoring enabled + their configs."""
         async with AsyncSession(self._engine) as db:
             result = await db.execute(
                 text("""
-                SELECT c.id, c.name, c.ip_address, c.location, c.stream_main_uri, c.stream_sub_uri,
-                       cnc.poll_interval, cnc.ping_enabled, cnc.rtsp_check_enabled
+                SELECT c.id, c.name, c.ip_address, c.location,
+                       cnc.poll_interval, cnc.ping_enabled, cnc.retention_days
                 FROM cameras c
                 JOIN camera_network_config cnc ON c.id = cnc.camera_id
                 WHERE c.is_active = true
@@ -92,102 +92,120 @@ class NetworkMonitor:
             """)
             )
             rows = result.fetchall()
-
             return [
                 {
                     "id": row[0],
                     "name": row[1],
                     "ip_address": row[2],
                     "location": row[3],
-                    "stream_main_uri": row[4],
-                    "stream_sub_uri": row[5],
-                    "poll_interval": row[6],
-                    "ping_enabled": row[7],
-                    "rtsp_check_enabled": row[8],
+                    "poll_interval": row[4] or POLL_INTERVAL_S,
+                    "ping_enabled": row[5] if row[5] is not None else True,
+                    "retention_days": row[6] or DEFAULT_RETENTION_DAYS,
                 }
                 for row in rows
             ]
 
-    async def _collect_single_camera(self, camera: dict[str, Any], offset_seconds: float):
-        """Collect metrics for one camera. Independent error handling."""
-        if offset_seconds > 0:
-            await asyncio.sleep(offset_seconds)
+    async def _fetch_mediamtx_paths(self) -> dict[str, dict[str, int]]:
+        """Fetch path-level byte counters from MediaMTX.
 
-        async with self._semaphore:
-            try:
-                metrics = await self.collect_metrics(camera)
-                if metrics:
-                    await self.store_metrics(metrics)
+        Returns: {camera_id: {"bytesReceived": N, "bytesSent": N}, ...}
+        The _sub suffix is stripped from path names.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.get(f"{MEDIAMTX_HOST}/v3/paths/list")
+                if resp.status_code != 200:
+                    return {}
+                page = resp.json()
+        except Exception:
+            logger.debug("mediamtx_api_failed")
+            return {}
 
-                    try:
-                        from .ws_manager import ws_manager
+        result: dict[str, dict[str, int]] = {}
+        for p in page.get("items", []):
+            name = p.get("name", "")
+            if name.endswith("_sub"):
+                cid = name[:-4]
+                result[cid] = {
+                    "bytes_received": p.get("bytesReceived", 0),
+                    "bytes_sent": p.get("bytesSent", 0),
+                }
+        return result
 
-                        await ws_manager.broadcast(
-                            {
-                                "type": "network_metric",
-                                "camera_id": str(camera["id"]),
-                                "metrics": metrics,
-                            }
-                        )
-                    except Exception as ws_err:
-                        logger.warning("network_ws_broadcast_failed", error=str(ws_err))
+    def _compute_mbps(
+        self, cam_id: str, bytes_rcv: int, bytes_sent: int
+    ) -> tuple[float | None, float | None]:
+        """Compute inbound/outbound Mbps from byte deltas since last sample."""
+        now = time.monotonic()
+        inbound_mbps = outbound_mbps = None
 
-                    try:
-                        from .network_alerts import network_alert_service
+        if prev := self._byte_tracker.get(cam_id):
+            prev_ts, prev_rcv, prev_sent = prev
+            elapsed = now - prev_ts
+            if elapsed >= 1.0:
+                d_rcv = bytes_rcv - prev_rcv
+                d_sent = bytes_sent - prev_sent
+                if d_rcv >= 0:
+                    inbound_mbps = round(d_rcv / elapsed * 8 / 1_000_000, 2)
+                if d_sent >= 0:
+                    outbound_mbps = round(d_sent / elapsed * 8 / 1_000_000, 2)
 
-                        if network_alert_service:
-                            await network_alert_service.evaluate(
-                                camera["id"], metrics, self._engine
-                            )
-                    except Exception as alert_err:
-                        logger.warning("network_alert_eval_failed", error=str(alert_err))
+        self._byte_tracker[cam_id] = (now, bytes_rcv, bytes_sent)
+        return inbound_mbps, outbound_mbps
 
-            except Exception as e:
-                logger.error(
-                    "network_collect_error",
-                    camera_id=str(camera.get("id", "unknown")),
-                    camera_name=camera.get("name", "unknown"),
-                    error=str(e),
+    async def _collect_single_camera(self, camera: dict[str, Any], mmtx: dict[str, dict[str, int]]):
+        try:
+            metrics = await self.collect_metrics(camera, mmtx)
+            if metrics:
+                await self.store_metrics(metrics)
+
+                from .ws_manager import ws_manager
+
+                await ws_manager.broadcast(
+                    {"type": "network_metric", "camera_id": str(camera["id"]), "metrics": metrics}
                 )
 
-    async def collect_metrics(self, camera: dict[str, Any]) -> dict[str, Any] | None:
-        """Collect all metrics for one camera. Returns None if collection failed."""
-        results: dict[str, Any] = {
-            "camera_id": str(camera["id"]),
-        }
+                from .network_alerts import network_alert_service
 
-        if camera.get("ping_enabled", True):
-            try:
-                ping_result = await self.ping_camera(camera["ip_address"])
-                results.update(ping_result)
-            except Exception as e:
-                logger.debug("ping_failed", camera_id=str(camera["id"]), error=str(e))
-                results["rtt_ms"] = None
-                results["jitter_ms"] = None
-                results["packet_loss_pct"] = 100.0
-        else:
-            results["rtt_ms"] = None
-            results["jitter_ms"] = None
-            results["packet_loss_pct"] = None
+                await network_alert_service.evaluate(camera["id"], metrics, self._engine)
 
-        if camera.get("rtsp_check_enabled", True):
+        except Exception as e:
+            logger.error(
+                "network_collect_error",
+                camera_id=str(camera.get("id", "unknown")),
+                error=str(e),
+            )
+
+    async def collect_metrics(
+        self, camera: dict[str, Any], mmtx: dict[str, dict[str, int]]
+    ) -> dict[str, Any] | None:
+        cid = str(camera["id"])
+        results: dict[str, Any] = {"camera_id": cid}
+
+        # --- ping ---
+        if camera.get("ping_enabled", True) and camera.get("ip_address"):
             try:
-                mtmx_stats = await self.get_mediamtx_stats(camera["id"])
-                if mtmx_stats:
-                    results.update(mtmx_stats)
-                else:
-                    proc_stats = await self.parse_proc_stats(camera["id"])
-                    if proc_stats:
-                        results.update(proc_stats)
-            except Exception as e:
-                logger.debug("stats_fetch_failed", camera_id=str(camera["id"]), error=str(e))
+                ping = await self._ping(camera["ip_address"])
+                results.update(ping)
+            except Exception:
+                # ping failure is non-fatal — leave metrics unset
+                pass
+        results.setdefault("rtt_ms", None)
+        results.setdefault("jitter_ms", None)
+        results.setdefault("packet_loss_pct", None)
+
+        # --- MediaMTX bytes → bandwidth ---
+        path = mmtx.get(cid, {})
+        bytes_rcv = path.get("bytes_received", 0)
+        bytes_sent = path.get("bytes_sent", 0)
+        inbound, outbound = self._compute_mbps(cid, bytes_rcv, bytes_sent)
+        results["inbound_mbps"] = inbound
+        results["outbound_mbps"] = outbound
 
         results["status"] = self._determine_status(results)
+        return results
 
-        return results if results else None
-
-    async def ping_camera(self, ip_address: str) -> dict[str, Any]:
-        """ICMP ping via subprocess. Returns rtt_ms, jitter_ms, packet_loss_pct."""
+    async def _ping(self, ip_address: str) -> dict[str, Any]:
         proc = await asyncio.create_subprocess_exec(
             "ping",
             "-c",
@@ -198,154 +216,59 @@ class NetworkMonitor:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, _ = await proc.communicate()
-        output = stdout.decode("utf-8", errors="replace")
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+        output = stdout.decode(errors="replace")
 
-        rtt_match = re.search(
-            r"rtt\s+min/avg/max/mdev\s+=\s+([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)", output
-        )
-
-        if rtt_match:
-            avg_rtt = float(rtt_match.group(2))
-            mdev = float(rtt_match.group(4))
-
+        m = re.search(r"rtt\s+min/avg/max/mdev\s+=\s+([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)", output)
+        if m:
             return {
-                "rtt_ms": round(avg_rtt, 2),
-                "jitter_ms": round(mdev, 2),
+                "rtt_ms": round(float(m.group(2)), 2),
+                "jitter_ms": round(float(m.group(4)), 2),
                 "packet_loss_pct": 0.0,
             }
 
-        loss_match = re.search(r"(\d+(?:\.\d+)?)%\s+packet\s+loss", output)
-        if loss_match:
-            loss_pct = float(loss_match.group(1))
+        m = re.search(r"(\d+(?:\.\d+)?)%\s+packet\s+loss", output)
+        if m:
             return {
                 "rtt_ms": None,
                 "jitter_ms": None,
-                "packet_loss_pct": loss_pct,
+                "packet_loss_pct": float(m.group(1)),
             }
 
-        return {
-            "rtt_ms": None,
-            "jitter_ms": None,
-            "packet_loss_pct": 100.0,
-        }
-
-    async def get_mediamtx_stats(self, camera_id: UUID) -> dict[str, Any] | None:
-        """Get bitrate/fps from MediaMTX REST API."""
-        try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                resp = await client.get(f"http://127.0.0.1:9997/v3/paths/{camera_id}")
-                if resp.status_code != 200:
-                    return None
-
-                data = resp.json()
-                stats: dict[str, Any] = {}
-
-                runners = data.get("runners", [])
-                total_bitrate_mbps = 0.0
-                fps_values = []
-                pids = []
-
-                for runner in runners:
-                    for reader in runner.get("readers", []):
-                        stats_info = reader.get("stats", {})
-                        bitrate_bps = stats_info.get("averageBitrateBps", 0)
-                        total_bitrate_mbps += bitrate_bps / 1_000_000
-                        fps = stats_info.get("currentFps", 0)
-                        if fps > 0:
-                            fps_values.append(fps)
-
-                    for writer in runner.get("writers", []):
-                        stats_info = writer.get("stats", {})
-                        bitrate_bps = stats_info.get("currentBitrateBps", 0)
-                        total_bitrate_mbps += bitrate_bps / 1_000_000
-                        fps = stats_info.get("currentFps", 0)
-                        if fps > 0:
-                            fps_values.append(fps)
-
-                    pid = runner.get("pid")
-                    if pid:
-                        pids.append(pid)
-
-                if total_bitrate_mbps > 0:
-                    stats["outbound_mbps"] = round(total_bitrate_mbps, 2)
-                    stats["fps_current"] = (
-                        round(sum(fps_values) / len(fps_values), 1) if fps_values else None
-                    )
-
-                    for pid in pids:
-                        proc_stats = await self._read_proc_stats(pid)
-                        if proc_stats:
-                            stats["ffmpeg_pid"] = pid
-                            stats["ffmpeg_cpu"] = proc_stats.get("cpu_percent")
-                            stats["ffmpeg_memory_mb"] = proc_stats.get("memory_mb")
-
-                return stats if stats else None
-
-        except Exception as e:
-            logger.debug("mediamtx_api_failed", camera_id=str(camera_id), error=str(e))
-            return None
-
-    async def parse_proc_stats(self, camera_id: UUID) -> dict[str, Any] | None:
-        """Fallback: find FFmpeg PID from running processes, then read /proc/[pid]/stat."""
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "pgrep",
-                "-f",
-                f"ffmpeg.*{camera_id}",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await proc.communicate()
-            pids = stdout.decode("utf-8", errors="replace").strip().split("\n")
-
-            if not pids or pids == [""]:
-                return None
-
-            pid = int(pids[0])
-            stats = await self._read_proc_stats(pid)
-            if stats:
-                stats["ffmpeg_pid"] = pid
-            return stats
-
-        except Exception as e:
-            logger.debug("proc_stats_failed", camera_id=str(camera_id), error=str(e))
-            return None
-
-    async def _read_proc_stats(self, pid: int) -> dict[str, Any] | None:
-        """Read /proc/{pid}/stat and /proc/{pid}/status for CPU + memory."""
-        try:
-            with open(f"/proc/{pid}/stat") as f:
-                stat_fields = f.read().split()
-
-            utime = int(stat_fields[13])
-            stime = int(stat_fields[14])
-            total_ticks = utime + stime
-
-            with open(f"/proc/{pid}/status") as f:
-                for line in f:
-                    if line.startswith("VmRSS:"):
-                        memory_kb = int(line.split()[1])
-                        return {
-                            "ffmpeg_cpu": round(total_ticks / 10.0, 2),
-                            "ffmpeg_memory_mb": round(memory_kb / 1024, 2),
-                        }
-
-            return {"ffmpeg_cpu": 0.0, "ffmpeg_memory_mb": 0.0}
-
-        except (FileNotFoundError, IndexError, ValueError):
-            return None
+        return {"rtt_ms": None, "jitter_ms": None, "packet_loss_pct": None}
 
     def _determine_status(self, metrics: dict[str, Any]) -> str:
-        """Determine camera status from collected metrics."""
-        if not metrics.get("rtt_ms") and metrics.get("packet_loss_pct", 0) >= 100:
+        loss = metrics.get("packet_loss_pct")
+        rtt = metrics.get("rtt_ms")
+        inbound = metrics.get("inbound_mbps")
+        outbound = metrics.get("outbound_mbps")
+
+        has_bandwidth = (inbound is not None and inbound > 0) or (
+            outbound is not None and outbound > 0
+        )
+
+        if loss is not None and loss >= 100 and not has_bandwidth:
             return "offline"
-        if metrics.get("packet_loss_pct", 0) > 5.0:
+        if loss is not None and loss > 5.0:
             return "degraded"
+        if rtt is None and loss is None and not has_bandwidth:
+            return "unknown"
         return "online"
 
+    async def _cleanup_old_metrics(self):
+        """Delete metrics rows older than the configured retention (default 30 days)."""
+        try:
+            async with AsyncSession(self._engine) as db:
+                await db.execute(
+                    text(
+                        "DELETE FROM network_metrics WHERE recorded_at < NOW() - INTERVAL '30 days'"
+                    )
+                )
+                await db.commit()
+        except Exception:
+            await db.rollback()
+
     async def store_metrics(self, metrics: dict[str, Any]) -> None:
-        """Insert metrics into database."""
         camera_id = metrics.pop("camera_id", None)
         if not camera_id:
             return
@@ -353,35 +276,27 @@ class NetworkMonitor:
         async with AsyncSession(self._engine) as db:
             try:
                 await db.execute(
-                    text("""
-                    INSERT INTO network_metrics
-                       (camera_id, recorded_at, inbound_mbps, outbound_mbps, rtt_ms, jitter_ms,
-                        rtsp_latency, packets_sent, packets_recv, packet_loss_pct,
-                        fps_current, bitrate_current, rtsp_reconnect_cnt,
-                        ffmpeg_pid, ffmpeg_cpu, ffmpeg_memory_mb, status, error_message)
-                    VALUES (:camera_id, NOW(), :inbound_mbps, :outbound_mbps, :rtt_ms, :jitter_ms,
-                              :rtsp_latency, :packets_sent, :packets_recv, :packet_loss_pct,
-                              :fps_current, :bitrate_current, :rtsp_reconnect_cnt,
-                              :ffmpeg_pid, :ffmpeg_cpu, :ffmpeg_memory_mb, :status, :error_message)
-                """),
+                    text(
+                        """
+                        INSERT INTO network_metrics
+                           (camera_id, recorded_at,
+                            inbound_mbps, outbound_mbps,
+                            rtt_ms, jitter_ms, packet_loss_pct,
+                            status)
+                        VALUES (:camera_id, NOW(),
+                                :inbound_mbps, :outbound_mbps,
+                                :rtt_ms, :jitter_ms, :packet_loss_pct,
+                                :status)
+                        """
+                    ),
                     {
                         "camera_id": camera_id,
                         "inbound_mbps": metrics.get("inbound_mbps"),
                         "outbound_mbps": metrics.get("outbound_mbps"),
                         "rtt_ms": metrics.get("rtt_ms"),
                         "jitter_ms": metrics.get("jitter_ms"),
-                        "rtsp_latency": metrics.get("rtsp_latency"),
-                        "packets_sent": metrics.get("packets_sent"),
-                        "packets_recv": metrics.get("packets_recv"),
                         "packet_loss_pct": metrics.get("packet_loss_pct"),
-                        "fps_current": metrics.get("fps_current"),
-                        "bitrate_current": metrics.get("bitrate_current"),
-                        "rtsp_reconnect_cnt": metrics.get("rtsp_reconnect_cnt"),
-                        "ffmpeg_pid": metrics.get("ffmpeg_pid"),
-                        "ffmpeg_cpu": metrics.get("ffmpeg_cpu"),
-                        "ffmpeg_memory_mb": metrics.get("ffmpeg_memory_mb"),
                         "status": metrics.get("status", "unknown"),
-                        "error_message": metrics.get("error_message"),
                     },
                 )
                 await db.commit()

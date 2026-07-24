@@ -11,7 +11,13 @@ import {
 } from "recharts";
 
 interface NetworkChartProps {
-  data: Array<{ recorded_at: string | null; inbound_mbps?: number | null; outbound_mbps?: number | null; rtt_ms?: number | null; packet_loss_pct?: number | null }>;
+  points: Array<{
+    recorded_at: string | null;
+    inbound_mbps?: number | null;
+    outbound_mbps?: number | null;
+    rtt_ms?: number | null;
+    packet_loss_pct?: number | null;
+  }>;
   title: string;
   height?: number;
 }
@@ -22,20 +28,20 @@ function formatTime(dateStr: string | null): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-export default function NetworkChart({ data, title, height = 200 }: NetworkChartProps) {
+export default function NetworkChart({ points, title, height = 200 }: NetworkChartProps) {
   const chartData = useMemo(() => {
-    return [...data].reverse().map((d) => ({
+    return [...points].reverse().map((d) => ({
       time: formatTime(d.recorded_at),
       inbound: d.inbound_mbps ?? null,
       outbound: d.outbound_mbps ?? null,
       rtt: d.rtt_ms ?? null,
       loss: d.packet_loss_pct ?? null,
     }));
-  }, [data]);
+  }, [points]);
 
-  const hasBandwidth = data.some((d) => d.inbound_mbps != null || d.outbound_mbps != null);
-  const hasLatency = data.some((d) => d.rtt_ms != null);
-  const hasLoss = data.some((d) => d.packet_loss_pct != null);
+  const hasBandwidth = points.some((d) => d.inbound_mbps != null || d.outbound_mbps != null);
+  const hasLatency = points.some((d) => d.rtt_ms != null);
+  const hasLoss = points.some((d) => d.packet_loss_pct != null);
 
   return (
     <div className="bg-gray-900 rounded border border-gray-800 p-4">
@@ -45,23 +51,23 @@ export default function NetworkChart({ data, title, height = 200 }: NetworkChart
           <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
           <XAxis dataKey="time" stroke="#6B7280" fontSize={10} tickMargin={5} />
           <YAxis stroke="#6B7280" fontSize={10} />
-           <Tooltip
+          <Tooltip
             contentStyle={{ backgroundColor: "#1F2937", border: "1px solid #374151", borderRadius: "4px", fontSize: "12px" }}
             labelStyle={{ color: "#D1D5DB" }}
-            formatter={(value) => [
-              value != null ? Number(value).toFixed(2) : "—",
-              "" as any,
-             ]}
-           />
+          />
           <Legend wrapperStyle={{ fontSize: "11px" }} />
           {hasBandwidth && (
             <>
-              <Line type="monotone" dataKey="inbound" stroke="#3B82F6" strokeWidth={1.5} dot={false} name="Inbound (Mbps)" />
-              <Line type="monotone" dataKey="outbound" stroke="#10B981" strokeWidth={1.5} dot={false} name="Outbound (Mbps)" />
+              <Line type="monotone" dataKey="inbound" stroke="#3B82F6" strokeWidth={1.5} dot={false} name="In (Mbps)" />
+              <Line type="monotone" dataKey="outbound" stroke="#10B981" strokeWidth={1.5} dot={false} name="Out (Mbps)" />
             </>
           )}
-          {hasLatency && <Line type="monotone" dataKey="rtt" stroke="#F59E0B" strokeWidth={1.5} dot={false} name="RTT (ms)" />}
-          {hasLoss && <Line type="monotone" dataKey="loss" stroke="#EF4444" strokeWidth={1.5} dot={false} name="Packet Loss (%)" />}
+          {hasLatency && (
+            <Line type="monotone" dataKey="rtt" stroke="#F59E0B" strokeWidth={1.5} dot={false} name="RTT (ms)" />
+          )}
+          {hasLoss && (
+            <Line type="monotone" dataKey="loss" stroke="#EF4444" strokeWidth={1.5} dot={false} name="Loss (%)" />
+          )}
         </LineChart>
       </ResponsiveContainer>
     </div>

@@ -16,6 +16,14 @@ logger = structlog.get_logger()
 router = APIRouter(prefix="/api/v1/network", tags=["network"])
 
 
+@router.get("/monitor/status")
+async def monitor_status(
+    current_user: Annotated[dict, Depends(get_current_user)],
+):
+    """Get monitor running state."""
+    return {"data": {"running": network_monitor.running}}
+
+
 @router.post("/monitor/start")
 async def start_monitoring(
     current_user: Annotated[dict, Depends(get_current_user)],
@@ -23,7 +31,7 @@ async def start_monitoring(
     """Start background network metrics collection."""
     if not network_monitor.running:
         await network_monitor.start()
-    return {"data": {"status": "started"}}
+    return {"data": {"running": True, "status": "started"}}
 
 
 @router.post("/monitor/stop")
@@ -33,7 +41,19 @@ async def stop_monitoring(
     """Stop background network metrics collection."""
     if network_monitor.running:
         await network_monitor.stop()
-    return {"data": {"status": "stopped"}}
+    return {"data": {"running": False, "status": "stopped"}}
+
+
+@router.post("/monitor/toggle")
+async def toggle_monitoring(
+    current_user: Annotated[dict, Depends(get_current_user)],
+):
+    """Play/pause the background metrics collection."""
+    if network_monitor.running:
+        await network_monitor.stop()
+        return {"data": {"running": False, "status": "paused"}}
+    await network_monitor.start()
+    return {"data": {"running": True, "status": "started"}}
 
 
 @router.get("/metrics")
@@ -44,9 +64,9 @@ async def get_latest_metrics(
     """Latest metrics for all cameras."""
     result = await db.execute(
         text("""
-        SELECT c.id, c.name, c.location, nm.status, nm.outbound_mbps, nm.rtt_ms,
-               nm.packet_loss_pct, nm.fps_current, nm.bitrate_current,
-               nm.ffmpeg_cpu, nm.ffmpeg_memory_mb, nm.recorded_at
+        SELECT c.id, c.name, c.location, nm.status,
+               nm.inbound_mbps, nm.outbound_mbps,
+               nm.rtt_ms, nm.packet_loss_pct, nm.recorded_at
         FROM cameras c
         LEFT JOIN LATERAL (
             SELECT * FROM network_metrics nmc
@@ -67,14 +87,11 @@ async def get_latest_metrics(
                 "camera_name": row[1],
                 "location": row[2],
                 "status": row[3] or "unknown",
-                "outbound_mbps": row[4],
-                "rtt_ms": row[5],
-                "packet_loss_pct": row[6],
-                "fps_current": row[7],
-                "bitrate_current": row[8],
-                "ffmpeg_cpu": row[9],
-                "ffmpeg_memory_mb": row[10],
-                "recorded_at": row[11].isoformat() if row[11] else None,
+                "inbound_mbps": row[4],
+                "outbound_mbps": row[5],
+                "rtt_ms": row[6],
+                "packet_loss_pct": row[7],
+                "recorded_at": row[8].isoformat() if row[8] else None,
             }
             for row in rows
         ]
@@ -90,7 +107,9 @@ async def get_camera_metrics(
     """Latest metrics for single camera."""
     result = await db.execute(
         text("""
-        SELECT c.name, c.location, nm.*
+        SELECT c.name, c.location, nm.inbound_mbps, nm.outbound_mbps,
+               nm.rtt_ms, nm.jitter_ms, nm.packet_loss_pct,
+               nm.status, nm.recorded_at
         FROM cameras c
         LEFT JOIN LATERAL (
             SELECT * FROM network_metrics nmc
@@ -103,33 +122,20 @@ async def get_camera_metrics(
         {"camera_id": camera_id},
     )
     row = result.fetchone()
-
     if not row:
         return {"data": None}
-
     return {
         "data": {
             "camera_name": row[0],
             "location": row[1],
-            "id": str(row[2]),
-            "camera_id": str(row[3]),
-            "recorded_at": row[4].isoformat() if row[4] else None,
-            "inbound_mbps": row[5],
-            "outbound_mbps": row[6],
-            "rtt_ms": row[7],
-            "jitter_ms": row[8],
-            "rtsp_latency": row[9],
-            "packets_sent": row[10],
-            "packets_recv": row[11],
-            "packet_loss_pct": row[12],
-            "fps_current": row[13],
-            "bitrate_current": row[14],
-            "rtsp_reconnect_cnt": row[15],
-            "ffmpeg_pid": row[16],
-            "ffmpeg_cpu": row[17],
-            "ffmpeg_memory_mb": row[18],
-            "status": row[19] or "unknown",
-            "error_message": row[20],
+            "camera_id": str(camera_id),
+            "inbound_mbps": row[2],
+            "outbound_mbps": row[3],
+            "rtt_ms": row[4],
+            "jitter_ms": row[5],
+            "packet_loss_pct": row[6],
+            "status": row[7] or "unknown",
+            "recorded_at": row[8].isoformat() if row[8] else None,
         }
     }
 
@@ -161,29 +167,28 @@ async def get_camera_history(
         return {"data": None}
 
     offset = (page - 1) * per_page
+    interval_sql = f"NOW() - INTERVAL '{interval}'"
     result = await db.execute(
-        text("""
-        SELECT id, recorded_at, inbound_mbps, outbound_mbps, rtt_ms, jitter_ms,
-               rtsp_latency, packets_sent, packets_recv, packet_loss_pct,
-               fps_current, bitrate_current, rtsp_reconnect_cnt,
-               ffmpeg_pid, ffmpeg_cpu, ffmpeg_memory_mb, status, error_message
+        text(f"""
+        SELECT id, recorded_at, inbound_mbps, outbound_mbps, rtt_ms,
+               packet_loss_pct, status
         FROM network_metrics
         WHERE camera_id = :camera_id
-          AND recorded_at > NOW() - INTERVAL ':interval'
+          AND recorded_at > {interval_sql}
         ORDER BY recorded_at DESC
         LIMIT :limit OFFSET :offset
     """),
-        {"camera_id": camera_id, "interval": interval, "limit": per_page, "offset": offset},
+        {"camera_id": camera_id, "limit": per_page, "offset": offset},
     )
     rows = result.fetchall()
 
     count_result = await db.execute(
-        text("""
+        text(f"""
         SELECT COUNT(1) FROM network_metrics
         WHERE camera_id = :camera_id
-          AND recorded_at > NOW() - INTERVAL ':interval'
+          AND recorded_at > {interval_sql}
     """),
-        {"camera_id": camera_id, "interval": interval},
+        {"camera_id": camera_id},
     )
     total_count = count_result.scalar() or 0
 
@@ -200,19 +205,8 @@ async def get_camera_history(
                     "inbound_mbps": row[2],
                     "outbound_mbps": row[3],
                     "rtt_ms": row[4],
-                    "jitter_ms": row[5],
-                    "rtsp_latency": row[6],
-                    "packets_sent": row[7],
-                    "packets_recv": row[8],
-                    "packet_loss_pct": row[9],
-                    "fps_current": row[10],
-                    "bitrate_current": row[11],
-                    "rtsp_reconnect_cnt": row[12],
-                    "ffmpeg_pid": row[13],
-                    "ffmpeg_cpu": row[14],
-                    "ffmpeg_memory_mb": row[15],
-                    "status": row[16] or "unknown",
-                    "error_message": row[17],
+                    "packet_loss_pct": row[5],
+                    "status": row[6] or "unknown",
                 }
                 for row in rows
             ],
@@ -254,7 +248,8 @@ async def get_network_summary(
 
     avg_result = await db.execute(
         text("""
-        SELECT AVG(nm.outbound_mbps)::numeric(10,2), AVG(nm.rtt_ms)::numeric(8,2)
+        SELECT AVG(nm.inbound_mbps)::numeric(10,2), AVG(nm.outbound_mbps)::numeric(10,2),
+               AVG(nm.rtt_ms)::numeric(8,2)
         FROM cameras c
         JOIN LATERAL (
             SELECT * FROM network_metrics nmc
@@ -262,7 +257,8 @@ async def get_network_summary(
             ORDER BY nmc.recorded_at DESC
             LIMIT 1
         ) nm ON true
-        WHERE c.is_active = true AND nm.outbound_mbps IS NOT NULL AND nm.rtt_ms IS NOT NULL
+        WHERE c.is_active = true
+          AND (nm.inbound_mbps IS NOT NULL OR nm.outbound_mbps IS NOT NULL OR nm.rtt_ms IS NOT NULL)
     """)
     )
     avg_row = avg_result.fetchone()
@@ -320,8 +316,9 @@ async def get_network_summary(
             "online_cameras": status_counts["online"],
             "degraded_cameras": status_counts["degraded"],
             "offline_cameras": status_counts["offline"],
-            "avg_bandwidth_mbps": float(avg_row[0]) if avg_row and avg_row[0] else None,
-            "avg_latency_ms": float(avg_row[1]) if avg_row and avg_row[1] else None,
+            "avg_inbound_mbps": float(avg_row[0]) if avg_row and avg_row[0] else None,
+            "avg_outbound_mbps": float(avg_row[1]) if avg_row and avg_row[1] else None,
+            "avg_latency_ms": float(avg_row[2]) if avg_row and avg_row[2] else None,
             "active_alerts": alert_row[0] or 0,
             "alerts_by_severity": {"warning": alert_row[1] or 0, "critical": alert_row[2] or 0},
             "cameras_by_location": cameras_by_location,

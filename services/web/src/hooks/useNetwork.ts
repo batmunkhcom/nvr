@@ -1,6 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { networkApi } from "../api/network";
-import type { NetworkDashboardSummary, LatestMetric, NetworkAlert } from "../types/network";
+import type {
+  NetworkDashboardSummary,
+  LatestMetric,
+  NetworkAlert,
+} from "../types/network";
 
 export function useNetworkSummary() {
   return useQuery({
@@ -18,13 +22,35 @@ export function useLatestMetrics() {
   });
 }
 
-export function useCameraHistory(cameraId: string | null | undefined, range = "24h") {
+export function useCameraHistory(
+  cameraId: string | null | undefined,
+  range = "24h",
+) {
   return useQuery({
     queryKey: ["network", "history", cameraId, range],
     queryFn: () =>
       networkApi.getCameraHistory(cameraId!, range).then((r) => r.data.data),
     enabled: !!cameraId,
     refetchInterval: 30_000,
+  });
+}
+
+export function useMonitorStatus() {
+  return useQuery({
+    queryKey: ["network", "monitor", "status"],
+    queryFn: () => networkApi.getMonitorStatus().then((r) => r.data.data),
+    refetchInterval: 15_000,
+  });
+}
+
+export function useToggleMonitoring() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => networkApi.toggleMonitoring(),
+    onSuccess: (r) => {
+      qc.setQueryData(["network", "monitor", "status"], r.data.data);
+      qc.invalidateQueries({ queryKey: ["network", "summary"] });
+    },
   });
 }
 
@@ -47,50 +73,29 @@ export function useAcknowledgeAlert() {
   });
 }
 
-export function useStartMonitoring() {
+export function useNetworkWebSocket(
+  onMetricUpdate?: (cameraId: string, metrics: Record<string, unknown>) => void,
+) {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => networkApi.startMonitoring(),
-    onSuccess: () => {
+
+  return {
+    onCameraStatus: () => {
+      qc.invalidateQueries({ queryKey: ["network", "metrics"] });
       qc.invalidateQueries({ queryKey: ["network", "summary"] });
     },
-  });
-}
-
-export function useStopMonitoring() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => networkApi.stopMonitoring(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["network", "summary"] });
+    onEvent: () => {
+      qc.invalidateQueries({ queryKey: ["network", "alerts"] });
     },
-  });
-}
-
-export function useNetworkWebSocket(onMetricUpdate?: (cameraId: string, metrics: Record<string, unknown>) => void) {
-  const qc = useQueryClient();
-
-  const onCameraStatus = () => {
-    qc.invalidateQueries({ queryKey: ["network", "metrics"] });
-    qc.invalidateQueries({ queryKey: ["network", "summary"] });
-  };
-
-  const onEvent = () => {
-    qc.invalidateQueries({ queryKey: ["network", "alerts"] });
-  };
-
-  const onMetric = (cameraId: string, metrics: Record<string, unknown>) => {
-    if (onMetricUpdate) {
-      onMetricUpdate(cameraId, metrics);
-    }
-    qc.setQueryData(["network", "metrics"], (old: LatestMetric[] | undefined) => {
-      if (!old) return old;
-      return old.map((m) =>
-        m.camera_id === cameraId ? { ...m, ...metrics } : m
+    onMetric: (cameraId: string, metrics: Record<string, unknown>) => {
+      onMetricUpdate?.(cameraId, metrics);
+      qc.setQueryData<LatestMetric[] | undefined>(
+        ["network", "metrics"],
+        (old) =>
+          old?.map((m) =>
+            m.camera_id === cameraId ? { ...m, ...metrics } : m,
+          ),
       );
-    });
-    qc.invalidateQueries({ queryKey: ["network", "summary"] });
+      qc.invalidateQueries({ queryKey: ["network", "summary"] });
+    },
   };
-
-  return { connect: onCameraStatus, disconnect: onEvent };
 }

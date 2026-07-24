@@ -114,7 +114,7 @@ services:
   # Application Services
   # ============================================================================
 
-  nvr-api:
+   nvr-api:
     logging: *default-logging
     build:
       context: .

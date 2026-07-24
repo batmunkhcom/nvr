@@ -1,15 +1,19 @@
 import { NetworkDashboardSummary } from "../../types/network";
-import { Wifi, Activity, AlertTriangle, Server } from "lucide-react";
+import { Wifi, Activity, AlertTriangle, Server, ArrowDown, ArrowUp } from "lucide-react";
 
 interface NetworkSummaryBarProps {
   summary: NetworkDashboardSummary;
 }
 
 export default function NetworkSummaryBar({ summary }: NetworkSummaryBarProps) {
-  const { total_cameras, online_cameras, degraded_cameras, offline_cameras, avg_bandwidth_mbps, avg_latency_ms, active_alerts, alerts_by_severity } = summary;
+  const {
+    total_cameras, online_cameras, degraded_cameras, offline_cameras,
+    avg_inbound_mbps, avg_outbound_mbps, avg_latency_ms,
+    active_alerts, alerts_by_severity,
+  } = summary;
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-7 gap-3 mb-6">
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
       <div className="bg-gray-900 rounded border border-gray-800 p-3">
         <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
           <Server size={14} className="text-blue-400" /> Cameras
@@ -18,19 +22,32 @@ export default function NetworkSummaryBar({ summary }: NetworkSummaryBarProps) {
           <span className="text-green-400">{online_cameras}</span>
           <span className="text-gray-500">/{total_cameras}</span>
         </div>
-        {degraded_cameras > 0 && (
-          <div className="text-[10px] text-yellow-500 mt-0.5">{degraded_cameras} degraded</div>
+        {(degraded_cameras > 0 || offline_cameras > 0) && (
+          <div className="text-[10px] text-gray-500 mt-0.5">
+            {degraded_cameras > 0 && <span className="text-yellow-500">{degraded_cameras} degraded </span>}
+            {offline_cameras > 0 && <span className="text-red-400">{offline_cameras} offline</span>}
+          </div>
         )}
       </div>
 
       <div className="bg-gray-900 rounded border border-gray-800 p-3">
         <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
-          <Wifi size={14} className="text-green-400" /> Bandwidth
+          <ArrowDown size={14} className="text-blue-400" /> Inbound BW
         </div>
-        <div className="text-lg font-bold">
-          {avg_bandwidth_mbps != null ? `${avg_bandwidth_mbps.toFixed(1)} Mbps` : "—"}
+        <div className="text-lg font-bold text-blue-300">
+          {avg_inbound_mbps != null ? `${avg_inbound_mbps.toFixed(1)} Mbps` : "—"}
         </div>
-        <div className="text-[10px] text-gray-500 mt-0.5">average</div>
+        <div className="text-[10px] text-gray-500 mt-0.5">avg cam→server</div>
+      </div>
+
+      <div className="bg-gray-900 rounded border border-gray-800 p-3">
+        <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
+          <ArrowUp size={14} className="text-purple-400" /> Outbound BW
+        </div>
+        <div className="text-lg font-bold text-purple-300">
+          {avg_outbound_mbps != null ? `${avg_outbound_mbps.toFixed(1)} Mbps` : "—"}
+        </div>
+        <div className="text-[10px] text-gray-500 mt-0.5">avg server→client</div>
       </div>
 
       <div className="bg-gray-900 rounded border border-gray-800 p-3">
@@ -40,48 +57,11 @@ export default function NetworkSummaryBar({ summary }: NetworkSummaryBarProps) {
         <div className="text-lg font-bold">
           {avg_latency_ms != null ? `${avg_latency_ms.toFixed(0)} ms` : "—"}
         </div>
-        <div className="text-[10px] text-gray-500 mt-0.5">average</div>
-      </div>
-
-      <div className="bg-gray-900 rounded border border-gray-800 p-3">
-        <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
-          <AlertTriangle size={14} className="text-orange-400" /> Alerts
+        <div className="text-[10px] text-gray-500 mt-0.5">
+          {active_alerts > 0
+            ? `Alerts: ${alerts_by_severity.critical}C / ${alerts_by_severity.warning}W`
+            : "No alerts"}
         </div>
-        <div className="text-lg font-bold">
-          {active_alerts > 0 ? (
-            <>
-              <span className="text-red-400">{alerts_by_severity.critical}</span>
-              <span className="text-yellow-500">/{alerts_by_severity.warning}</span>
-            </>
-          ) : (
-            <span className="text-green-400">0</span>
-          )}
-        </div>
-        <div className="text-[10px] text-gray-500 mt-0.5">active</div>
-      </div>
-
-      <div className="bg-gray-900 rounded border border-gray-800 p-3">
-        <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
-          <Wifi size={14} className="text-green-400" /> Online
-        </div>
-        <div className="text-lg font-bold text-green-400">{online_cameras}</div>
-        <div className="text-[10px] text-gray-500 mt-0.5">connected</div>
-      </div>
-
-      <div className="bg-gray-900 rounded border border-gray-800 p-3">
-        <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
-          <Activity size={14} className="text-yellow-400" /> Degraded
-        </div>
-        <div className="text-lg font-bold text-yellow-400">{degraded_cameras}</div>
-        <div className="text-[10px] text-gray-500 mt-0.5">issues</div>
-      </div>
-
-      <div className="bg-gray-900 rounded border border-gray-800 p-3">
-        <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
-          <AlertTriangle size={14} className="text-red-400" /> Offline
-        </div>
-        <div className="text-lg font-bold text-red-400">{offline_cameras}</div>
-        <div className="text-[10px] text-gray-500 mt-0.5">disconnected</div>
       </div>
     </div>
   );
