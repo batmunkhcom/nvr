@@ -10,7 +10,7 @@ interface Props {
   startOffset?: number;
 }
 
-const SPEEDS = [0.5, 0.75, 1, 1.5, 2, 4, 8];
+const SPEEDS = [0.125, 0.25, 0.5, 0.75, 1, 1.5, 2, 4, 8];
 
 export default function RecordingPlayer({ src, poster, autoPlay = true, controls = true, className = "", startOffset }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -75,10 +75,14 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
             className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
               speed === s
                 ? "bg-blue-600 text-white"
-                : "bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
+                : s < 1
+                  ? "bg-gray-800 text-amber-400 hover:bg-gray-700 hover:text-amber-300"
+                  : s > 1
+                    ? "bg-gray-800 text-emerald-400 hover:bg-gray-700 hover:text-emerald-300"
+                    : "bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
             }`}
           >
-            {s}x
+            {s < 1 ? `${s}x` : `${s}x`}
           </button>
         ))}
       </div>
