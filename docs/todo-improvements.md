@@ -129,6 +129,14 @@
 
 ---
 
+## 9. Recordings UX — Download + Playback Speed + Thumbnail Fixes (v0.00.99, 2026-07-24)
+
+- [x] **9.1** Download: `?download=true` query param → `Content-Disposition: attachment` + proper filename (`camera_id` + `start_time`); download button per recording row (Download icon)
+- [x] **9.2** Playback speed: speed selector in `RecordingPlayer` (0.5x, 0.75x, 1x, 1.5x, 2x, 4x, 8x); sets `video.playbackRate`
+- [x] **9.3** Thumbnail 404 fix: `-ss 2` fallback → retry `-ss 0` for short segments (<2s); log warning on failure; backfill budget 20→200 for faster catch-up
+
+---
+
 ## Гүйцэтгэлийн лог
 
 | Огноо | Ажил | Төлөв |
