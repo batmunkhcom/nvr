@@ -28,6 +28,9 @@ RECONNECT_BASE_S = 5
 RECONNECT_MAX_S = 120
 FRAME_WIDTH = 640
 DEFAULT_OBJECTS = ["person", "car", "truck", "bus", "motorcycle", "bicycle"]
+MOTION_CHANNEL = "nvr:motion"
+MOTION_OFF_S = 10.0  # silence this long -> motion inactive
+MOTION_HEARTBEAT_S = 30.0  # re-publish active state (recording engine recovery)
 
 
 def build_rtsp_url(stream_uri: str, username: str | None, password: str | None) -> str:
@@ -53,6 +56,8 @@ class FrameSampler:
         ai_objects: list[str] | None,
         ai_sensitivity: str | None,
         ai_min_confidence: float | None,
+        ai_zones: list | None = None,
+        motion_only: bool = False,
         event_callback=None,
     ):
         self.camera_id = camera_id
@@ -63,6 +68,8 @@ class FrameSampler:
         # clamp misconfigured values (e.g. "2" from system_config)
         if self.ai_min_confidence > 1:
             self.ai_min_confidence = 0.5
+        self.ai_zones = [z for z in (ai_zones or []) if len(z.get("points", [])) >= 3]
+        self.motion_only = motion_only
 
         self._detector = AIDetector.shared()
         self._motion = MotionDetector(sensitivity=ai_sensitivity or "medium")
@@ -71,6 +78,10 @@ class FrameSampler:
         # class -> (last_event_ts, center_x_norm, center_y_norm)
         self._last_events: dict[str, tuple[float, float, float]] = {}
         self._task: asyncio.Task | None = None
+        # motion recording trigger state
+        self._motion_active = False
+        self._last_motion_ts = 0.0
+        self._last_motion_pub_ts = 0.0
 
     async def start(self) -> None:
         self._running = True
@@ -140,7 +151,13 @@ class FrameSampler:
                 frame, (FRAME_WIDTH, int(frame.shape[0] * FRAME_WIDTH / frame.shape[1]))
             )
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            if not self._motion.detect(gray):
+            has_motion = self._motion.detect(gray)
+            await self._track_motion(has_motion)
+            if not has_motion:
+                await asyncio.sleep(frame_interval)
+                continue
+
+            if self.motion_only:
                 await asyncio.sleep(frame_interval)
                 continue
 
@@ -152,6 +169,7 @@ class FrameSampler:
                 for d in detections
                 if d["class"] in self.ai_objects and d["confidence"] >= self.ai_min_confidence
             ]
+            detections = self._filter_zones(detections, frame.shape[1], frame.shape[0])
             detections = self._apply_cooldown(detections, frame.shape[1], frame.shape[0])
             if detections:
                 await self._persist(detections, frame, cv2)
@@ -190,6 +208,50 @@ class FrameSampler:
             self._last_events[cls] = (now_ts, cx, cy)
             fresh.append(det)
         return fresh
+
+    def _filter_zones(self, detections: list[dict], frame_w: int, frame_h: int) -> list[dict]:
+        """Keep detections whose bottom-center (ground point) is inside a zone.
+
+        Zones are normalized (0-1) polygons; empty zone list = whole frame.
+        """
+        if not self.ai_zones:
+            return detections
+        import cv2
+
+        polygons = [
+            (np.array(z["points"], dtype=np.float32) * [frame_w, frame_h]).astype(np.int32)
+            for z in self.ai_zones
+        ]
+        kept = []
+        for det in detections:
+            box = det.get("box") or [0, 0, 0, 0]
+            px = (box[0] + box[2]) / 2
+            py = box[3]  # bottom edge = ground contact point
+            if any(cv2.pointPolygonTest(poly, (px, py), False) >= 0 for poly in polygons):
+                kept.append(det)
+        return kept
+
+    async def _track_motion(self, has_motion: bool) -> None:
+        """Publish motion state changes (+ heartbeat) for the recording engine."""
+        now_ts = datetime.now(UTC).timestamp()
+        if has_motion:
+            self._last_motion_ts = now_ts
+            if not self._motion_active:
+                self._motion_active = True
+                await self._publish_motion(True)
+            elif now_ts - self._last_motion_pub_ts >= MOTION_HEARTBEAT_S:
+                await self._publish_motion(True)  # heartbeat while active
+        elif self._motion_active and now_ts - self._last_motion_ts >= MOTION_OFF_S:
+            self._motion_active = False
+            await self._publish_motion(False)
+
+    async def _publish_motion(self, active: bool) -> None:
+        self._last_motion_pub_ts = datetime.now(UTC).timestamp()
+        await db.RedisPublisher.shared().publish(
+            MOTION_CHANNEL,
+            {"camera_id": self.camera_id, "active": active},
+        )
+        logger.info("motion_state", camera=self.camera_name, active=active)
 
     async def _persist(self, detections: list[dict], frame: np.ndarray, cv2) -> None:
         now = datetime.now(UTC)

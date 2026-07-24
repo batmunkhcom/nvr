@@ -73,13 +73,14 @@ class SegmentCatalog:
 
         async with self._session_factory() as session:
             known_paths = await self._load_known_paths(session)
+            camera_modes = await self._load_camera_modes(session)
             disk_files = self._walk_segments(base)
 
             for path in sorted(disk_files):
                 if path in known_paths:
                     continue
                 try:
-                    if await self._register(session, path, base):
+                    if await self._register(session, path, base, camera_modes):
                         stats["registered"] += 1
                 except Exception:
                     stats["errors"] += 1
@@ -95,6 +96,10 @@ class SegmentCatalog:
     async def _load_known_paths(self, session: AsyncSession) -> set[str]:
         result = await session.execute(text("SELECT file_path FROM recordings"))
         return {row[0] for row in result.fetchall()}
+
+    async def _load_camera_modes(self, session: AsyncSession) -> dict[str, str]:
+        result = await session.execute(text("SELECT id, recording_mode FROM cameras"))
+        return {str(row[0]): row[1] for row in result.fetchall()}
 
     def _walk_segments(self, base: str) -> set[str]:
         """All .mp4 segment paths on disk (absolute)."""
@@ -115,7 +120,9 @@ class SegmentCatalog:
                         found.add(os.path.join(root, name))
         return found
 
-    async def _register(self, session: AsyncSession, path: str, base: str) -> bool:
+    async def _register(
+        self, session: AsyncSession, path: str, base: str, camera_modes: dict[str, str]
+    ) -> bool:
         """Insert a recordings row for a closed segment. Returns True if inserted."""
         start_time = _parse_start_time(os.path.basename(path))
         if start_time is None:
@@ -141,6 +148,7 @@ class SegmentCatalog:
         except ValueError:
             return False
 
+        recording_type = "motion" if camera_modes.get(camera_id) == "motion" else "continuous"
         await session.execute(
             text(
                 """
@@ -148,7 +156,7 @@ class SegmentCatalog:
                     (id, camera_id, file_path, file_size_bytes, duration_seconds,
                      start_time, end_time, recording_type)
                 VALUES (:id, :camera_id, :file_path, :size, :duration,
-                        :start_time, :end_time, 'continuous')
+                        :start_time, :end_time, :recording_type)
                 ON CONFLICT DO NOTHING
                 """
             ),
@@ -160,6 +168,7 @@ class SegmentCatalog:
                 "duration": duration,
                 "start_time": start_time,
                 "end_time": end_time,
+                "recording_type": recording_type,
             },
         )
         return True

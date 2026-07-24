@@ -68,7 +68,7 @@ class DiskAnalytics:
         per_camera = []
         total_bytes_day = 0.0
         for name, camera_id, total_b, segments in rows:
-            gb_day = round((total_b or 0) / (1024**3) * scale, 2)
+            gb_day = round(float(total_b or 0) / (1024**3) * scale, 2)
             total_bytes_day += gb_day
             per_camera.append(
                 {

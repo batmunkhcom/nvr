@@ -47,6 +47,11 @@ def retention(rec_engine):
     return importlib.import_module("rec_engine.retention")
 
 
+@pytest.fixture(scope="module")
+def motion(rec_engine):
+    return importlib.import_module("rec_engine.motion")
+
+
 # ----------------------------------------------------------------------
 # recorder.build_rtsp_url
 # ----------------------------------------------------------------------
@@ -139,3 +144,83 @@ def test_is_deletable_young_file_protected(retention, tmp_path):
 
 def test_is_deletable_missing_file(retention):
     assert retention.RetentionManager._is_deletable("/nonexistent/file.mp4") is True
+
+
+# ----------------------------------------------------------------------
+# motion recorder controller
+# ----------------------------------------------------------------------
+
+
+class _FakeRecorder:
+    def __init__(self):
+        self.started = False
+        self.stopped = False
+
+    def start(self):
+        self.started = True
+
+    async def stop(self):
+        self.stopped = True
+
+
+def _make_controller(motion):
+    ctrl = motion.MotionRecorderController(session_factory=None)
+    return ctrl
+
+
+async def _async_val(v):
+    return v
+
+
+async def test_motion_start_on_active(motion, monkeypatch):
+    ctrl = _make_controller(motion)
+    fake = _FakeRecorder()
+
+    async def fake_start(camera_id):
+        ctrl.recorders[camera_id] = fake
+        fake.start()
+
+    monkeypatch.setattr(ctrl, "_start", fake_start)
+    await ctrl.handle_event("cam1", True)
+    assert "cam1" in ctrl.recorders
+    assert fake.started
+
+
+async def test_motion_stop_after_delay(motion, monkeypatch):
+    ctrl = _make_controller(motion)
+    fake = _FakeRecorder()
+    fake.start()
+    ctrl.recorders["cam1"] = fake
+    monkeypatch.setattr(ctrl, "_stop_delay", lambda: _async_val(0.05))
+
+    await ctrl.handle_event("cam1", False)
+    assert "cam1" in ctrl.recorders  # still recording during delay
+    import asyncio
+
+    await asyncio.sleep(0.15)
+    assert "cam1" not in ctrl.recorders
+    assert fake.stopped
+
+
+async def test_motion_reactivation_cancels_stop(motion, monkeypatch):
+    ctrl = _make_controller(motion)
+    fake = _FakeRecorder()
+    fake.start()
+    ctrl.recorders["cam1"] = fake
+    monkeypatch.setattr(ctrl, "_stop_delay", lambda: _async_val(0.1))
+
+    await ctrl.handle_event("cam1", False)  # schedules stop
+    await ctrl.handle_event("cam1", True)  # cancels the pending stop
+    import asyncio
+
+    await asyncio.sleep(0.2)
+    assert "cam1" in ctrl.recorders  # recording continues
+    assert not fake.stopped
+
+
+async def test_motion_inactive_without_recorder_is_noop(motion, monkeypatch):
+    ctrl = _make_controller(motion)
+    monkeypatch.setattr(ctrl, "_stop_delay", lambda: _async_val(0.01))
+    await ctrl.handle_event("camX", False)  # nothing to stop
+    assert "camX" not in ctrl.recorders
+    assert ctrl._stop_timers == {}

@@ -104,6 +104,12 @@ class OnvifEventSubscriber:
         event_type = event.get("type", "motion_detected")
         is_motion = _is_motion_event(event)
 
+        if is_motion:
+            # feed motion-mode recording (stop delay handled by recording engine)
+            await db_module.RedisPublisher.shared().publish(
+                "nvr:motion", {"camera_id": self.camera_id, "active": True}
+            )
+
         try:
             now = datetime.now(UTC)
             async with db_module.SessionFactory() as session:

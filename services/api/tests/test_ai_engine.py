@@ -153,3 +153,50 @@ def test_detector_not_ready_without_model(detector):
     det = detector.AIDetector("nonexistent_model.onnx")
     assert det.ready is False
     assert det.detect(np.zeros((100, 100, 3), dtype=np.uint8)) == []
+
+
+# ----------------------------------------------------------------------
+# Zone filtering (cv2 required)
+# ----------------------------------------------------------------------
+
+cv2 = pytest.importorskip("cv2", reason="opencv not installed in this environment")
+
+
+def _zone(x1, y1, x2, y2):
+    """Rectangle zone as normalized polygon."""
+    return {"name": "z", "points": [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]}
+
+
+def _det(x1, y1, x2, y2, cls="car"):
+    return {"class": cls, "confidence": 0.9, "box": [x1, y1, x2, y2]}
+
+
+def test_zones_empty_passes_all(sampler):
+    s = _make_sampler(sampler, ai_zones=[])
+    dets = [_det(0, 0, 100, 100), _det(500, 300, 600, 350)]
+    assert len(s._filter_zones(dets, 640, 360)) == 2
+
+
+def test_zones_keeps_detection_inside(sampler):
+    s = _make_sampler(sampler, ai_zones=[_zone(0.0, 0.0, 0.5, 1.0)])  # left half
+    inside = _det(50, 100, 100, 150)  # bottom-center (75, 150) -> inside left half
+    assert len(s._filter_zones([inside], 640, 360)) == 1
+
+
+def test_zones_filters_outside(sampler):
+    s = _make_sampler(sampler, ai_zones=[_zone(0.0, 0.0, 0.5, 1.0)])  # left half
+    outside = _det(500, 100, 600, 150)  # bottom-center (550, 150) -> right half
+    assert s._filter_zones([outside], 640, 360) == []
+
+
+def test_zones_uses_bottom_center_anchor(sampler):
+    """Object standing ON the zone edge: top half outside, feet inside -> kept."""
+    s = _make_sampler(sampler, ai_zones=[_zone(0.0, 0.5, 1.0, 1.0)])  # bottom half
+    standing = _det(100, 100, 150, 200)  # bottom edge y=200 of 360 -> inside bottom half
+    assert len(s._filter_zones([standing], 640, 360)) == 1
+
+
+def test_zones_invalid_polygon_ignored(sampler):
+    s = _make_sampler(sampler, ai_zones=[{"name": "bad", "points": [[0, 0], [1, 1]]}])
+    assert s.ai_zones == []  # <3 points -> dropped at init
+    assert len(s._filter_zones([_det(0, 0, 10, 10)], 640, 360)) == 1

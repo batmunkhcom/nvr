@@ -26,15 +26,16 @@ SessionFactory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commi
 
 
 async def load_ai_cameras(session: AsyncSession) -> list[dict]:
-    """Active cameras with AI enabled."""
+    """Active cameras needing a sampler: AI enabled OR motion-mode recording."""
     result = await session.execute(
         text(
             """
             SELECT id, name, motion_source, stream_main_uri, stream_sub_uri,
                    username, encrypted_password, ai_objects, ai_sensitivity,
-                   ai_min_confidence, onvif_events_service_url
+                   ai_min_confidence, ai_zones, ai_enabled, recording_mode,
+                   onvif_events_service_url
             FROM cameras
-            WHERE is_active AND ai_enabled
+            WHERE is_active AND (ai_enabled OR recording_mode = 'motion')
             """
         )
     )
@@ -86,3 +87,38 @@ def decrypt_password(encrypted: str | None) -> str | None:
     except Exception:
         logger.warning("camera_password_decrypt_failed")
         return None
+
+
+class RedisPublisher:
+    """Lazy, shared Redis publisher for motion + detection channels."""
+
+    _instance: RedisPublisher | None = None
+
+    def __init__(self) -> None:
+        self._redis = None
+
+    @classmethod
+    def shared(cls) -> RedisPublisher:
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    async def publish(self, channel: str, payload: dict) -> None:
+        try:
+            import json
+
+            import redis.asyncio as aioredis
+
+            if self._redis is None:
+                host = os.environ.get("REDIS_HOST", "localhost")
+                port = int(os.environ.get("REDIS_PORT", "6379"))
+                self._redis = aioredis.from_url(
+                    f"redis://{host}:{port}/0",
+                    socket_connect_timeout=3,
+                    retry_on_timeout=True,
+                )
+            await self._redis.publish(channel, json.dumps(payload))
+        except Exception:
+            # drop the connection so next publish reconnects
+            self._redis = None
+            logger.warning("redis_publish_failed", channel=channel)

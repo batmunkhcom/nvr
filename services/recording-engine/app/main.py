@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from . import config
 from .analytics import DiskAnalytics
 from .catalog import SegmentCatalog
+from .motion import MotionRecorderController, motion_listener_loop
 from .recorder import CameraRecorder
 from .retention import RetentionManager
 
@@ -31,7 +32,8 @@ SHUTDOWN = asyncio.Event()
 engine = create_async_engine(config.DATABASE_URL, pool_size=5, max_overflow=5)
 SessionFactory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-_recorders: dict[str, CameraRecorder] = {}
+_recorders: dict[str, CameraRecorder] = {}  # continuous-mode recorders (reconcile-managed)
+_motion_controller = MotionRecorderController(SessionFactory)
 
 
 async def _load_cameras() -> list[dict]:
@@ -44,7 +46,7 @@ async def _load_cameras() -> list[dict]:
                        username, encrypted_password
                 FROM cameras
                 WHERE is_active
-                  AND recording_mode NOT IN ('disabled', 'never')
+                  AND recording_mode NOT IN ('disabled', 'never', 'motion')
                   AND (stream_main_uri IS NOT NULL OR stream_sub_uri IS NOT NULL)
                 """
             )
@@ -167,11 +169,13 @@ async def main() -> None:
         asyncio.create_task(_catalog_loop()),
         asyncio.create_task(_retention_loop()),
         asyncio.create_task(_analytics_loop()),
+        asyncio.create_task(motion_listener_loop(_motion_controller, SHUTDOWN)),
     ]
 
     await SHUTDOWN.wait()
 
-    for recorder in list(_recorders.values()):
+    await _motion_controller.shutdown()
+    for recorder in list(_recorders.values()) + list(_motion_controller.recorders.values()):
         await recorder.stop()
     for task in tasks:
         task.cancel()

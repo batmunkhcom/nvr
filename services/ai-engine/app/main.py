@@ -75,6 +75,11 @@ def _build_worker(cam: dict):
     if not stream_uri:
         logger.warning("ai_no_stream_uri", camera=cam["name"])
         return None
+
+    # motion-only worker: publishes motion state for motion-mode recording
+    # (no YOLO) when AI detection is disabled for this camera
+    motion_only = not cam["ai_enabled"] and cam.get("recording_mode") == "motion"
+
     return FrameSampler(
         camera_id=cam["id"],
         camera_name=cam["name"],
@@ -84,6 +89,8 @@ def _build_worker(cam: dict):
         ai_objects=cam["ai_objects"],
         ai_sensitivity=cam["ai_sensitivity"],
         ai_min_confidence=cam["ai_min_confidence"],
+        ai_zones=cam["ai_zones"],
+        motion_only=motion_only,
         event_callback=_broadcast_event,
     )
 
