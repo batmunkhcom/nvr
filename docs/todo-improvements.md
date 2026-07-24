@@ -113,6 +113,14 @@
 - [x] **7.7** Live баталгаажуулалт: булангийн zone тавихад зам дээрх машин танихаа больсон (motion хэвээр), zone устгахад сэргэсэн ✅
 - [x] **7.8** Тест: motion controller 4 тест + zone filter 5 тест (64 backend + 34 frontend бүгд pass)
 
+## Phase 8 — Recordings UX ✅ (2026-07-24)
+
+- [x] **8.1** Thumbnails: catalog сегмент бүрд sidecar `.jpg` (ffmpeg frame @2s, 320px); хуучин сегментүүдэд backfill (20/scan); retention хамт устгана; `GET /recordings/{id}/thumbnail` + UI зураг (Film fallback)
+- [x] **8.2** Bulk delete: `POST /recordings/bulk-delete` — ids / delete_all (камераар) / before date; файл+thumbnail+мөр хамт, 60с бичигдэж буй файл хамгаалалттай; UI: checkbox, бүгдийг сонгох, Delete selected/all/older-than (confirm-тай)
+- [x] **8.3** Timeline click-to-play: цаг дээр дарахад тухайн мөчийг хамарсан сегментийг олж, тэр агшинаас тоглуулна (seek offset); stream endpoint HTTP Range (206) дэмжинэ; шинэ сегмент `+faststart`
+- [x] **8.4** Цаг хугацааны интервал шүүлтүүр: from/to `datetime-local` (API from_time/to_time)
+- [x] **8.5** Баталгаажуулалт: thumbnail 200 ✅, range 206 ✅, bulk delete 32 мөр устгагдсан ✅ (тест явцад өнөөдрийн ~3 цагийн бичлэг устсан — систем шууд дахин бичиж эхэлсэн, хэрэглэгчид мэдэгдэх)
+
 ## Үлдэх backlog (дараагийн ажил)
 
 - [ ] Telegram/webhook мэдэгдэл идэвхжүүлэлт (notification_service бэлэн)
