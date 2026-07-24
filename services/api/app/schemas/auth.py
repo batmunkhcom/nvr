@@ -53,3 +53,23 @@ class ApiKeyResponse(BaseModel):
     permissions: list[str]
     expires_at: str | None = None
     created_at: str
+
+
+class ProfileResponse(BaseModel):
+    id: str
+    username: str
+    email: str | None = None
+    role: str
+    is_active: bool
+    last_login_at: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class ProfileUpdate(BaseModel):
+    email: str | None = None
+
+
+class PasswordChangeRequest(BaseModel):
+    old_password: str = Field(min_length=1)
+    new_password: str = Field(min_length=6, max_length=100)

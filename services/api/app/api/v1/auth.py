@@ -1,6 +1,7 @@
-"""Auth endpoints — login, refresh, logout, API keys."""
+"""Auth endpoints — login, refresh, logout, API keys, profile, change password."""
 
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 import structlog
@@ -14,6 +15,7 @@ from ...core.security import (
     create_refresh_token,
     decode_token,
     generate_api_key,
+    hash_password,
     verify_password,
 )
 from ...middleware.auth import get_current_user, require_admin
@@ -24,6 +26,9 @@ from ...schemas.auth import (
     ApiKeyResponse,
     LoginRequest,
     LoginResponse,
+    PasswordChangeRequest,
+    ProfileResponse,
+    ProfileUpdate,
     RefreshRequest,
     RefreshResponse,
 )
@@ -46,6 +51,8 @@ async def login(
 
     access_token = create_access_token(user.id, user.username, user.role)
     refresh_token = create_refresh_token(user.id)
+    user.last_login_at = datetime.now(UTC)
+    await db.flush()
 
     return LoginResponse(
         access_token=access_token,
@@ -156,3 +163,68 @@ async def delete_api_key(
     if not key:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found")
     await db.delete(key)
+
+
+@router.get("/me", response_model=ProfileResponse)
+async def get_my_profile(
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    result = await db.execute(select(User).where(User.id == uuid.UUID(current_user["sub"])))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return ProfileResponse(
+        id=str(user.id),
+        username=user.username,
+        email=user.email,
+        role=user.role,
+        is_active=user.is_active,
+        last_login_at=user.last_login_at.isoformat() if user.last_login_at else None,
+        created_at=user.created_at.isoformat() if user.created_at else None,
+        updated_at=user.updated_at.isoformat() if user.updated_at else None,
+    )
+
+
+@router.patch("/me", response_model=ProfileResponse)
+async def update_my_profile(
+    body: ProfileUpdate,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    result = await db.execute(select(User).where(User.id == uuid.UUID(current_user["sub"])))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if body.email is not None:
+        user.email = body.email if body.email else None
+    user.updated_at = datetime.now(UTC)
+    await db.flush()
+    return ProfileResponse(
+        id=str(user.id),
+        username=user.username,
+        email=user.email,
+        role=user.role,
+        is_active=user.is_active,
+        last_login_at=user.last_login_at.isoformat() if user.last_login_at else None,
+        created_at=user.created_at.isoformat() if user.created_at else None,
+        updated_at=user.updated_at.isoformat() if user.updated_at else None,
+    )
+
+
+@router.post("/change-password", status_code=status.HTTP_200_OK)
+async def change_password(
+    body: PasswordChangeRequest,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    result = await db.execute(select(User).where(User.id == uuid.UUID(current_user["sub"])))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not verify_password(body.old_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    user.hashed_password = hash_password(body.new_password)
+    user.updated_at = datetime.now(UTC)
+    await db.flush()
+    return {"data": {"message": "Password changed successfully"}}
