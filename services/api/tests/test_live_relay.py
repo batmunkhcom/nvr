@@ -32,13 +32,19 @@ class TestStartRelay:
         assert result["status"] == "started"
         assert result["hls_url"] is not None
         assert len(live_relay.STREAM_DICT) == 1
-        mock_call.assert_called_once()
+        # 1x GET /relay/status (not running) + 1x POST /relay/start
+        assert mock_call.call_count == 2
 
     @pytest.mark.anyio
     async def test_duplicate_start_idempotent(self):
         cid = uuid.uuid4()
+        responses = [
+            {"running": False},  # first GET status -> not running
+            _sm_response(cid=str(cid)),  # first POST start -> started
+            {"running": True},  # second GET status -> already running
+        ]
         with patch.object(
-            live_relay, "_call_stream_manager", AsyncMock(return_value=_sm_response(cid=str(cid)))
+            live_relay, "_call_stream_manager", AsyncMock(side_effect=responses)
         ):
             first = await live_relay.start_relay(cid, "rtsp://cam/1")
             second = await live_relay.start_relay(cid, "rtsp://cam/1")

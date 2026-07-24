@@ -1,140 +1,186 @@
-"""Recording retention manager + corrupt segment recovery + tier migration."""
+"""Recording retention — age-based + circular (overwrite-oldest) cleanup.
+
+Policy:
+1. Age-based: segments older than retention.default_days are deleted.
+2. Circular: when disk usage exceeds storage.max_usage_percent OR free space
+   drops below storage.min_free_gb, the OLDEST segments are deleted first
+   until the watermark is satisfied — the disk can never fill up.
+3. Files younger than PROTECT_SECONDS (still being written) are never deleted.
+4. Every file delete also removes the recordings DB row (kept in sync).
+"""
 
 from __future__ import annotations
 
 import asyncio
 import os
-import uuid
+import shutil
+import time
 from datetime import UTC, datetime, timedelta
 
 import structlog
-from nvr_common.storage import StorageBackend
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from . import config
 
 logger = structlog.get_logger()
 
-FFMPEG_PATH = os.environ.get("FFMPEG_PATH", "ffmpeg")
-RETENTION_CHECK_INTERVAL = 3600  # 1 hour
-EMERGENCY_THRESHOLD = 5
-CRITICAL_THRESHOLD = 3
+PROTECT_SECONDS = 600  # never delete segments newer than 10 minutes
+MAX_DELETES_PER_RUN = 500
 
 
 class RetentionManager:
-    """Auto-delete old recordings based on retention policies."""
+    """Keeps recordings within age and disk-space watermarks."""
 
-    async def cleanup(self, backend: StorageBackend, retention_days: int) -> dict:
-        """Delete recordings older than retention_days from a storage backend."""
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]):
+        self._session_factory = session_factory
+
+    async def run(self) -> dict:
+        """One retention pass. Returns a summary dict."""
+        async with self._session_factory() as session:
+            retention_days = await config.get_config_int(session, "retention.default_days")
+            max_usage_pct = await config.get_config_int(session, "storage.max_usage_percent")
+            min_free_gb = await config.get_config_int(session, "storage.min_free_gb")
+
+        summary = {"age_deleted": 0, "circular_deleted": 0, "freed_bytes": 0}
+
+        deleted, freed = await self._enforce_age_limit(retention_days)
+        summary["age_deleted"] += deleted
+        summary["freed_bytes"] += freed
+
+        deleted, freed = await self._enforce_disk_watermarks(max_usage_pct, min_free_gb)
+        summary["circular_deleted"] += deleted
+        summary["freed_bytes"] += freed
+
+        if deleted or summary["age_deleted"]:
+            logger.info("retention_pass_complete", **summary)
+        return summary
+
+    # ------------------------------------------------------------------
+    # Age-based cleanup
+    # ------------------------------------------------------------------
+
+    async def _enforce_age_limit(self, retention_days: int) -> tuple[int, int]:
+        if retention_days <= 0:
+            return 0, 0
         cutoff = datetime.now(UTC) - timedelta(days=retention_days)
-        files = await backend.list_files("recordings/")
+        async with self._session_factory() as session:
+            result = await session.execute(
+                text(
+                    "SELECT id, file_path FROM recordings "
+                    "WHERE start_time < :cutoff ORDER BY start_time LIMIT :limit"
+                ),
+                {"cutoff": cutoff, "limit": MAX_DELETES_PER_RUN},
+            )
+            rows = result.fetchall()
+        return await self._delete_rows(rows)
 
+    # ------------------------------------------------------------------
+    # Circular (disk watermark) cleanup
+    # ------------------------------------------------------------------
+
+    async def _enforce_disk_watermarks(
+        self, max_usage_pct: int, min_free_gb: int
+    ) -> tuple[int, int]:
         deleted = 0
-        freed_bytes = 0
-        for path in files:
-            if self._is_older_than(path, cutoff):
-                await backend.delete(path)
-                deleted += 1
+        freed = 0
+        for _ in range(MAX_DELETES_PER_RUN):
+            usage = await asyncio.to_thread(shutil.disk_usage, config.STORAGE_LOCAL_PATH)
+            usage_pct = usage.used / usage.total * 100 if usage.total else 0
+            free_gb = usage.free / (1024**3)
+            if usage_pct < max_usage_pct and free_gb >= min_free_gb:
+                break
 
-        logger.info(
-            "retention_cleanup",
-            backend=backend.name,
-            deleted=deleted,
-            retention_days=retention_days,
-        )
-        return {"deleted": deleted, "freed_bytes": freed_bytes}
+            row = await self._oldest_recording()
+            if row is None:
+                logger.critical(
+                    "retention_nothing_to_delete",
+                    usage_pct=round(usage_pct, 1),
+                    free_gb=round(free_gb, 2),
+                )
+                break
+            d, f = await self._delete_rows([row])
+            deleted += d
+            freed += f
+            if d == 0:
+                # Oldest segment is protected or undeletable — cannot make progress
+                break
 
-    @staticmethod
-    def _is_older_than(path: str, cutoff: datetime) -> bool:
-        parts = path.replace("recordings/", "").split("/")
-        if len(parts) >= 3:
-            date_str = f"{parts[0]}-{parts[1]}-{parts[2][:2]}"
+        if deleted:
+            logger.warning("retention_circular_cleanup", deleted=deleted, freed_bytes=freed)
+        return deleted, freed
+
+    async def _oldest_recording(self) -> tuple | None:
+        """Oldest deletable recording row (id, file_path), or None."""
+        protect_after = datetime.now(UTC) - timedelta(seconds=PROTECT_SECONDS)
+        async with self._session_factory() as session:
+            result = await session.execute(
+                text(
+                    "SELECT id, file_path FROM recordings "
+                    "WHERE start_time < :protect ORDER BY start_time LIMIT 1"
+                ),
+                {"protect": protect_after},
+            )
+            return result.fetchone()
+
+    # ------------------------------------------------------------------
+    # Delete helpers (file + DB row, kept in sync)
+    # ------------------------------------------------------------------
+
+    async def _delete_rows(self, rows: list[tuple]) -> tuple[int, int]:
+        deleted = 0
+        freed = 0
+        for row_id, file_path in rows:
+            if not self._is_deletable(file_path):
+                continue
+            size = 0
             try:
-                file_date = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=UTC)
-                return file_date < cutoff
-            except ValueError:
+                size = os.path.getsize(file_path)
+                os.unlink(file_path)
+            except FileNotFoundError:
                 pass
-        return False
+            except OSError:
+                logger.warning("retention_delete_failed", path=file_path, exc_info=True)
+                continue
+            if await self._delete_row_only(row_id):
+                deleted += 1
+                freed += size
+        self._prune_empty_dirs()
+        return deleted, freed
 
-
-class EmergencyCleanup:
-    """Aggressive disk space cleanup protocol — 4 levels."""
-
-    @staticmethod
-    async def run(backend: StorageBackend) -> dict:
-        """Execute emergency cleanup based on free space percentage."""
-        free_pct = await backend.free_percent()
-        if free_pct >= EMERGENCY_THRESHOLD:
-            return {"action": "none", "free_pct": free_pct}
-
-        logger.critical("emergency_cleanup_started", backend=backend.name, free_pct=free_pct)
-
-        actions = []
-
-        if free_pct < EMERGENCY_THRESHOLD:
-            files = await backend.list_files("recordings/")
-            old = sorted(files)[: max(1, len(files) // 3)]
-            for f in old:
-                await backend.delete(f)
-            actions.append("deleted_oldest_third")
-
-        if await backend.free_percent() < CRITICAL_THRESHOLD:
-            all_files = await backend.list_files("recordings/")
-            non_events = [f for f in all_files if "event" not in f.lower()]
-            for f in non_events:
-                await backend.delete(f)
-            actions.append("deleted_non_event_recordings")
-
-        logger.info("emergency_cleanup_complete", backend=backend.name, actions=actions)
-        return {"action": "emergency", "free_pct": await backend.free_percent(), "steps": actions}
-
-
-async def recover_corrupt_segment(filepath: str) -> str | None:
-    """Attempt to recover a corrupt MP4 using ffmpeg -err_detect ignore_err."""
-    if not os.path.exists(filepath):
-        return None
-    recovered = filepath.replace(".mp4", "_recovered.mp4")
-    proc = await asyncio.create_subprocess_exec(
-        FFMPEG_PATH,
-        "-err_detect",
-        "ignore_err",
-        "-i",
-        filepath,
-        "-c",
-        "copy",
-        recovered,
-        "-y",
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    await proc.wait()
-    if proc.returncode == 0 and os.path.getsize(recovered) > 1024:
-        logger.info("segment_recovered", original=filepath, recovered=recovered)
-        return recovered
-    if os.path.exists(recovered):
-        os.unlink(recovered)
-    return None
-
-
-class TierMigrationManager:
-    """Orchestrate storage tier migrations (hot → warm → cold)."""
+    async def _delete_row_only(self, row_id) -> bool:
+        try:
+            async with self._session_factory() as session:
+                await session.execute(
+                    text("DELETE FROM recordings WHERE id = :id"), {"id": str(row_id)}
+                )
+                await session.commit()
+            return True
+        except Exception:
+            logger.warning("retention_row_delete_failed", id=str(row_id), exc_info=True)
+            return False
 
     @staticmethod
-    async def migrate_recording(
-        recording_id: uuid.UUID,
-        from_backend: StorageBackend,
-        to_backend: StorageBackend,
-        file_path: str,
-    ) -> dict:
-        """Migrate a recording from one backend to another with checksum verification."""
-        logger.info("migration_started", recording_id=str(recording_id))
+    def _is_deletable(file_path: str) -> bool:
+        try:
+            age = time.time() - os.path.getmtime(file_path)
+            return age >= PROTECT_SECONDS
+        except OSError:
+            return True  # missing file -> row should be purged anyway
 
-        source_checksum = await from_backend.checksum(file_path)
-
-        await from_backend.copy_to(file_path, to_backend, file_path)
-
-        dest_checksum = await to_backend.checksum(file_path)
-        if dest_checksum != source_checksum:
-            return {"status": "failed", "error": "Checksum mismatch"}
-
-        await from_backend.delete(file_path)
-
-        logger.info("migration_complete", recording_id=str(recording_id))
-        return {"status": "complete", "checksum": dest_checksum}
+    @staticmethod
+    def _prune_empty_dirs() -> None:
+        """Remove empty Y/M/D directories left behind after deletes."""
+        base = config.STORAGE_LOCAL_PATH
+        for camera_dir in os.listdir(base):
+            cam_path = os.path.join(base, camera_dir)
+            if not os.path.isdir(cam_path):
+                continue
+            for root, dirs, _files in os.walk(cam_path, topdown=False):
+                for d in dirs:
+                    full = os.path.join(root, d)
+                    try:
+                        if not os.listdir(full):
+                            os.rmdir(full)
+                    except OSError:
+                        pass

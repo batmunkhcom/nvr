@@ -44,39 +44,39 @@
 
 ---
 
-## Phase 1 — Диск аюулгүй байдал (Яаралтай) ⬜
+## Phase 1 — Диск аюулгүй байдал (Яаралтай) ✅
 
-- [ ] **1.1** Docker цэвэрлэх: build cache (~4.5GB), ашиглагдаагүй images (~3.2GB) → ~8GB чөлөөлөх
-- [ ] **1.2** Docker log rotation бүх service-д (`max-size: 10m, max-file: 3`)
-- [ ] **1.3** Recordings disk budget тохиргоо: `storage.max_usage_percent` (default 85%), `storage.min_free_gb` (default 2GB) system_config-д
+- [x] **1.1** Docker цэвэрлэх: build cache 4.5GB чөлөөлсөн (9.6GB → 13GB чөлөөтэй)
+- [x] **1.2** Docker log rotation бүх 13 service-д (`max-size: 10m, max-file: 3`)
+- [x] **1.3** Recordings disk budget тохиргоо: `storage.max_usage_percent`=85, `storage.min_free_gb`=2, `recording.segment_seconds`=300, `recording.stream`=sub; retention 30→7 хоног (бодитой)
 
-## Phase 2 — Recording engine бүрэн ажиллагаатай ⬜
+## Phase 2 — Recording engine бүрэн ажиллагаатай 🟡
 
-- [ ] **2.1** Env mismatch засах: compose `POSTGRES_*` нэршилтэй болгох (эсвэл код `DB_*` унших) — аль алийг нэгдмэл болгох
-- [ ] **2.2** Нууц үг тайлалтыг `app.core.security.decrypt_password_aes` (AES-256-GCM) руу шилжүүлэх — Fernet устгах
-- [ ] **2.3** Retention wiring TypeError засах (`RetentionManager(session)` → зөв signature)
-- [ ] **2.4** **Circular retention**: дискийн чөлөөт зай watermark-аас доошлохөд хамгийн хуучин сегментээс эхэлж устгах (диск хэзээ ч дүүрэхгүй, overwrite oldest). DB мөрийг файлтай sync байлгах
-- [ ] **2.5** Recorder → `recordings` table бүртгэл: сегмент бичигдэх бүрд DB мөр үүсгэх (Recordings хуудас одоо хоосон харагдаж байна)
-- [ ] **2.6** Sub-stream бичлэг: `stream_sub_uri`-аар бичих (диск 10x хэмнэнэ), `-c:v copy` (CPU хэмнэнэ)
-- [ ] **2.7** Recording container асаах, сегмент бичигдэж байгааг баталгаажуулах (`/data/recordings/...`), Recordings хуудаснаас тоглуулж үзэх
-- [ ] **2.8** **Диск хэрэглээний анализ**: камер тус бүрийн бодит bitrate → GB/хоног хэмжилт, system_config-д хадгалах, Storage хуудсанд "X GB/хоног, ~Y хоногийн бичлэг багтана" гэж харуулах
-- [ ] **2.9** Тест: retention unit test (circular устгалтын дараалал), recorder segment DB registration test
+- [x] **2.1** Env mismatch засах: compose `POSTGRES_*` нэршил рүү нэгдмэл болгосон (код хоёуланг нь уншина)
+- [x] **2.2** Нууц үг тайлалт AES-256-GCM — `nvr_common.security` shared module үүсгэсэн (Fernet устгасан)
+- [x] **2.3** Retention wiring TypeError засах — бүтэн шинэ retention.py (plain SQL)
+- [x] **2.4** **Circular retention**: дискийн watermark (85% эсвэл <2GB чөлөө) хэтэрвэл хамгийн хуучин сегментээс устгана; 10 минутаас шинэ файл хамгаалагдсан; DB sync
+- [x] **2.5** Recorder → `recordings` table: SegmentCatalog 60с тутам scan → шинэ сегмент DB-д бүртгэнэ (ffprobe duration), устсан файлуудын мөрийг цэвэрлэнэ
+- [x] **2.6** Sub-stream бичлэг + `-c:v copy` + 300с сегмент (config-аас уншина)
+- [ ] **2.7** Recording container асаах, сегмент бичигдэж байгааг баталгаажуулах (image build хүлээж байна)
+- [ ] **2.8** **Диск хэрэглээний анализ**: analytics.py бичигдсэн (GB/хоног, days_fit → `storage.analysis` config) — ажиллаж байгааг баталгаажуулах + UI-д харуулах
+- [x] **2.9** Тест: test_recording_engine.py 11 тест (RTSP URL, ffmpeg args, filename parse, retention protection) ✅
 
-## Phase 3 — AI танилт бүрэн ажиллагаатай ⬜
+## Phase 3 — AI танилт бүрэн ажиллагаатай 🟡
 
-- [ ] **3.1** Compose env засах: ai-engine-д DB credentials, STORAGE_LOCAL_PATH, snapshots volume mount нэмэх
-- [ ] **3.2** YOLOv8n ONNX model татах → `ai_models` volume (entrypoint-д auto-download, интернетгүй бол local fallback)
-- [ ] **3.3** `detector.py` бүрэн засах: YOLOv8 output `(1,84,8400)` → transpose, per-class argmax, confidence filter, **NMS**, letterbox координат буцаалт
-- [ ] **3.4** Cooldown баг засах: cooldown-д байгаа class-уудыг persist хийхээс өмнө шүүх (одоо шүүлтүүргүйгээр бүгдийг хадгалдаг)
-- [ ] **3.5** Frame source: MediaMTX sub relay (`rtsp://nvr-mediamtx:8554/{id}_sub`) ашиглах — камерт нэмэлт холболт үүсгэхгүй; fallback: шууд камер
-- [ ] **3.6** `ai.confidence_threshold` = 2 буруу утгыг 0.5 болгох; validation нэмэх (0–1 хүрээ)
-- [ ] **3.7** AI container асаах, машин/хүн танигдаж events + snapshots үүсэж байгааг баталгаажуулах
+- [x] **3.1** Compose env засах: POSTGRES_* credentials, NVR_ENCRYPTION_KEY, STORAGE_LOCAL_PATH, recordings volume (snapshots), restart policy, command/working_dir
+- [ ] **3.2** YOLOv8n ONNX model татах → `ai_models` volume (ai-engine image доторх ultralytics-аар export)
+- [x] **3.3** `detector.py` бүрэн шинэчилсэн: YOLOv8 `(1,84,8400)` → transpose, per-class argmax, confidence filter, **cv2.dnn.NMSBoxes**, letterbox unscale; shared singleton session
+- [x] **3.4** Cooldown баг засах: `_apply_cooldown` одоо үнэхээр шүүдэг (class тус бүрээр, 15с)
+- [x] **3.5** Frame pipeline сайжруулалт: JPEG round-trip устгасан (numpy direct), cap.read/inference thread-д, reconnect backoff 5→120с
+- [x] **3.6** `ai.confidence_threshold` 2→0.5 зассан (DB) + кодод clamp validation (0.05–0.95)
+- [ ] **3.7** AI container асаах, машин/хүн танигдаж events + snapshots үүсэж байгааг баталгаажуулах (image build хүлээж байна)
 - [ ] **3.8** Events UI: snapshot thumbnail, объект төрлийн badge, шүүлтүүр (камер/төрөл/огноо)
-- [ ] **3.9** Тест: detector post-processing unit test (fixture tensor), NMS test
+- [x] **3.9** Тест: test_ai_engine.py 14 тест (URL build, confidence clamp, cooldown, letterbox) — numpy-тэй орчинд ажиллана
 
 ## Phase 4 — Performance & tuning ⬜
 
-- [ ] **4.1** `health_check_loop` `probe_ip(port=)` баг засах — 10 камерын auto status сэргээх
+- [x] **4.1** `health_check_loop` `probe_ip(port=)` баг зассан + live_relay тестүүд шинэчилсэн (59/59 pass)
 - [ ] **4.2** stream-manager CPU аудит: 15 идэвхтэй стрим 131% — dashboard зөвхөн sub татаж байгаа шалгах, relay auto-stop хугацаа тохируулах
 - [ ] **4.3** DB индекс: `events(camera_id, start_time)`, `recordings(camera_id, start_time)` шалгах/нэмэх; PostgreSQL tuning (shared_buffers 512MB, effective_cache_size 4GB)
 - [ ] **4.4** Compose: бүх app service-д `restart: unless-stopped`, healthcheck нэмэх (api, stream-manager, recording, ai)

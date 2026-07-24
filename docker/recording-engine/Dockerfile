@@ -11,7 +11,8 @@ RUN pip install --no-cache-dir "fastapi>=0.115" "uvicorn[standard]>=0.34" \
     "sqlalchemy[asyncio]>=2.0" "asyncpg>=0.30" "pydantic>=2.10" \
     "redis>=5.2" "httpx>=0.28" "structlog>=24.4" "pyyaml>=6.0" \
     "aiohttp>=3.11" "opencv-python-headless>=4.10" "numpy>=2.2" \
-    "psutil>=6.1" "tenacity>=9.0" "python-dateutil>=2.9"
+    "psutil>=6.1" "tenacity>=9.0" "python-dateutil>=2.9" \
+    "cryptography>=43.0"
 
 COPY services/recording-engine/ ./services/recording-engine/
 COPY packages/ ./packages/

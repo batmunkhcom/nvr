@@ -54,7 +54,7 @@ async def _check_single(camera: Camera) -> dict[str, Any]:
                 pass
 
     try:
-        probe_result = await probe_ip(camera.ip_address or "", port=554, timeout=3.0)
+        probe_result = await probe_ip(str(camera.ip_address or ""), timeout=3.0)
         if not probe_result.get("reachable") or 554 not in probe_result.get("open_ports", []):
             err = "Camera unreachable on port 554"
             async with async_session_factory() as session:

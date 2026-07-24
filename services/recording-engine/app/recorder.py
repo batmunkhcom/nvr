@@ -1,158 +1,192 @@
-"""Recording engine — continuous and motion-triggered recording handlers."""
+"""Recording engine — per-camera FFmpeg supervisor with auto-restart.
+
+Design:
+- One supervisor task per camera; spawns FFmpeg segment muxer.
+- Auto-restart on FFmpeg exit with circuit breaker backoff (60s -> 600s cap).
+- Records directly from camera RTSP (sub-stream by default) with -c:v copy
+  (no transcode CPU cost; one extra RTSP connection per camera).
+"""
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
-from collections import deque
+import urllib.parse
+from collections.abc import Callable
 
 import structlog
 from nvr_common.circuit_breaker import CircuitBreaker
 
+from . import config
+
 logger = structlog.get_logger()
 
-_engine_instance: RecordingEngine | None = None
-FFMPEG_CMD = os.environ.get("FFMPEG_PATH", "ffmpeg")
-RESTART_COOLDOWN = 600
+STDERR_TAIL_LINES = 20
 
 
-class RecordingEngine:
-    """Manages FFmpeg recording per camera with circuit breaker and retry."""
+def build_rtsp_url(stream_uri: str, username: str | None, password: str | None) -> str:
+    """Embed credentials into the RTSP URL if not already present."""
+    if not username or not password or not stream_uri.startswith("rtsp://"):
+        return stream_uri
+    parsed = urllib.parse.urlparse(stream_uri)
+    if parsed.username:
+        return stream_uri
+    user = urllib.parse.quote(username, safe="")
+    pw = urllib.parse.quote(password, safe="")
+    port = f":{parsed.port}" if parsed.port else ""
+    return f"rtsp://{user}:{pw}@{parsed.hostname}{port}{parsed.path}"
 
-    circuit_breakers: dict[str, CircuitBreaker] = {}  # noqa: RUF012
-    _running: bool = False
-    _subtasks: list[asyncio.Task] = []  # noqa: RUF012
 
-    @classmethod
-    def get_breaker(cls, camera_id: str) -> CircuitBreaker:
-        if camera_id not in cls.circuit_breakers:
-            cls.circuit_breakers[camera_id] = CircuitBreaker(
-                name=f"recording_{camera_id}",
-                base_cooldown=60,
-                max_cooldown=600,
-            )
-        return cls.circuit_breakers[camera_id]
+def build_ffmpeg_args(stream_url: str, camera_dir: str, segment_seconds: int) -> list[str]:
+    """FFmpeg segment muxer command — MP4 segments named by UTC clock time."""
+    output_pattern = os.path.join(camera_dir, "%Y/%m/%d/%Y%m%d_%H%M%S.mp4")
+    return [
+        config.FFMPEG_PATH,
+        "-hide_banner",
+        "-loglevel",
+        "warning",
+        "-rtsp_transport",
+        "tcp",
+        "-rw_timeout",
+        "15000000",  # 15s IO timeout -> exit so supervisor restarts
+        "-i",
+        stream_url,
+        "-c:v",
+        "copy",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "64k",
+        "-f",
+        "segment",
+        "-segment_format",
+        "mp4",
+        "-segment_time",
+        str(segment_seconds),
+        "-segment_atclocktime",
+        "1",
+        "-reset_timestamps",
+        "1",
+        "-strftime",
+        "1",
+        output_pattern,
+    ]
 
-    @classmethod
-    async def start(cls, camera_id: str, stream_uri: str, output_dir: str) -> None:
-        """Start recording for a camera."""
-        breaker = cls.get_breaker(camera_id)
-        if await breaker.is_open():
-            logger.warning("circuit_open_skip", camera_id=camera_id)
-            return
 
-        import os
+class CameraRecorder:
+    """Supervises the FFmpeg recording process for a single camera."""
 
-        output_path = os.path.join(output_dir, str(camera_id), "%Y/%m/%d/%Y%m%d_%H%M%S.mp4")
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    def __init__(
+        self,
+        camera_id: str,
+        camera_name: str,
+        stream_uri: str,
+        username: str | None,
+        password: str | None,
+        output_base: str,
+        segment_seconds: int,
+        on_crash: Callable[[str, str], None] | None = None,
+    ):
+        self.camera_id = camera_id
+        self.camera_name = camera_name
+        self.password = password
+        self.output_base = output_base
+        self.segment_seconds = segment_seconds
+        self.on_crash = on_crash
 
-        args = [
-            FFMPEG_CMD,
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-rtsp_transport",
-            "tcp",
-            "-i",
-            stream_uri,
-            "-c:v",
-            "copy",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "128k",
-            "-f",
-            "segment",
-            "-segment_format",
-            "mp4",
-            "-segment_time",
-            "900",
-            "-segment_atclocktime",
-            "1",
-            "-reset_timestamps",
-            "1",
-            "-strftime",
-            "1",
-            output_path,
-        ]
+        self.stream_url = build_rtsp_url(stream_uri, username, password)
+        self.breaker = CircuitBreaker(
+            name=f"recording_{camera_id}", base_cooldown=60, max_cooldown=600
+        )
+        self._task: asyncio.Task | None = None
+        self._process: asyncio.subprocess.Process | None = None
+        self._stopping = False
 
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *args,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            logger.info("recording_started", camera_id=camera_id, pid=process.pid)
+    def start(self) -> None:
+        self._stopping = False
+        self._task = asyncio.create_task(self._supervise())
 
-            monitor_task = asyncio.create_task(
-                cls._monitor(camera_id, process, stream_uri, output_dir)
-            )
-            cls._subtasks.append(monitor_task)
-        except Exception:
-            logger.error("recording_start_failed", camera_id=camera_id, exc_info=True)
-            breaker.trip()
+    async def stop(self) -> None:
+        self._stopping = True
+        await self._kill_process()
+        if self._task and not self._task.done():
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+        logger.info("recording_stopped", camera_id=self.camera_id)
 
-    @classmethod
-    async def _monitor(
-        cls, camera_id: str, process: asyncio.subprocess.Process, stream_uri: str, output_dir: str
-    ) -> None:
-        """Monitor FFmpeg stderr for errors and handle process death."""
-        breaker = cls.get_breaker(camera_id)
-        try:
-            while True:
-                line = await process.stderr.readline()
-                if not line:
-                    break
-                text = line.decode("utf-8", errors="replace").lower()
-                if "connection refused" in text or "404" in text or "unauthorized" in text:
-                    logger.warning("recording_stream_error", camera_id=camera_id, line=text.strip())
-                    breaker.trip()
-                    break
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            logger.error("monitor_error", camera_id=camera_id, exc_info=True)
-        finally:
-            await cls._kill_ffmpeg(process)
-            breaker.trip()
-            logger.info("recording_stopped", camera_id=camera_id)
-
-    @classmethod
-    async def _kill_ffmpeg(cls, process: asyncio.subprocess.Process) -> None:
-        """Graceful shutdown: SIGTERM → 5s wait → SIGKILL."""
-        try:
-            process.terminate()
+    async def _supervise(self) -> None:
+        """Restart FFmpeg forever until stopped, with circuit breaker backoff."""
+        while not self._stopping:
+            if await self.breaker.is_open():
+                await asyncio.sleep(min(self.breaker.cooldown_remaining() + 1, 60))
+                continue
             try:
-                await asyncio.wait_for(process.wait(), timeout=5.0)
-            except TimeoutError:
+                await self._run_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.error("recording_spawn_failed", camera_id=self.camera_id, exc_info=True)
+            if self._stopping:
+                break
+            self.breaker.trip()
+            if self.on_crash:
+                self.on_crash(self.camera_id, self.camera_name)
+            logger.warning(
+                "recording_restart_scheduled",
+                camera_id=self.camera_id,
+                cooldown_s=self.breaker.cooldown_remaining(),
+            )
+
+    async def _run_once(self) -> None:
+        camera_dir = os.path.join(self.output_base, self.camera_id)
+        os.makedirs(camera_dir, exist_ok=True)
+        args = build_ffmpeg_args(self.stream_url, camera_dir, self.segment_seconds)
+
+        self._process = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        logger.info(
+            "recording_started",
+            camera_id=self.camera_id,
+            camera=self.camera_name,
+            pid=self._process.pid,
+        )
+        self.breaker.reset()
+        rc = await self._wait_with_stderr_tail(self._process)
+        logger.warning("recording_ffmpeg_exited", camera_id=self.camera_id, returncode=rc)
+
+    async def _wait_with_stderr_tail(self, process: asyncio.subprocess.Process) -> int:
+        tail: list[bytes] = []
+        assert process.stderr is not None
+        while True:
+            line = await process.stderr.readline()
+            if not line:
+                break
+            tail.append(line)
+            if len(tail) > STDERR_TAIL_LINES:
+                tail.pop(0)
+        rc = await process.wait()
+        if tail and rc != 0:
+            logger.warning(
+                "recording_ffmpeg_stderr",
+                camera_id=self.camera_id,
+                tail=b"".join(tail).decode("utf-8", errors="replace")[-1000:],
+            )
+        return rc
+
+    async def _kill_process(self) -> None:
+        process = self._process
+        if not process or process.returncode is not None:
+            return
+        with contextlib.suppress(ProcessLookupError):
+            process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+        except TimeoutError:
+            with contextlib.suppress(ProcessLookupError):
                 process.kill()
-                await process.wait()
-        except ProcessLookupError:
-            pass
-
-    @classmethod
-    async def stop(cls) -> None:
-        """Stop all recordings and clean up subtasks."""
-        cls._running = False
-        for task in cls._subtasks:
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(*cls._subtasks, return_exceptions=True)
-        cls._subtasks.clear()
-        logger.info("recording_engine_stopped")
-
-
-class MotionBuffer:
-    """Pre-record buffer for motion-triggered recording."""
-
-    def __init__(self, pre_record_s: int = 5, fps: int = 25):
-        self.pre_record_s = pre_record_s
-        self.buffer: deque[bytes] = deque(maxlen=pre_record_s * fps)
-
-    def push(self, frame: bytes) -> None:
-        self.buffer.append(frame)
-
-    def flush(self) -> list[bytes]:
-        frames = list(self.buffer)
-        self.buffer.clear()
-        return frames
+            await process.wait()

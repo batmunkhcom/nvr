@@ -19,12 +19,11 @@ RETRY_DELAY = 30
 class OnvifEventSubscriber:
     def __init__(
         self,
-        camera_id: uuid.UUID,
+        camera_id: str,
         camera_name: str,
         events_service_url: str,
         username: str,
         password: str,
-        db_session_factory,
         event_callback,
     ):
         self.camera_id = camera_id
@@ -32,17 +31,19 @@ class OnvifEventSubscriber:
         self.url = events_service_url.rstrip("/")
         self.username = username
         self.password = password
-        self._db_factory = db_session_factory
         self._event_callback = event_callback
         self._running = False
+        self._task: asyncio.Task | None = None
 
     async def start(self) -> None:
         self._running = True
         logger.info("onvif_subscriber_started", camera=self.camera_name)
-        asyncio.create_task(self._loop())
+        self._task = asyncio.create_task(self._loop())
 
     async def stop(self) -> None:
         self._running = False
+        if self._task:
+            self._task.cancel()
 
     async def _loop(self) -> None:
         await self._subscribe()
@@ -94,40 +95,49 @@ class OnvifEventSubscriber:
             return _parse_onvif_events(resp.text)
 
     async def _handle_event(self, event: dict) -> None:
+        import json
+
+        from sqlalchemy import text
+
+        from . import db as db_module
+
         event_type = event.get("type", "motion_detected")
         is_motion = _is_motion_event(event)
 
         try:
-            from app.models.event import Event
-
-            async with self._db_factory() as db:
-
-                now = datetime.now(UTC)
-                ev = Event(
-                    id=uuid.uuid4(),
-                    camera_id=self.camera_id,
-                    event_type=event_type,
-                    severity="info" if not is_motion else "warning",
-                    start_time=now,
-                    event_metadata={
-                        "source": "camera_onvif",
-                        "raw": event,
-                        "is_motion": is_motion,
+            now = datetime.now(UTC)
+            async with db_module.SessionFactory() as session:
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO events
+                            (id, camera_id, event_type, severity, start_time, metadata)
+                        VALUES
+                            (:id, :camera_id, :event_type, :severity, :start_time,
+                             CAST(:metadata AS json))
+                        """
+                    ),
+                    {
+                        "id": str(uuid.uuid4()),
+                        "camera_id": self.camera_id,
+                        "event_type": event_type,
+                        "severity": "warning" if is_motion else "info",
+                        "start_time": now,
+                        "metadata": json.dumps(
+                            {"source": "camera_onvif", "raw": event, "is_motion": is_motion}
+                        ),
                     },
                 )
-                db.add(ev)
-                await db.commit()
+                await session.commit()
 
-                if self._event_callback:
-                    await self._event_callback(
-                        self.camera_id,
-                        [event_type],
-                        None,
-                    )
-                logger.info(
-                    "onvif_event", camera=self.camera_name,
-                    event_type=event_type, is_motion=is_motion,
-                )
+            if self._event_callback:
+                await self._event_callback(self.camera_id, [event_type], None)
+            logger.info(
+                "onvif_event",
+                camera=self.camera_name,
+                event_type=event_type,
+                is_motion=is_motion,
+            )
         except Exception:
             logger.warning("onvif_persist_failed", camera=self.camera_name, exc_info=True)
 
@@ -166,12 +176,14 @@ def _parse_onvif_events(xml_text: str) -> list[dict]:
             if data_elem is not None:
                 value = data_elem.get("Value", "true")
 
-            events.append({
-                "type": "motion_detected" if is_motion else "smart_event",
-                "topic": topic,
-                "value": value,
-                "is_motion": is_motion,
-            })
+            events.append(
+                {
+                    "type": "motion_detected" if is_motion else "smart_event",
+                    "topic": topic,
+                    "value": value,
+                    "is_motion": is_motion,
+                }
+            )
     except Exception:
         pass
     return events

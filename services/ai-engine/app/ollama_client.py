@@ -5,14 +5,13 @@ from __future__ import annotations
 import base64
 import json
 import os
-from io import BytesIO
 from typing import TYPE_CHECKING
 
 import httpx
 import structlog
 
 if TYPE_CHECKING:
-    from uuid import UUID
+    pass
 
 logger = structlog.get_logger()
 
@@ -46,7 +45,9 @@ class OllamaClient:
                 if resp.status_code == 200:
                     data = resp.json()
                     return data.get("response", "").strip()
-                logger.warning("ollama_analysis_failed", status=resp.status_code, body=resp.text[:200])
+                logger.warning(
+                    "ollama_analysis_failed", status=resp.status_code, body=resp.text[:200]
+                )
                 return ""
         except Exception:
             logger.warning("ollama_analysis_error", exc_info=True)
@@ -120,11 +121,13 @@ class OllamaClient:
 
         if snapshot_bytes:
             encoded = base64.b64encode(snapshot_bytes).decode()
-            formatted.append({
-                "role": "user",
-                "content": "Analyze the attached security camera snapshot.",
-                "images": [encoded],
-            })
+            formatted.append(
+                {
+                    "role": "user",
+                    "content": "Analyze the attached security camera snapshot.",
+                    "images": [encoded],
+                }
+            )
 
         try:
             async with httpx.AsyncClient(timeout=60) as client:
