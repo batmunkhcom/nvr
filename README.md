@@ -1,106 +1,325 @@
 # mBm NVR System
 
-Centralized Network Video Recorder for managing multiple IP cameras (ONVIF, RTSP, Hikvision, Dahua, Axis, Reolink, etc.) with live monitoring, recording, AI object detection, and motion detection.
+Centralized Network Video Recorder for managing IP cameras (ONVIF, RTSP, Hikvision, Dahua, Axis, Reolink) with live monitoring, motion-triggered recording, AI object detection, and network health monitoring.
 
-mBm NVR is developed with **mBm AI Assistant** — an AI-powered engineering and operations assistant by [mBm TECHNOLOGY LLC](https://mbm.mn) that handles rapid coding, server management, deployments, and full-stack troubleshooting.
->
-> Try it at: **[console.mbm.mn](https://console.mbm.mn)**
->
-> used model: Deepseek V4 Pro
-> 
+Built with **mBm AI Assistant** — an AI-powered engineering and operations assistant by [mBm TECHNOLOGY LLC](https://mbm.mn).
+
+---
 
 ## Features
 
-- **Live Monitoring** — Real-time HLS streaming with sub-stream support for bandwidth-efficient dashboard previews; idle streams stop automatically to save CPU
-- **Recording** — Continuous recording in 5-minute MP4 segments with **circular retention** (oldest recordings are overwritten when the disk watermark is hit — the disk can never fill up) and per-camera GB/day analytics
-- **AI Object Detection** — YOLOv8 (ONNX) detection pipeline for people, vehicles, and 80 COCO classes, with motion gating and position-aware event deduplication
-- **Motion Detection** — Camera-side (ONVIF) and server-side (OpenCV MOG2) motion detection
-- **IP Camera Discovery** — Auto-discover ONVIF/RTSP cameras on local subnets
-- **PTZ Control** — Pan, tilt, and zoom control for supported cameras
-- **Multi-User** — Role-based access (admin, operator, viewer)
-- **Locations** — Organize cameras by physical location
-- **Backup & Restore** — Encrypted backup scripts for database and configuration
+### Live Monitoring
+- **LL-HLS streaming** with 1–3 second glass-to-glass latency
+- **Sub-stream support** for bandwidth-efficient dashboard multi-camera previews
+- **Idle stream reaper** — relays with zero viewers stop automatically after 10 minutes, saving CPU
+- **Audio playback** — listen to camera audio during live view
+- **Digital zoom** — 2D CSS zoom+pan on any stream
+- **PTZ controls** — pan, tilt, zoom for supported cameras (ONVIF + vendor-specific)
+
+### Recording
+- **Motion-triggered recording** — FFmpeg starts when motion detected, stops after configurable idle delay (30s)
+- **Continuous recording** mode also available per camera
+- **5-minute MP4 segments** with `-c:v copy` (zero video re-encode, minimal CPU)
+- **Circular retention** — disk watermark at 85% or <2GB free triggers oldest segment deletion first. Disk can never fill up.
+- **Age-based retention** — configurable retention days (default 7)
+- **GB/day analytics** — per-camera usage rates, capacity projection (days remaining)
+- **Recording playback** — browser-native `<video>` with HTTP Range (206), speed controls (0.125x–8x), download button
+- **Thumbnails** — auto-generated sidecar JPEG per recording segment
+- **Bulk delete** — by ID list, all per camera, or before a specific date
+- **Timeline view** — per-day segment bar chart, click to jump to moment
+
+### AI Object Detection
+- **YOLOv8n ONNX** inference on sub-stream frames
+- **MOG2 motion gate** — frames pass YOLO only when motion is detected, saving ~80% CPU
+- **Configurable per camera** — object classes (person, car, truck, bus, motorcycle, bicycle, etc.), confidence threshold, sensitivity (low/medium/high)
+- **Zone-based filtering** — draw polygon zones; only objects whose bottom-center falls inside a zone trigger events
+- **Position-aware deduplication** — static object = 1 event per 5 minutes; moved object = immediate event
+- **JPEG snapshots** saved with each detection event
+- **Events feed** with object badges, snapshot thumbnails, camera filter
+
+### Network Monitoring
+- **Real-time bandwidth** — inbound (RTSP) and outbound (FFmpeg relay) Mbps per camera
+- **Latency monitoring** — ICMP RTT, jitter
+- **Packet loss tracking**
+- **Linear charts** with time-range selector (1h/6h/12h/24h/7d)
+- **Multi-camera overlay** — all cameras on single chart with color-coded lines
+- **Location-based filtering**
+- **Alert thresholds** with configurable warning/critical levels
+
+### Camera Management
+- **6-phase auto-discovery** — ONVIF (WS-Discovery), RTSP (port scan + DESCRIBE/OPTIONS), HTTP (vendor paths), ARP (MAC OUI), mDNS (_onvif._tcp), vendor broadcast (Hikvision/Dahua UDP)
+- **Connection testing** — single TCP connection for Dahua digest auth (nonce binding)
+- **Auto-health-check** background loop with configurable interval
+- **Locations** — organize cameras by physical location (Building, Floor, Entrance, etc.)
+- **Dashboard** — configurable 1/2/3/4 column grid with drag-and-drop, persisted in DB
+
+### Security & Multi-User
+- **JWT authentication** — access (24h) + refresh (7d) tokens
+- **RBAC** — admin, operator, viewer roles
+- **Camera passwords encrypted at rest** (AES-256-GCM, shared `nvr_common.security` module)
+- **Media auth** — `?token=` query parameter for `<img>/<video>` tags
+- **API keys** for external integrations
+
+### System
+- **Settings page** — all system_config values editable via UI
+- **User profile** — password change, username display
+- **PWA support** — installable, offline AppShell cache
+- **Backup & restore** — encrypted pg_dump + config backup scripts
+- **Docker log rotation** — `max-size: 10m, max-file: 3` on all 8 services
+- **Scheduled recording** — day-of-week + time range schedules per camera
+
+---
 
 ## Architecture
 
-| Service | Role |
-|---------|------|
-| `nvr-api` | FastAPI backend — camera management, live relay orchestration, REST API |
-| `nvr-web` | React + Vite frontend — dashboard, live view, settings |
-| `nvr-db` | TimescaleDB (PostgreSQL) — time-series recording storage |
-| `nvr-redis` | Redis — job queue, caching, WebSocket pub/sub |
-| `nvr-minio` | MinIO (S3-compatible) — recording clip storage |
-| `nvr-mediamtx` | MediaMTX — RTSP relay input, HLS output for browsers |
-| `nvr-nginx` | Reverse proxy — routes `/api`, `/hls`, `/ws` to appropriate services |
-| `nvr-recording-engine` | Recording scheduler and segment writer |
-| `nvr-ai-engine` | YOLO-based object detection pipeline |
-| `nvr-mqtt-bridge` | MQTT integration for external event consumption |
+### Service Topology
+
+```
+┌──────────────┐     RTSP sub     ┌───────────────┐     Redis     ┌──────────────────┐
+│  IP Cameras  │─────────────────→│  AI Engine     │─────────────→│ Redis Pub/Sub    │
+│  (11× Dahua) │                  │  YOLOv8n ONNX  │  motion,     │ nvr:motion       │
+│              │                  │  MOG2 gate     │  events      │ nvr:events       │
+└──────┬───────┘                  └───────────────┘              └────────┬─────────┘
+       │                                                                  │
+       │ RTSP sub                                                         │
+       ▼                                                                  ▼
+┌──────────────────┐     RTSP libx264    ┌──────────────┐     HLS     ┌──────────┐
+│ Stream Manager   │───────────────────→│  MediaMTX    │───────────→│  Browser │
+│ FFmpeg relays    │                    │  RTSP server │  LL-HLS    │  hls.js  │
+│ (11× transcode)  │                    │  HLS server  │            │          │
+└──────────────────┘                    └──────────────┘            └──────────┘
+                                                │                        ▲
+                                                │ RTSP                   │
+┌──────────────────┐                            ▼                        │
+│ Recording Engine │     RTSP -c:v copy    ┌──────────────┐    HTTP    ┌──────────┐
+│ Per-camera FFmpeg│─────────────────────→│  Disk        │──Range───→│ FastAPI  │
+│ Motion controller│     300s segments    │ /data/record │           │ API      │
+│ Circular retention│                     └──────────────┘           └──────────┘
+│ Segment catalog  │
+│ Disk analytics   │
+└──────────────────┘
+```
+
+### Services
+
+| Service | Container | Role |
+|---------|-----------|------|
+| **API** | `nvr-api` | FastAPI backend — REST API, auth, camera management, live relay orchestration |
+| **Web** | `nvr-web` | React + Vite + TypeScript frontend — dashboard, live view, settings |
+| **Stream Manager** | `nvr-stream-manager` | FFmpeg relay lifecycle — transcodes RTSP sub-stream→libx264→MediaMTX, circuit breaker, idle reaper |
+| **MediaMTX** | `nvr-mediamtx` | RTSP server + LL-HLS origin — receives transcoded streams, serves HLS to browsers |
+| **Recording Engine** | `nvr-recording-engine` | Per-camera FFmpeg `-c:v copy` supervisors, motion controller, circular retention, segment catalog, disk analytics |
+| **AI Engine** | `nvr-ai-engine` | YOLOv8n ONNX detection, MOG2 motion gate, event generation, Redis pub/sub |
+| **Database** | `nvr-db` | PostgreSQL 16 — cameras, recordings, events, users, system_config |
+| **Cache / PubSub** | `nvr-redis` | Redis 7 — WebSocket pub/sub, motion state, event broadcast |
+
+Not actively used (disabled in current deploy): `nvr-mosquitto` (MQTT), `nvr-chrony` (NTP), `nvr-mqtt-bridge`, `nvr-nginx`.
+
+### Key Data Flows
+
+#### Live Stream
+1. Frontend calls `POST /api/v1/cameras/{id}/live/start?stream=sub`
+2. API delegates to stream-manager via HTTP (`http://nvr-stream-manager:8001`)
+3. Stream-manager spawns FFmpeg: `rtsp://camera_sub → libx264 → rtsp://nvr-mediamtx:8554/{id}_sub`
+4. MediaMTX creates LL-HLS at `/hls/{id}_sub/`
+5. Frontend polls manifest → initializes hls.js → plays in `<video>`
+
+#### Motion-Only Recording
+1. AI Engine publishes `{camera_id, active}` to Redis `nvr:motion` (on change + 30s heartbeat)
+2. Recording Engine `MotionRecorderController`: motion active → start FFmpeg recorder
+3. Motion inactive for 30s (`recording.motion_stop_delay_s`) → stop recorder
+4. New motion cancels pending stop
+5. Segments marked `recording_type='motion'` by catalog
+
+#### AI Detection
+1. FrameSampler connects to camera RTSP sub-stream at 0.5 FPS
+2. MOG2 background subtraction → if motion, pass frame to YOLO
+3. YOLOv8n ONNX inference → bounding boxes + class labels
+4. Zone filter (point-in-polygon) + confidence threshold
+5. Position-aware dedup: static = 1 event/5min, moved = immediate
+6. Event + JPEG snapshot → DB + Redis pub
+
+#### Circular Retention
+1. Every 5 minutes: check disk usage vs `storage.max_usage_percent` (85%) and `storage.min_free_gb` (2GB)
+2. If threshold exceeded → delete oldest segments first (files < 10min protected)
+3. Also age-based: delete segments older than `retention.default_days` (7 days)
+4. DB rows for deleted files cleaned up
+5. Max 500 deletions per run (I/O storm prevention)
+
+---
 
 ## Quick Start
 
 ### Prerequisites
-
-- Docker & Docker Compose (v2.22+)
-- Make
-- FFmpeg (for local development)
+- Docker & Docker Compose v2.22+
+- Python 3.13 (for scripts/seed_db.py)
+- FFmpeg 5.x+ (in stream-manager container)
 
 ### Setup
 
 ```bash
-# 1. Copy environment template and edit
+# 1. Copy and edit environment
 cp .env.example .env
-# Edit .env with your configuration (database passwords, secrets, camera credentials)
+# Edit .env: POSTGRES_PASSWORD, JWT_SECRET_KEY, NVR_ENCRYPTION_KEY, camera credentials
 
-# 2. Start all services
+# 2. Start core infrastructure (DB + Redis)
+docker compose up -d nvr-db nvr-redis
+
+# 3. Seed database (creates admin user, default config)
+make seed
+# Or: python3 scripts/seed_db.py
+
+# 4. Start all services
 docker compose up -d
 
-# 3. Apply database migrations
-make seed
-
-# 4. Access the web UI
+# 5. Access the web UI
 open http://localhost:3000
+# Default login: admin / admin
 ```
 
 ### Development
 
 ```bash
-# Start infrastructure services only (DB, Redis, MinIO, MediaMTX)
+# Start infrastructure only
 make infra
+# Or: docker compose up -d nvr-db nvr-redis nvr-mediamtx
 
-# Seed database with initial schema
+# Seed DB
 make seed
 
-# Run API in dev mode with hot-reload
+# Run API with hot-reload
 make dev
+# Or: cd services/api && uvicorn app.main:app --reload
 
-# Run web frontend in dev mode
+# Run web frontend
 make web
+# Or: cd services/web && npm run dev
 ```
 
-### Environment Variables
+### Key Environment Variables
 
-Key configuration variables (see `.env.example` for the full list):
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `POSTGRES_PASSWORD` | Database password | (required) |
+| `JWT_SECRET_KEY` | JWT signing secret | (required) |
+| `NVR_ENCRYPTION_KEY` | AES-256-GCM key for camera passwords | (required) |
+| `MEDIAMTX_RTSP` | MediaMTX RTSP endpoint | `rtsp://nvr-mediamtx:8554` |
+| `MEDIAMTX_HLS_URL` | MediaMTX HLS origin | `http://10.10.0.229:8888` |
+| `STREAM_MANAGER_URL` | Stream manager HTTP | `http://nvr-stream-manager:8001` |
+| `STREAM_IDLE_TIMEOUT_S` | Idle reaper timeout | `600` (10 min) |
+| `AI_MODEL_PATH` | ONNX model directory | `/app/models` |
+| `AI_YOLO_MODEL` | ONNX model filename | `yolov8n.onnx` |
+| `AI_DEVICE` | ONNX provider | `cpu` |
 
-| Variable | Description |
-|----------|-------------|
-| `POSTGRES_PASSWORD` | Database password |
-| `JWT_SECRET_KEY` | Secret key for JWT token signing |
-| `MEDIAMTX_RTSP` | MediaMTX RTSP endpoint (default: `rtsp://host.docker.internal:8554`) |
-| `MEDIAMTX_HLS_URL` | MediaMTX HLS endpoint (default: `http://host.docker.internal:8888`) |
-| `NVR_ENCRYPTION_KEY` | Key for encrypting camera passwords at rest |
+---
 
 ## API
 
-The REST API is available at `/api/v1/`. Key endpoints:
+All endpoints under `/api/v1/`. Responses wrapped in `{"data": ...}`.
 
-- `GET /api/v1/cameras` — List all cameras
-- `POST /api/v1/cameras` — Add a camera
-- `POST /api/v1/cameras/{id}/live/start` — Start a live relay stream
-- `POST /api/v1/cameras/discover` — Discover cameras on local subnets
-- `POST /api/v1/cameras/{id}/test` — Test camera connection
-- `GET /api/v1/locations` — List locations
-- `GET /api/v1/recordings` — Query recorded clips
+```
+POST   /api/v1/auth/login                    # JWT login
+POST   /api/v1/auth/refresh                  # Token refresh
+
+GET    /api/v1/cameras                       # List cameras (paginated, filtered)
+POST   /api/v1/cameras                       # Add camera
+GET    /api/v1/cameras/{id}                  # Get camera details
+PATCH  /api/v1/cameras/{id}                  # Update camera
+DELETE /api/v1/cameras/{id}                  # Delete camera
+POST   /api/v1/cameras/{id}/test             # Test connection
+POST   /api/v1/cameras/{id}/live/start       # Start live relay (stream=main|sub)
+POST   /api/v1/cameras/{id}/live/stop        # Stop live relay
+GET    /api/v1/cameras/{id}/live/status      # Relay status
+POST   /api/v1/cameras/{id}/ptz              # PTZ control
+POST   /api/v1/cameras/discover              # Start discovery scan
+GET    /api/v1/cameras/discover/{id}/status  # Scan status
+
+GET    /api/v1/recordings                    # List recordings (paginated, filtered)
+GET    /api/v1/recordings/{id}               # Get recording details
+GET    /api/v1/recordings/{id}/stream        # Stream recording (HTTP Range)
+GET    /api/v1/recordings/{id}/thumbnail     # Get thumbnail JPEG
+POST   /api/v1/recordings/bulk-delete        # Bulk delete
+GET    /api/v1/recordings/timeline           # Per-day timeline
+
+GET    /api/v1/events                        # List events (paginated, filtered)
+GET    /api/v1/events/{id}                   # Get event details
+GET    /api/v1/events/{id}/snapshot          # Get event snapshot
+PATCH  /api/v1/events/{id}/acknowledge       # Acknowledge event
+WS     /api/v1/events/stream                 # Real-time event WebSocket
+
+GET    /api/v1/network/metrics               # Latest metrics all cameras
+GET    /api/v1/network/metrics/{id}          # Latest metrics one camera
+GET    /api/v1/network/metrics/{id}/history  # Historical metrics
+GET    /api/v1/network/summary               # Dashboard summary stats
+
+GET    /api/v1/storage/usage                 # Storage usage
+GET    /api/v1/locations                     # List locations (CRUD)
+GET    /api/v1/users                         # List users (admin CRUD)
+GET    /api/v1/system/health                 # System health
+GET    /api/v1/system/config                 # System config
+PATCH  /api/v1/system/config                 # Update config
+
+WS     /api/v1/ws                            # Camera status + events WebSocket
+```
+
+---
+
+## Project Structure
+
+```
+nvr/
+├── services/
+│   ├── api/                  # FastAPI backend
+│   │   ├── app/
+│   │   │   ├── api/v1/       # Route handlers (14 routers)
+│   │   │   ├── core/         # Config, security, database
+│   │   │   ├── models/       # SQLAlchemy models
+│   │   │   ├── schemas/      # Pydantic schemas
+│   │   │   └── services/     # Business logic
+│   │   ├── alembic/          # DB migrations (9 versions)
+│   │   └── tests/            # pytest (64 tests)
+│   ├── web/                  # React + Vite frontend
+│   │   ├── src/
+│   │   │   ├── components/   # UI components
+│   │   │   ├── hooks/        # React hooks (TanStack Query)
+│   │   │   ├── pages/        # Route pages
+│   │   │   ├── store/        # Zustand state
+│   │   │   └── api/          # API client + endpoints
+│   │   └── src/test/         # vitest (34 tests)
+│   ├── stream-manager/       # FFmpeg relay lifecycle
+│   ├── recording-engine/     # Recording supervisor + retention
+│   └── ai-engine/            # YOLOv8 ONNX detection
+├── packages/
+│   └── common/               # Shared Python utilities
+│       └── nvr_common/
+│           ├── security.py   # AES-256-GCM encryption
+│           └── circuit_breaker.py
+├── config/                   # MediaMTX, vendor patterns, defaults
+├── docker/                   # Dockerfiles (7 services)
+├── docker-compose.yml        # Service definitions (12 services)
+├── docker-compose.prod.yml   # Production overrides
+├── Makefile                  # Shortcut commands (27 targets)
+├── scripts/                  # Bootstrap, backup, restore
+└── docs/                     # Documentation
+```
+
+---
+
+## Docker Networking
+
+All services communicate via `nvr-net` Docker network using container hostnames:
+
+| Hostname | Port | Service |
+|----------|------|---------|
+| `nvr-db` | 5432 | PostgreSQL |
+| `nvr-redis` | 6379 | Redis |
+| `nvr-mediamtx` | 8554, 8888, 9997 | RTSP, HLS, API |
+| `nvr-stream-manager` | 8001 | HTTP API |
+| `nvr-api` | 8000 | FastAPI |
+| `nvr-web` | 3000 | React dev server |
+
+---
 
 ## License
 
-Apache-2.0
+Apache-2.0 — see [LICENSE](LICENSE)

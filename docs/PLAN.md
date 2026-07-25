@@ -1,4 +1,6 @@
-# mBm NVR System — Бүрэн архитектур төлөвлөгөө
+# mBm NVR System — Original Architecture Plan (Historical)
+
+> **Note:** This document is the original architecture plan written in Mongolian. It describes the aspirational/planned architecture, not the current deployed state. For current architecture, see `docs/ARCHITECTURE.md`. For current status, see `docs/work-status.md`.
 
 **Хамрах хүрээ:** Database schema, API specification, streaming architecture, AI pipeline,
 security design, recording engine, storage lifecycle, deployment, vendor analysis, frontend architecture.
