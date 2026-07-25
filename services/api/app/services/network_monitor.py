@@ -21,6 +21,8 @@ import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
+from ..core.config import settings
+
 logger = structlog.get_logger()
 
 MEDIAMTX_HOST = "http://nvr-mediamtx:9997"
@@ -38,7 +40,11 @@ class NetworkMonitor:
         ] = {}  # cam_id -> (ts, bytes_rcv, bytes_sent)
 
     def init(self, db_url: str):
-        self._engine = create_async_engine(db_url)
+        self._engine = create_async_engine(
+            db_url,
+            pool_size=settings.postgres_pool_size,
+            max_overflow=settings.postgres_max_overflow,
+        )
 
     async def start(self):
         if self.running or not self._engine:
@@ -74,6 +80,8 @@ class NetworkMonitor:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
+        if self._engine:
+            self._engine.dispose()
         logger.info("network_monitor_stopped")
 
     async def _collect_loop(self):

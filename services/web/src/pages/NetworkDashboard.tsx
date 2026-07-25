@@ -5,7 +5,6 @@ import {
   useCameraHistory,
   useOverlayHistory,
   useNetworkSummary,
-  useActiveAlerts,
   useToggleMonitoring,
   useMonitorStatus,
 } from "../hooks/useNetwork";
@@ -27,7 +26,6 @@ export default function NetworkDashboard() {
   const { data: metrics } = useLatestMetrics();
   const { data: overlay } = useOverlayHistory(timeRange);
   const { data: singleHistory } = useCameraHistory(selectedCam, timeRange);
-  const { data: alerts } = useActiveAlerts();
   const { data: monStatus } = useMonitorStatus();
   const toggle = useToggleMonitoring();
 
@@ -79,8 +77,8 @@ export default function NetworkDashboard() {
       {/* summary */}
       {summary && <NetworkSummaryBar summary={summary} />}
 
-      {/* alerts */}
-      {alerts && alerts.length > 0 && <NetworkAlertPanel />}
+      {/* alerts — panel handles its own pagination */}
+      <NetworkAlertPanel />
 
       {/* location filter */}
       {locations.length >= 2 && (

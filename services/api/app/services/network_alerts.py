@@ -84,6 +84,10 @@ class NetworkAlertService:
             if current_value is None:
                 continue
 
+            # skip bandwidth_low when camera has no active stream (0 Mbps = idle)
+            if alert_type == "bandwidth_low" and current_value == 0.0:
+                continue
+
             breached = ("low" in alert_type and current_value < threshold) or (
                 "high" in alert_type and current_value > threshold
             )
@@ -220,8 +224,9 @@ class NetworkAlertService:
                 )
             await db.commit()
 
-    async def get_active_alerts(self, engine) -> list[dict]:
-        """Get all unacknowledged alerts for UI display."""
+    async def get_active_alerts(self, engine, page: int = 1, per_page: int = 50) -> dict:
+        """Get unacknowledged alerts with pagination."""
+        offset = (page - 1) * per_page
         async with AsyncSession(engine) as db:
             result = await db.execute(
                 text("""
@@ -231,24 +236,39 @@ class NetworkAlertService:
                 JOIN cameras c ON na.camera_id = c.id
                 WHERE na.acknowledged_at IS NULL
                 ORDER BY na.triggered_at DESC
-              """)
+                LIMIT :limit OFFSET :offset
+                """),
+                {"limit": per_page, "offset": offset},
             )
             rows = result.fetchall()
 
-            return [
-                {
-                    "id": str(row[0]),
-                    "camera_id": str(row[1]),
-                    "camera_name": row[2],
-                    "alert_type": row[3],
-                    "severity": row[4],
-                    "message": row[5],
-                    "triggered_at": row[6].isoformat(),
-                    "acknowledged_at": row[7].isoformat() if row[7] else None,
-                    "metadata": json.loads(row[8]) if isinstance(row[8], str) else (dict(row[8]) if row[8] else None),
-                }
-                for row in rows
-            ]
+            count_result = await db.execute(
+                text("""
+                SELECT COUNT(1) FROM network_alerts
+                WHERE acknowledged_at IS NULL
+                """)
+            )
+            total_count = count_result.scalar() or 0
+
+            return {
+                "data": [
+                    {
+                        "id": str(row[0]),
+                        "camera_id": str(row[1]),
+                        "camera_name": row[2],
+                        "alert_type": row[3],
+                        "severity": row[4],
+                        "message": row[5],
+                        "triggered_at": row[6].isoformat(),
+                        "acknowledged_at": row[7].isoformat() if row[7] else None,
+                        "metadata": json.loads(row[8]) if isinstance(row[8], str) else (dict(row[8]) if row[8] else None),
+                    }
+                    for row in rows
+                ],
+                "total_count": total_count,
+                "page": page,
+                "per_page": per_page,
+            }
 
     async def acknowledge_alert(self, alert_id: UUID, user_id: UUID, engine) -> dict:
         """Acknowledge a network alert."""

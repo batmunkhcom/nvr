@@ -39,8 +39,13 @@ export const networkApi = {
       "/network/monitor/toggle",
     ),
 
-  getActiveAlerts: () =>
-    apiClient.get<{ data: NetworkAlert[] }>("/network/alerts"),
+  getActiveAlerts: (page = 1, perPage = 50) =>
+    apiClient.get<{
+      data: NetworkAlert[];
+      total_count: number;
+      page: number;
+      per_page: number;
+    }>("/network/alerts", { params: { page, per_page: perPage } }),
 
   getAllAlerts: (
     page = 1,

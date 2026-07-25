@@ -445,14 +445,19 @@ async def get_network_summary(
 async def get_active_alerts(
     current_user: Annotated[dict, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
 ):
-    """Active (unacknowledged) alerts."""
+    """Active (unacknowledged) alerts with pagination."""
     from ...services.network_alerts import network_alert_service
 
     if network_alert_service._engine:
-        alerts = await network_alert_service.get_active_alerts(network_alert_service._engine)
+        result = await network_alert_service.get_active_alerts(
+            network_alert_service._engine, page, per_page
+        )
     else:
-        result = await db.execute(
+        offset = (page - 1) * per_page
+        result_obj = await db.execute(
             text("""
             SELECT na.id, na.camera_id, c.name as camera_name, na.alert_type, na.severity,
                    na.message, na.triggered_at, na.acknowledged_at, na.metadata
@@ -460,25 +465,41 @@ async def get_active_alerts(
             JOIN cameras c ON na.camera_id = c.id
             WHERE na.acknowledged_at IS NULL
             ORDER BY na.triggered_at DESC
-        """)
+            LIMIT :limit OFFSET :offset
+            """),
+            {"limit": per_page, "offset": offset},
         )
-        rows = result.fetchall()
-        alerts = [
-            {
-                "id": str(row[0]),
-                "camera_id": str(row[1]),
-                "camera_name": row[2],
-                "alert_type": row[3],
-                "severity": row[4],
-                "message": row[5],
-                "triggered_at": row[6].isoformat(),
-                "acknowledged_at": row[7].isoformat() if row[7] else None,
-                "metadata": dict(row[8]) if row[8] else None,
-            }
-            for row in rows
-        ]
+        rows = result_obj.fetchall()
 
-    return {"data": alerts}
+        count_result = await db.execute(
+            text("""
+            SELECT COUNT(1) FROM network_alerts
+            WHERE acknowledged_at IS NULL
+            """)
+        )
+        total_count = count_result.scalar() or 0
+
+        result = {
+            "data": [
+                {
+                    "id": str(row[0]),
+                    "camera_id": str(row[1]),
+                    "camera_name": row[2],
+                    "alert_type": row[3],
+                    "severity": row[4],
+                    "message": row[5],
+                    "triggered_at": row[6].isoformat(),
+                    "acknowledged_at": row[7].isoformat() if row[7] else None,
+                    "metadata": dict(row[8]) if row[8] else None,
+                }
+                for row in rows
+            ],
+            "total_count": total_count,
+            "page": page,
+            "per_page": per_page,
+        }
+
+    return result
 
 
 @router.get("/alerts/all")

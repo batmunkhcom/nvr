@@ -72,10 +72,10 @@ export function useToggleMonitoring() {
   });
 }
 
-export function useActiveAlerts() {
+export function useActiveAlerts(page = 1) {
   return useQuery({
-    queryKey: ["network", "alerts"],
-    queryFn: () => networkApi.getActiveAlerts().then((r) => r.data.data),
+    queryKey: ["network", "alerts", page],
+    queryFn: () => networkApi.getActiveAlerts(page, 50).then((r) => r.data),
     refetchInterval: 15_000,
   });
 }
