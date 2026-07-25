@@ -118,8 +118,8 @@ services:
       API_PORT: ${API_PORT}
       API_LOG_LEVEL: ${API_LOG_LEVEL}
       API_CORS_ORIGINS: ${API_CORS_ORIGINS}
-          S3_SECURE: ${S3_SECURE}
-          DISCOVERY_SUBNETS: ${DISCOVERY_SUBNETS}
+      S3_SECURE: ${S3_SECURE}
+      DISCOVERY_SUBNETS: ${DISCOVERY_SUBNETS}
       NVR_ENCRYPTION_KEY: ${NVR_ENCRYPTION_KEY}
       MEDIAMTX_RTSP: ${MEDIAMTX_RTSP:-rtsp://nvr-mediamtx:8554}
       STREAM_MANAGER_URL: http://nvr-stream-manager:8001
@@ -282,7 +282,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "4"
+          cpus: "2"
           memory: "4G"
 
   nvr-mqtt-bridge:

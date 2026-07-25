@@ -67,9 +67,9 @@ class StreamManager:
                 return
 
         is_sub = cid.endswith("_sub")
-        bitrate = "2000k" if is_sub else "4000k"
-        maxrate = "2000k" if is_sub else "4000k"
-        bufsize = "4000k" if is_sub else "8000k"
+        bitrate = "1000k" if is_sub else "4000k"
+        maxrate = "1000k" if is_sub else "4000k"
+        bufsize = "2000k" if is_sub else "8000k"
 
         args = [
             FFMPEG_PATH,

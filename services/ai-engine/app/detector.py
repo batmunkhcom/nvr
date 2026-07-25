@@ -135,7 +135,7 @@ class AIDetector:
             if os.environ.get("AI_DEVICE", "cpu") == "cuda":
                 providers.insert(0, "CUDAExecutionProvider")
             opts = ort.SessionOptions()
-            opts.intra_op_num_threads = 2
+            opts.intra_op_num_threads = 1
             self._session = ort.InferenceSession(
                 self.model_path, sess_options=opts, providers=providers
             )

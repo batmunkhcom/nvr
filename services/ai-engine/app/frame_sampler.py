@@ -20,7 +20,7 @@ from .detector import AIDetector, MotionDetector
 
 logger = structlog.get_logger()
 
-TARGET_FPS = 2
+TARGET_FPS = 0.5
 STATIC_COOLDOWN_S = 300  # same object in same place -> 1 event per 5 min
 MIN_EVENT_GAP_S = 5  # never more than 1 event per class per 5s
 POSITION_TOLERANCE = 0.10  # normalized box-center movement = new object
