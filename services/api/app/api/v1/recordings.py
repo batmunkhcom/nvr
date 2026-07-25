@@ -143,7 +143,6 @@ async def stream_recording(
     start, end = _parse_range(range, file_size)
 
     ts = recording.start_time.strftime("%Y-%m-%d_%H%M%S") if recording.start_time else str(recording_id)[:8]
-    disp_type = "attachment" if download else "inline"
     filename = f"recording_{recording.camera_id}_{ts}.mp4" if hasattr(recording, "camera_id") else f"recording_{recording_id}.mp4"
 
     def file_iterator(path: str, offset: int, remaining: int, chunk_size: int = 1024 * 1024):
@@ -157,26 +156,29 @@ async def stream_recording(
                 left -= len(chunk)
                 yield chunk
 
-    headers = {
-        "Accept-Ranges": "bytes",
-        "Content-Disposition": f'{disp_type}; filename="{filename}"',
-    }
-    if start == 0 and end == file_size - 1:
+    headers = {"Accept-Ranges": "bytes"}
+    if download:
+        headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+
+    is_full_range = (start == 0 and end == file_size - 1)
+
+    if range and not is_full_range:
         return StreamingResponse(
-            file_iterator(file_path, 0, file_size),
+            file_iterator(file_path, start, end - start + 1),
+            status_code=206,
             media_type="video/mp4",
-            headers={**headers, "Content-Length": str(file_size)},
-        )
+            headers={
+                 **headers,
+                "Content-Length": str(end - start + 1),
+                "Content-Range": f"bytes {start}-{end}/{file_size}",
+            },
+         )
+
     return StreamingResponse(
-        file_iterator(file_path, start, end - start + 1),
-        status_code=206,
+        file_iterator(file_path, 0, file_size),
         media_type="video/mp4",
-        headers={
-            **headers,
-            "Content-Length": str(end - start + 1),
-            "Content-Range": f"bytes {start}-{end}/{file_size}",
-        },
-    )
+        headers={**headers, "Content-Length": str(file_size)},
+     )
 
 
 @router.head("/{recording_id}/stream")

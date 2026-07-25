@@ -1,6 +1,5 @@
 import { useRef, useEffect, useState } from "react";
-import Hls from "hls.js";
-import { Volume2, VolumeX, Download, Play } from "lucide-react";
+import { Volume2, VolumeX, Download } from "lucide-react";
 
 interface Props {
   src: string;
@@ -19,8 +18,6 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
   const videoRef = useRef<HTMLVideoElement>(null);
   const [speed, setSpeed] = useState(1);
   const [muted, setMuted] = useState(true);
-  const [ready, setReady] = useState(false);
-  const [playBlocked, setPlayBlocked] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -31,10 +28,6 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (!src) return;
-
-    setReady(false);
-    setPlayBlocked(false);
 
     const seekIfNeeded = () => {
       if (startOffset && startOffset > 0 && Number.isFinite(video.duration)) {
@@ -42,61 +35,21 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
       }
     };
 
-    if (src.endsWith(".m3u8") && Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true });
-      hls.loadSource(src);
-      hls.attachMedia(video);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        setReady(true);
-        seekIfNeeded();
-        if (autoPlay) attemptPlay(video);
-      });
-      return () => {
-        hls.destroy();
-      };
-    }
-
-    const onCanPlay = () => {
-      setReady(true);
-      seekIfNeeded();
-      if (autoPlay) attemptPlay(video);
-    };
-
-    video.addEventListener("canplay", onCanPlay, { once: true });
+    video.addEventListener("loadedmetadata", seekIfNeeded, { once: true });
     video.src = src;
     video.muted = muted;
+    if (autoPlay) video.play().catch(() => {});
 
     return () => {
-      video.removeEventListener("canplay", onCanPlay);
+      video.removeEventListener("loadedmetadata", seekIfNeeded);
       video.pause();
-      video.removeAttribute("src");
+      video.src = "";
+      video.load();
     };
   }, [src, autoPlay, startOffset]);
 
-  const attemptPlay = (video: HTMLVideoElement) => {
-    video.play().catch(() => {
-      setPlayBlocked(true);
-    });
-  };
-
   return (
     <div className="relative">
-      {!ready && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/60 z-10 rounded">
-          <div className="w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-        </div>
-      )}
-      {playBlocked && (
-        <button
-          onClick={() => {
-            videoRef.current?.play();
-            setPlayBlocked(false);
-          }}
-          className="absolute inset-0 flex items-center justify-center bg-black/40 z-10 rounded group cursor-pointer"
-        >
-          <Play size={48} className="text-white/80 group-hover:text-white transition-colors" />
-        </button>
-      )}
       <video
         ref={videoRef}
         controls={controls}
@@ -105,7 +58,7 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
         poster={poster}
         playsInline
         preload="auto"
-        className={`w-full bg-black rounded ${className}`}
+        className={`w-full max-w-3xl aspect-video bg-black rounded ${className}`}
       />
       <div className="flex items-center gap-1 mt-2 flex-wrap">
         <button onClick={() => {

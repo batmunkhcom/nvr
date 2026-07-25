@@ -55,10 +55,19 @@ def build_rtsp_url(stream_uri: str, username: str | None, password: str | None) 
     return urllib.parse.urlunparse(parsed._replace(netloc=netloc))
 
 
-def build_ffmpeg_args(stream_url: str, camera_dir: str, segment_seconds: int) -> list[str]:
-    """FFmpeg segment muxer command — MP4 segments named by UTC clock time."""
+CODEC_BSF_MAP: dict[str, str] = {
+    "h264": "h264_metadata=video_full_range_flag=0",
+}
+
+
+def build_ffmpeg_args(stream_url: str, camera_dir: str, segment_seconds: int, *, video_codec: str | None = None) -> list[str]:
+    """FFmpeg segment muxer command — MP4 segments named by UTC clock time.
+
+    H.264 → passthrough with colour-range metadata fix (lowest CPU).
+    HEVC  → transcoded to H.264 (Chrome has limited HEVC support).
+    Other → passthrough, no filter."""
     output_pattern = os.path.join(camera_dir, "%Y/%m/%d/%Y%m%d_%H%M%S.mp4")
-    return [
+    args = [
         config.FFMPEG_PATH,
         "-hide_banner",
         "-loglevel",
@@ -66,11 +75,23 @@ def build_ffmpeg_args(stream_url: str, camera_dir: str, segment_seconds: int) ->
         "-rtsp_transport",
         "tcp",
         "-timeout",
-        "15000000",  # 15s socket timeout -> exit so supervisor restarts
+        "15000000",
         "-i",
         stream_url,
-        "-c:v",
-        "copy",
+    ]
+    if video_codec == "hevc":
+        args += [
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-crf", "20",
+            "-pix_fmt", "yuv420p",
+        ]
+    else:
+        args += ["-c:v", "copy"]
+        bsf = CODEC_BSF_MAP.get(video_codec or "")
+        if bsf:
+            args += ["-bsf:v", bsf]
+    args += [
         "-c:a",
         "aac",
         "-b:a",
@@ -91,6 +112,30 @@ def build_ffmpeg_args(stream_url: str, camera_dir: str, segment_seconds: int) ->
         "1",
         output_pattern,
     ]
+    return args
+
+
+async def _probe_video_codec(stream_url: str, timeout_s: int = 10) -> str | None:
+    """Probe the first video codec of an RTSP stream via ffprobe."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            config.FFPROBE_PATH,
+            "-v", "quiet",
+            "-rtsp_transport", "tcp",
+            "-timeout", str(timeout_s * 1_000_000),
+            "-select_streams", "v:0",
+            "-show_entries", "stream=codec_name",
+            "-of", "csv=p=0",
+            stream_url,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+        codec = stdout.decode(errors="replace").strip().lower()
+        return codec if codec else None
+    except Exception:
+        logger.warning("recording_codec_probe_failed", stream_url=stream_url[:80], exc_info=True)
+        return None
 
 
 class CameraRecorder:
@@ -115,6 +160,7 @@ class CameraRecorder:
         self.on_crash = on_crash
 
         self.stream_url = build_rtsp_url(stream_uri, username, password)
+        self._video_codec: str | None = None  # cached after first probe
         self.breaker = CircuitBreaker(
             name=f"recording_{camera_id}", base_cooldown=60, max_cooldown=600
         )
@@ -161,7 +207,17 @@ class CameraRecorder:
     async def _run_once(self) -> None:
         camera_dir = os.path.join(self.output_base, self.camera_id)
         _ensure_date_dirs(camera_dir)
-        args = build_ffmpeg_args(self.stream_url, camera_dir, self.segment_seconds)
+
+        if self._video_codec is None:
+            self._video_codec = await _probe_video_codec(self.stream_url)
+            if self._video_codec:
+                logger.info(
+                    "recording_codec_detected",
+                    camera_id=self.camera_id,
+                    codec=self._video_codec,
+                )
+
+        args = build_ffmpeg_args(self.stream_url, camera_dir, self.segment_seconds, video_codec=self._video_codec)
 
         self._process = await asyncio.create_subprocess_exec(
             *args,

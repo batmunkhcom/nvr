@@ -259,6 +259,7 @@ export default function Recordings() {
                   </button>
                 </div>
                 <RecordingPlayer
+                  key={activePlaybackId}
                   src={streamUrl}
                   startOffset={seekOffset}
                   className="max-h-96"
