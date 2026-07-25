@@ -234,7 +234,7 @@ class FrameSampler:
         return kept
 
     async def _track_motion(self, has_motion: bool) -> None:
-          """Publish motion state changes (+ heartbeat) for the recording engine."""
+        """Publish motion state changes (+ heartbeat) for the recording engine."""
         now_ts = datetime.now(UTC).timestamp()
         if has_motion:
             self._last_motion_ts = now_ts
@@ -243,7 +243,7 @@ class FrameSampler:
                 self._motion_active = True
                 await self._publish_motion(True)
             elif self._motion_active and now_ts - self._last_motion_pub_ts >= MOTION_HEARTBEAT_S:
-                await self._publish_motion(True)   # heartbeat while active
+                await self._publish_motion(True)    # heartbeat while active
         else:
             self._motion_consecutive = 0
         if self._motion_active and now_ts - self._last_motion_ts >= MOTION_OFF_S:
