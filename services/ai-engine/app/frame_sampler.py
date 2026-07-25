@@ -82,6 +82,7 @@ class FrameSampler:
         self._motion_active = False
         self._last_motion_ts = 0.0
         self._last_motion_pub_ts = 0.0
+        self._motion_consecutive = 0
 
     async def start(self) -> None:
         self._running = True
@@ -151,6 +152,7 @@ class FrameSampler:
                 frame, (FRAME_WIDTH, int(frame.shape[0] * FRAME_WIDTH / frame.shape[1]))
             )
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            gray = cv2.GaussianBlur(gray, (3, 3), 0)
             has_motion = self._motion.detect(gray)
             await self._track_motion(has_motion)
             if not has_motion:
@@ -232,16 +234,19 @@ class FrameSampler:
         return kept
 
     async def _track_motion(self, has_motion: bool) -> None:
-        """Publish motion state changes (+ heartbeat) for the recording engine."""
+          """Publish motion state changes (+ heartbeat) for the recording engine."""
         now_ts = datetime.now(UTC).timestamp()
         if has_motion:
             self._last_motion_ts = now_ts
-            if not self._motion_active:
+            self._motion_consecutive += 1
+            if not self._motion_active and self._motion_consecutive >= 2:
                 self._motion_active = True
                 await self._publish_motion(True)
-            elif now_ts - self._last_motion_pub_ts >= MOTION_HEARTBEAT_S:
-                await self._publish_motion(True)  # heartbeat while active
-        elif self._motion_active and now_ts - self._last_motion_ts >= MOTION_OFF_S:
+            elif self._motion_active and now_ts - self._last_motion_pub_ts >= MOTION_HEARTBEAT_S:
+                await self._publish_motion(True)   # heartbeat while active
+        else:
+            self._motion_consecutive = 0
+        if self._motion_active and now_ts - self._last_motion_ts >= MOTION_OFF_S:
             self._motion_active = False
             await self._publish_motion(False)
 

@@ -238,4 +238,6 @@ class MotionDetector:
         import cv2
 
         fg_mask = self.bg_subtractor.apply(gray_frame)
-        return cv2.countNonZero(fg_mask) > 500
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
+        return cv2.countNonZero(fg_mask) > 1500
