@@ -58,19 +58,28 @@ export function useStreamPlayer({
     cleanupHls();
     const hls = new Hls({
       enableWorker: false,
-      maxBufferLength: 2,
-      maxMaxBufferLength: 4,
+      maxBufferLength: 5,
+      maxMaxBufferLength: 8,
       lowLatencyMode: true,
       liveDurationInfinity: false,
-      liveSyncDurationCount: 2,
+      liveSyncDurationCount: 3,
     });
     hlsRef.current = hls;
 
+    let fatalCount = 0;
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       if (!abortRef.current) { setState("playing"); videoRef.current?.play().catch(() => {}); }
     });
     hls.on(Hls.Events.ERROR, (_e, data) => {
-      if (data.fatal) { cleanupHls(); if (!abortRef.current) { setState("retrying"); setRetrySec(3); setTimeout(() => { if (!abortRef.current) startStream(); }, 3000); } }
+      if (data.fatal) {
+        fatalCount++;
+        cleanupHls();
+        if (!abortRef.current) {
+          const retryDelay = fatalCount > 2 ? 5000 : 2000;
+          setRetrySec(Math.ceil(retryDelay / 1000));
+          setTimeout(() => { if (!abortRef.current) startStream(); }, retryDelay);
+        }
+      }
     });
     const src = finalUrlRef.current || hlsPath;
     hls.loadSource(src);

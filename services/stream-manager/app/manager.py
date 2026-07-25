@@ -44,7 +44,7 @@ class StreamManager:
     def _get_breaker(cls, camera_id: str) -> CircuitBreaker:
         if camera_id not in cls._breakers:
             cls._breakers[camera_id] = CircuitBreaker(
-                name=f"stream_{camera_id}", base_cooldown=30, max_cooldown=300
+                name=f"stream_{camera_id}", base_cooldown=15, max_cooldown=120
             )
         return cls._breakers[camera_id]
 
