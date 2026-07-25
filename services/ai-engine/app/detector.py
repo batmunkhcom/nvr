@@ -228,16 +228,17 @@ class MotionDetector:
     def __init__(self, sensitivity: str = "medium"):
         import cv2
 
-        thresholds = {"low": 40, "medium": 25, "high": 16}
-        self.threshold = thresholds.get(sensitivity, 25)
+        thresholds = {"low": 60, "medium": 40, "high": 25}
+        self.threshold = thresholds.get(sensitivity, 40)
         self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history=500, varThreshold=self.threshold, detectShadows=False
+            history=800, varThreshold=self.threshold, detectShadows=False
         )
 
     def detect(self, gray_frame: np.ndarray) -> bool:
         import cv2
 
         fg_mask = self.bg_subtractor.apply(gray_frame)
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
         fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
-        return cv2.countNonZero(fg_mask) > 1500
+        fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel)
+        return cv2.countNonZero(fg_mask) > 3000

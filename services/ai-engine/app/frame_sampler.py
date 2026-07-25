@@ -29,8 +29,9 @@ RECONNECT_MAX_S = 120
 FRAME_WIDTH = 640
 DEFAULT_OBJECTS = ["person", "car", "truck", "bus", "motorcycle", "bicycle"]
 MOTION_CHANNEL = "nvr:motion"
-MOTION_OFF_S = 10.0  # silence this long -> motion inactive
-MOTION_HEARTBEAT_S = 30.0  # re-publish active state (recording engine recovery)
+MOTION_OFF_S = 30.0   # silence this long -> motion inactive
+MOTION_HEARTBEAT_S = 30.0   # re-publish active state (recording engine recovery)
+MOTION_COOLDOWN_S = 60.0   # min gap between recording starts after motion stops
 
 
 def build_rtsp_url(stream_uri: str, username: str | None, password: str | None) -> str:
@@ -83,6 +84,7 @@ class FrameSampler:
         self._last_motion_ts = 0.0
         self._last_motion_pub_ts = 0.0
         self._motion_consecutive = 0
+        self._motion_last_stop_ts = 0.0
 
     async def start(self) -> None:
         self._running = True
@@ -239,15 +241,17 @@ class FrameSampler:
         if has_motion:
             self._last_motion_ts = now_ts
             self._motion_consecutive += 1
-            if not self._motion_active and self._motion_consecutive >= 2:
+            cooldown_remaining = self._motion_last_stop_ts + MOTION_COOLDOWN_S - now_ts
+            if not self._motion_active and self._motion_consecutive >= 5 and cooldown_remaining <= 0:
                 self._motion_active = True
                 await self._publish_motion(True)
             elif self._motion_active and now_ts - self._last_motion_pub_ts >= MOTION_HEARTBEAT_S:
-                await self._publish_motion(True)    # heartbeat while active
+                await self._publish_motion(True)      # heartbeat while active
         else:
             self._motion_consecutive = 0
         if self._motion_active and now_ts - self._last_motion_ts >= MOTION_OFF_S:
             self._motion_active = False
+            self._motion_last_stop_ts = now_ts
             await self._publish_motion(False)
 
     async def _publish_motion(self, active: bool) -> None:
