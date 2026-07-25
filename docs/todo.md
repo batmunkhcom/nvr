@@ -57,6 +57,14 @@
 - [x] Sub-stream bitrate 2000k→1000k
 - [x] AI engine docker CPU limit 4→2
 
+### Phase 5 — Browser Compatibility Fixes (v0.01.21) ✅
+- [x] Remove hls.js from RecordingPlayer — CSP script-src block in Chrome
+- [x] HEVC→H.264 transcode in recording engine — universal browser playback
+- [x] H.264 bitstream filter — normalize `yuvj420p color_range=pc`→`yuv420p tv`
+- [x] HTTP Range handling — 200 OK for full file, 206 for partial ranges
+- [x] RecordingPlayer cleanup — restore working controls/speed/audio UX
+- [x] AGENTS.md troubleshooting section — CSP, codec, Range, browser differences
+
 ---
 
 ## Immediate Backlog

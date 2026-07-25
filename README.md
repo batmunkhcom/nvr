@@ -20,22 +20,26 @@ Built with **mBm AI Assistant** — an AI-powered engineering and operations ass
 - **Motion-triggered recording** — FFmpeg starts when motion detected, stops after configurable idle delay (30s)
 - **Continuous recording** mode also available per camera
 - **5-minute MP4 segments** with `-c:v copy` (zero video re-encode, minimal CPU)
+- **Codec normalization** — HEVC→H.264 transcode (`libx264 ultrafast crf20`), H.264 bitstream filter (`video_full_range_flag=0`) for universal browser compatibility. Auto-detected via ffprobe before FFmpeg spawns.
 - **Circular retention** — disk watermark at 85% or <2GB free triggers oldest segment deletion first. Disk can never fill up.
 - **Age-based retention** — configurable retention days (default 7)
 - **GB/day analytics** — per-camera usage rates, capacity projection (days remaining)
-- **Recording playback** — browser-native `<video>` with HTTP Range (206), speed controls (0.125x–8x), download button
-- **Thumbnails** — auto-generated sidecar JPEG per recording segment
+- **Recording playback** — browser-native `<video>` with progressive download, HTTP Range support (206 Partial Content for seeking), speed controls (0.125x–8x with slow/fast color coding), mute toggle, download button
+- **Thumbnails** — auto-generated sidecar JPEG per recording segment, ffmpeg thumbnail extraction with time-offset fallback
 - **Bulk delete** — by ID list, all per camera, or before a specific date
 - **Timeline view** — per-day segment bar chart, click to jump to moment
+- **Stream selection** — per-camera `recording.stream` config (sub-stream ~700kbps / main-stream full resolution)
+- **Scheduled recording** — day-of-week + time range schedules per camera
 
 ### AI Object Detection
-- **YOLOv8n ONNX** inference on sub-stream frames
-- **MOG2 motion gate** — frames pass YOLO only when motion is detected, saving ~80% CPU
-- **Configurable per camera** — object classes (person, car, truck, bus, motorcycle, bicycle, etc.), confidence threshold, sensitivity (low/medium/high)
-- **Zone-based filtering** — draw polygon zones; only objects whose bottom-center falls inside a zone trigger events
-- **Position-aware deduplication** — static object = 1 event per 5 minutes; moved object = immediate event
-- **JPEG snapshots** saved with each detection event
-- **Events feed** with object badges, snapshot thumbnails, camera filter
+- **YOLOv8n ONNX** inference on sub-stream frames (shared singleton session, CPUExecutionProvider)
+- **MOG2 motion gate** — frames pass YOLO only when motion is detected (history=800, morphological close, threshold-based sensitivity). Saves ~80% CPU.
+- **Configurable per camera** — object classes (80 COCO classes: person, car, truck, bus, motorcycle, bicycle, etc.), confidence threshold (clamped 0.05–0.95), sensitivity (low/medium/high)
+- **Zone-based filtering** — draw polygon zones on camera snapshot; only objects whose bottom-center falls inside a zone trigger events. Empty zones = whole frame.
+- **Position-aware deduplication** — static object = 1 event per 5 minutes (`STATIC_COOLDOWN_S`); moved object (>0.10 normalized distance) = immediate event. Minimum gap of 5s between same-class events (`MIN_EVENT_GAP_S`).
+- **JPEG snapshots** saved with each detection event (token-authenticated)
+- **Events feed** with object badges, snapshot thumbnails, camera filter, severity levels, acknowledge action
+- **Motion-only mode** — cameras with `recording_mode='motion'` and `ai_enabled=False` get motion-only sampler (MOG2 gate, no YOLO) that publishes to Redis `nvr:motion`
 
 ### Network Monitoring
 - **Real-time bandwidth** — inbound (RTSP) and outbound (FFmpeg relay) Mbps per camera
@@ -54,19 +58,49 @@ Built with **mBm AI Assistant** — an AI-powered engineering and operations ass
 - **Dashboard** — configurable 1/2/3/4 column grid with drag-and-drop, persisted in DB
 
 ### Security & Multi-User
-- **JWT authentication** — access (24h) + refresh (7d) tokens
-- **RBAC** — admin, operator, viewer roles
-- **Camera passwords encrypted at rest** (AES-256-GCM, shared `nvr_common.security` module)
-- **Media auth** — `?token=` query parameter for `<img>/<video>` tags
-- **API keys** for external integrations
+- **JWT authentication** — access (24h) + refresh (7d) tokens, Redis blacklist for revoked tokens
+- **RBAC** — admin, operator, viewer roles. Enforced via FastAPI dependency injection (`require_admin`, `require_operator`).
+- **Camera passwords encrypted at rest** (AES-256-GCM, shared `nvr_common.security` module). Decrypted in-memory only when FFmpeg spawns.
+- **Media auth** — `?token=` query parameter passes through `get_current_user` for `<img>/<video>` tags
+- **API keys** — bcrypt hashed, prefix-identifiable (`nvr_a3f2...`), permission-scoped, expirable
 
 ### System
-- **Settings page** — all system_config values editable via UI
+- **Settings page** — all system_config values editable via UI (storage, recording, AI, network, UI categories)
 - **User profile** — password change, username display
 - **PWA support** — installable, offline AppShell cache
-- **Backup & restore** — encrypted pg_dump + config backup scripts
+- **Backup & restore** — encrypted pg_dump + config backup scripts (AES-256-CBC)
 - **Docker log rotation** — `max-size: 10m, max-file: 3` on all 8 services
 - **Scheduled recording** — day-of-week + time range schedules per camera
+- **Real-time WebSocket** — `/api/v1/ws` pushes camera status, events, and network metrics to all connected clients
+- **Prometheus metrics** — `/metrics` endpoint on API server
+
+### Browser Compatibility
+
+| Feature | Chrome | Safari | Firefox |
+|---------|--------|--------|---------|
+| Live HLS (LL-HLS) | ✅ hls.js | ✅ hls.js | ✅ hls.js |
+| Recording MP4 playback | ✅ Progressive `<video>` | ✅ Progressive `<video>` | ✅ Progressive `<video>` |
+| CSP `script-src` enforcement | ⚠️ Strict (blocks `new Function()`) | Lenient | Moderate |
+| `Range: bytes=0-` handling | Requires `206 Partial Content` | Accepts `200 OK` | Accepts `200 OK` |
+| `pix_fmt=yuvj420p` full-range | ❌ Rejects | ✅ Accepts | ❌ Rejects |
+
+**Design decisions for universal compatibility:**
+1. RecordingPlayer uses progressive MP4 download (NO hls.js) — avoids CSP `unsafe-eval` conflict
+2. Recording engine normalizes all codecs to H.264 `yuv420p` `color_range=tv` — Chrome-safe format
+3. Stream endpoint returns `200 OK` for full-file requests, `206 Partial Content` for seeking — satisfies Chrome's strict Range handling
+
+### Performance & Efficiency
+
+| Metric | Value |
+|--------|-------|
+| CPUs / Memory | 4 cores / 8 GB (actual deployment) |
+| AI CPU (10 cameras, 0.5 FPS) | ~74% (down from 166% after tuning) |
+| AI RAM (shared ONNX session) | ~565 MB (down from 955 MB) |
+| Stream relay FFmpeg (11 cameras) | ~11 × 1 cpu-core each, 1000k bitrate |
+| Recording FFmpeg (`-c:v copy`) | Negligible CPU (zero video encode) |
+| Idle reaper savings | ~0 CPU when nobody watches |
+| Motion-only recording | 5-8 GB/day (vs 26 GB/day continuous) |
+| LL-HLS latency | 1-3 seconds glass-to-glass |
 
 ---
 

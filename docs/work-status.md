@@ -1,6 +1,6 @@
 # NVR System — Current State
 
-> Last updated: 2026-07-25 (v0.01.15)
+> Last updated: 2026-07-25 (v0.01.21)
 > Sources: `README.md`, `docs/ARCHITECTURE.md`, `CHANGELOG.md`, git log
 
 ---
@@ -18,7 +18,7 @@
 | Server load | ~21 (4 cores, down from 41 after tuning) |
 | Disk | 29GB total, circular retention active |
 | Tests | 64 pytest + 34 vitest (all passing) |
-| Last deploy | v0.01.15 (server performance tuning) |
+| Last deploy | v0.01.21 (recording playback fix + codec normalization) |
 
 ---
 
@@ -27,15 +27,16 @@
 ### Core Systems
 - **Live streaming** — LL-HLS with 1-3s glass-to-glass, audio+video, digital zoom
 - **Recording** — motion-triggered FFmpeg `-c:v copy`, 300s MP4 segments, 30s stop delay
+- **Codec normalization** — HEVC→H.264 transcode, H.264 bitstream filter for universal browser compatibility
 - **Circular retention** — disk ≥85% or <2GB free triggers oldest deletion, disk can never fill
-- **AI detection** — YOLOv8n ONNX, position-aware dedup, zone filtering, event snapshots
+- **AI detection** — YOLOv8n ONNX, position-aware dedup, zone filtering, event snapshots, motion-only sampler for non-AI cameras
 - **Idle reaper** — relays with zero viewers stop after 10 min (CPU savings)
 - **Health checks** — camera auto-health background loop, connection testing
 
 ### Frontend
 - **Dashboard** — 1-4 column grid, camera tiles with live preview
 - **Live View** — full-screen single camera with PTZ, audio, zoom
-- **Recordings page** — list, filter, bulk delete, thumbnail previews, playback with speed controls
+- **Recordings page** — list, filter, bulk delete, thumbnail previews, playback with speed controls (0.125x–8x, slow/fast color coded), mute toggle, download
 - **Events page** — feed with snapshots, object badges, camera filter, acknowledge
 - **Network dashboard** — bandwidth/latency/packet loss charts, time-range selector, alerts
 - **Storage page** — disk analysis, GB/day projection, per-camera table
@@ -68,6 +69,7 @@
 3. **No Telegram/webhook notifications** — `notification_service.py` skeleton exists, not wired up
 4. **29GB disk** — limited capacity; motion-only recording significantly reduced usage from 26GB/day (continuous) to ~5-8GB/day
 5. **FFmpeg 5.1.9** in stream-manager — can't use `-reconnect` on RTSP input. Monitor loop handles reconnection instead.
+6. **CSP requires `unsafe-eval`** — hls.js (used in LiveView) needs `new Function()`. RecordingPlayer avoids this but LiveView streams still depend on hls.js.
 
 ---
 
@@ -75,6 +77,8 @@
 
 | Commit | Date | Description |
 |--------|------|-------------|
+| `7d1c550` | Jul 25 | Recording playback fix — remove hls.js (CSP), codec normalization, Range handling |
+| `7f9b143` | Jul 25 | Network alerts — bandwidth_low flood, pagination, recording player |
 | `8e1571a` | Jul 25 | Server load tuning — AI FPS 0.5, ONNX threads 1, bitrate 1000k |
 | `cd40fdc` | Jul 25 | HLS stability — correct FFmpeg `-timeout` option |
 | `bf37ca1` | Jul 25 | HLS stability — stop retry disconnect loop |
@@ -83,8 +87,6 @@
 | `0b008cd` | Jul 25 | Camera name column in recordings list |
 | `ad9294e` | Jul 25 | User profile page, password change, username dropdown |
 | `e539ea1` | Jul 24 | Low-latency HLS — 10-15s → 1-3s glass-to-glass |
-| `f8eb510` | Jul 24 | Enable audio in stream-manager FFmpeg relay |
-| `876424e` | Jul 24 | Audio controls + digital zoom everywhere, ONVIF PTZ in modal |
 
 ---
 

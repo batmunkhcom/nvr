@@ -1,6 +1,6 @@
 # NVR System Architecture
 
-> Reflects actual deployed state as of 2026-07-25 (v0.01.15).
+> Reflects actual deployed state as of 2026-07-25 (v0.01.21).
 
 ---
 
@@ -205,6 +205,9 @@ ffmpeg -rtsp_transport tcp -timeout 15000000 \
 
 **Notes:**
 - `-c:v copy` — no video transcode (very low CPU)
+- **Codec normalization** — auto-detected via ffprobe before FFmpeg spawns:
+  - HEVC → `-c:v libx264 -preset ultrafast -crf 20 -pix_fmt yuv420p`
+  - H.264 → `-bsf:v h264_metadata=video_full_range_flag=0` (normalizes `yuvj420p color_range=pc` → `yuv420p tv`)
 - 300s segments with `+faststart` (enables seeking before download complete)
 - Motion-only mode: FFmpeg starts/stops based on Redis `nvr:motion` state
 - Circuit breaker: 60s→600s cooldown
@@ -325,6 +328,33 @@ Key hooks:
 ### HLS Proxy
 Vite dev server proxies `/hls` → MediaMTX HLS origin (`http://10.10.0.229:8888`) with `changeOrigin: true` and Location header rewrite for redirects.
 
+### Recording Playback Architecture
+
+```
+Browser → RecordingPlayer.tsx
+  ├── Progressive MP4 download (no hls.js — avoids CSP unsafe-eval conflict)
+  ├── <video controls muted autoPlay playsInline preload="auto">
+  ├── HTTP Range: 200 OK (full file) / 206 Partial Content (seeking)
+  ├── playbackRate controls: 0.125x ... 8x (slow/fast color coded)
+  └── Token auth via ?token= query parameter
+```
+
+**Why no hls.js in RecordingPlayer:**
+- `hls.js` internally uses `new Function()` which triggers CSP `script-src` blocks in Chrome
+- RecordingPlayer only plays MP4 progressive downloads (not HLS)
+- LiveView uses `useStreamPlayer` with hls.js — that's the correct HLS context
+
+### CSP Strategy
+
+| Context | Stack | HLS? | CSP Safe? |
+|---------|-------|------|-----------|
+| RecordingPlayer | Native `<video>` + MP4 | No | ✅ |
+| MiniLivePreview | `useStreamPlayer` + hls.js | Yes | ⚠️ Requires `unsafe-eval` |
+| CameraGrid ExpandedView | `useStreamPlayer` + hls.js | Yes | ⚠️ Requires `unsafe-eval` |
+| LiveViewPage | `useStreamPlayer` + hls.js | Yes | ⚠️ Requires `unsafe-eval` |
+
+For production, add `script-src 'self' 'unsafe-eval'` to CSP header — hls.js requires it. RecordingPlayer deliberately avoids this dependency.
+
 ---
 
 ## Security
@@ -342,8 +372,10 @@ Vite dev server proxies `/hls` → MediaMTX HLS origin (`http://10.10.0.229:8888
 1. **FFmpeg 5.1.9** (not 7.x) — stream-manager container uses Debian bookworm apt package. `-stimeout` not supported; use `-timeout`.
 2. **`libx264` transcode always** — Dahua camera H.264 FU-A packet ordering causes MediaMTX HLS errors with `-c:v copy`. Must transcode.
 3. **`-c:v copy` for recording** — recording engine uses direct copy (zero video CPU) since it writes to disk not through MediaMTX.
-4. **Sub-stream for AI** — 640px width, 0.5 FPS. Reduces inference load dramatically vs main stream.
-5. **Motion-only recording** — all 11 cameras use `recording_mode='motion'`. Recording starts only when AI/motion sensor detects activity.
-6. **No TimescaleDB hypertables** — plain PostgreSQL tables with DESC time indexes provide adequate performance for current scale.
-7. **No MinIO/S3** — all recordings stored on local disk volume (`/data/recordings`).
-8. **No NGINX** — Vite dev server proxies directly to API and MediaMTX. NGINX planned for production.
+4. **Codec auto-detection + normalization** — ffprobe detects HEVC/H.264 before FFmpeg spawns. HEVC→H.264 transcode, H.264 `video_full_range_flag=0` bsf. Ensures Chrome-compatible output (yuv420p tv range).
+5. **Sub-stream for AI** — 640px width, 0.5 FPS. Reduces inference load dramatically vs main stream.
+6. **Motion-only recording** — all 11 cameras use `recording_mode='motion'`. Recording starts only when AI/motion sensor detects activity.
+7. **No TimescaleDB hypertables** — plain PostgreSQL tables with DESC time indexes provide adequate performance for current scale.
+8. **No MinIO/S3** — all recordings stored on local disk volume (`/data/recordings`).
+9. **No NGINX** — Vite dev server proxies directly to API and MediaMTX. NGINX planned for production.
+10. **No hls.js in RecordingPlayer** — uses native `<video>` progressive MP4 only. Avoids CSP `unsafe-eval` conflict in Chrome. hls.js reserved for LiveView streams only.

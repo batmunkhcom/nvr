@@ -4,6 +4,16 @@ All notable changes to the NVR system. Versions follow the format `v{major}.{min
 
 ---
 
+## v0.01.21 (2026-07-25) — Recording Playback Fix + Codec Normalization
+
+- **CSP fix — remove hls.js from RecordingPlayer** — `hls.js` uses `new Function()` which triggers CSP `script-src` block in Chrome (Chrome strict, Safari lenient). RecordingPlayer now uses native `<video>` progressive MP4 only.
+- **HEVC→H.264 transcode** in recording engine — ffprobe auto-detects codec; HEVC streams transcoded with `libx264 ultrafast crf20 pix_fmt yuv420p`
+- **H.264 bitstream filter** — normalizes `yuvj420p color_range=pc` → `yuv420p tv` via `-bsf:v h264_metadata=video_full_range_flag=0`
+- **HTTP Range handling fix** — returns `200 OK` for full-file requests, `206 Partial Content` only for partial ranges (fixes Chrome rejection of full-range 206 responses)
+- **RecordingPlayer cleanup** — removed complex spinner/playBlocked overlay, restored working `controls={controls}`, fixed `video.playbackRate` useEffect for speed controls
+- **Recordings.tsx** — added `key={activePlaybackId}` to force clean remount on recording switch
+- **AGENTS.md** — comprehensive Recording Playback troubleshooting section added (CSP, codec, Range, browser differences)
+
 ## v0.01.15 (2026-07-25) — Server Load Tuning
 
 - **AI FPS 2→0.5** — YOLO inference rate reduced (CPU: 166%→74%)
