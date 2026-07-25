@@ -112,7 +112,7 @@ EOF
 # ────────────────────────────────────────
 infra_up() {
   info "Starting infrastructure (DB, Redis, MinIO)..."
-  docker compose up -d nvr-db nvr-redis nvr-minio
+  docker compose up -d nvr-db nvr-redis
   info "Waiting for services to be ready..."
   sleep 3
   ok "Infrastructure started"
@@ -126,7 +126,7 @@ infra_down() {
 
 infra_status() {
   info "Infrastructure status:"
-  docker compose ps nvr-db nvr-redis nvr-minio 2>/dev/null || echo "  No containers running"
+  docker compose ps nvr-db nvr-redis  2>/dev/null || echo "  No containers running"
 }
 
 # ────────────────────────────────────────
@@ -445,7 +445,7 @@ all_setup() {
   cd services/web && npm install --silent 2>/dev/null && cd "$PROJECT_DIR" || warn "npm install failed"
 
   info "[3/7] Starting infrastructure..."
-  docker compose up -d nvr-db nvr-redis nvr-minio 2>/dev/null || warn "Docker not available"
+  docker compose up -d nvr-db nvr-redis  2>/dev/null || warn "Docker not available"
   sleep 5
 
   info "[4/7] Running migrations..."
@@ -492,7 +492,7 @@ start_cmd() {
 
   # 1. Infrastructure
   info "[1/5] Starting infrastructure (DB, Redis, MinIO, MediaMTX)..."
-  docker compose up -d nvr-db nvr-redis nvr-minio nvr-mediamtx 2>/dev/null
+  docker compose up -d nvr-db nvr-redis nvr-mediamtx 2>/dev/null
   info "  Waiting for services to be healthy..."
   sleep 4
 
