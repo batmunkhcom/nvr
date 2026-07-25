@@ -60,6 +60,7 @@ export function useStreamPlayer({
       enableWorker: false,
       maxBufferLength: 5,
       maxMaxBufferLength: 8,
+      maxBufferHole: 0.5,
       lowLatencyMode: true,
       liveDurationInfinity: false,
       liveSyncDurationCount: 3,

@@ -78,6 +78,8 @@ class StreamManager:
             "error",
             "-rtsp_transport",
             transport,
+            "-timeout",
+            "10000000",
             "-i",
             stream_uri,
             "-c:v",
@@ -88,10 +90,6 @@ class StreamManager:
             "zerolatency",
             "-g",
             "5",
-            "-fflags",
-            "nobuffer",
-            "-flags",
-            "low_delay",
             "-b:v",
             bitrate,
             "-maxrate",
@@ -172,20 +170,24 @@ class StreamManager:
             logger.error("monitor_error", camera_id=camera_id, exc_info=True)
         finally:
             await cls._kill_ffmpeg(process)
-            if process.returncode is not None:
-                logger.warning("ffmpeg_exited", camera_id=camera_id, pid=process.pid, returncode=process.returncode)
+            rc = process.returncode
+            if rc is not None:
+                logger.warning("ffmpeg_exited", camera_id=camera_id, pid=process.pid, returncode=rc)
 
         if cls._running:
-            breaker.trip()
+            if rc != 0:
+                breaker.trip()
             jitter = asyncio.get_event_loop().time() % 1.0
-            await asyncio.sleep(min(backoff, 300) + jitter)
+            backoff = 1.0 if rc == 0 else min(backoff, 5)
+            await asyncio.sleep(backoff + jitter)
             backoff *= 2
 
+            max_attempts = 5 if rc == 0 else 3
             transport_idx = TRANSPORT_ORDER.index("tcp")
             reconnected = False
-            for attempt in range(3):
+            for attempt in range(max_attempts):
                 transport = TRANSPORT_ORDER[(transport_idx + attempt) % len(TRANSPORT_ORDER)]
-                if await breaker.is_open():
+                if rc != 0 and await breaker.is_open():
                     logger.warning("monitor_reconnect_breaker_open", camera_id=camera_id)
                     break
                 try:
