@@ -214,7 +214,8 @@ function CameraTile({
 export default function CameraGrid() {
   const { data: cameras, isLoading } = useCameras();
   const { reorderCameras } = useCameraMutations();
-  const { data: events = [] } = useEvents();
+  const { data: eventsPage } = useEvents();
+  const events = eventsPage?.data || [];
   const qc = useQueryClient();
   const [columns, setColumns] = useUiPreference<number>("dashboard_columns", 2);
   const cols = gridColsClass[columns] ? columns : 2;

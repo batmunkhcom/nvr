@@ -22,7 +22,8 @@ function fmtBytes(bytes: number) {
 export default function Dashboard() {
   const { data: cameras } = useCameras();
   const usage = useStorageUsage();
-  const { data: events } = useEvents();
+  const { data: eventsPage } = useEvents();
+  const events = eventsPage?.data;
   const { data: counterSummary } = useCounterSummary();
   const qc = useQueryClient();
 

@@ -72,7 +72,7 @@ async def get_event_snapshot(
     from fastapi.responses import FileResponse
 
     event = await get_event(event_id, db)
-    snapshot_path = event.get("snapshot_path")
+    snapshot_path = event.snapshot_path
     if not snapshot_path or not os.path.exists(snapshot_path):
         raise HTTPException(status_code=404, detail="Snapshot not found")
     return FileResponse(snapshot_path, media_type="image/jpeg")
