@@ -281,7 +281,8 @@ class FrameSampler:
 
         snapshot_path = None
         try:
-            ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            annotated = self._draw_boxes(frame.copy(), detections, cv2)
+            ok, buf = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 85])
             if ok:
                 snapshot_path = await self._save_snapshot(buf.tobytes(), now)
         except Exception:
@@ -308,6 +309,30 @@ class FrameSampler:
             camera=self.camera_name,
             objects=list(objects.keys()),
         )
+
+    @staticmethod
+    def _draw_boxes(frame: np.ndarray, detections: list[dict], cv2) -> np.ndarray:
+        """Draw bounding boxes and labels on a copy of the detection frame."""
+        import random
+
+        for det in detections:
+            box = det.get("box")
+            if not box or len(box) != 4:
+                continue
+            x1, y1, x2, y2 = map(int, box)
+            label = f"{det['class']} {det['confidence']:.2f}"
+            # deterministic color per class
+            random.seed(hash(det["class"]) % (2**31))
+            color = (random.randint(80, 255), random.randint(80, 255), random.randint(80, 255))
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            cv2.rectangle(frame, (x1, y1 - th - 4), (x1 + tw + 4, y1), color, -1)
+            cv2.putText(
+                frame, label, (x1 + 2, y1 - 4),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA,
+            )
+
+        return frame
 
     async def _save_snapshot(self, data: bytes, ts: datetime) -> str | None:
         snap_dir = os.path.join(
