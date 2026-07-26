@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import text
@@ -14,8 +14,8 @@ async def get_counter_summary(
     camera_id: str | None = None,
     days: int = 7,
 ) -> dict[str, int]:
-    since = date.today()
-    params: dict[str, Any] = {"counter_date": since, "days": days}
+    start_date = date.today() - timedelta(days=days - 1)
+    params: dict[str, Any] = {"start_date": start_date}
     where = ""
     if camera_id:
         where = "AND camera_id = CAST(:camera_id AS uuid)"
@@ -25,10 +25,11 @@ async def get_counter_summary(
         text(f"""
             SELECT object_category, SUM(count)::int AS total
             FROM object_counters
-            WHERE counter_date >= :counter_date - CAST(:days AS int) * INTERVAL '1 day'
+            WHERE counter_date >= :start_date
             {where}
             GROUP BY object_category
-        """)
+        """),
+        params,
     )
     summary: dict[str, int] = {}
     for row in result.fetchall():
@@ -70,7 +71,7 @@ async def get_counter_per_camera(
     db: AsyncSession,
     days: int = 7,
 ) -> list[dict]:
-    since = date.today()
+    start_date = date.today() - timedelta(days=days - 1)
     result = await db.execute(
         text("""
             SELECT
@@ -80,11 +81,11 @@ async def get_counter_per_camera(
                 SUM(oc.count)::int AS total
             FROM object_counters oc
             JOIN cameras c ON c.id = oc.camera_id
-            WHERE oc.counter_date >= :counter_date - CAST(:days AS int) * INTERVAL '1 day'
+            WHERE oc.counter_date >= :start_date
             GROUP BY oc.camera_id, c.name, oc.object_category
             ORDER BY c.name, oc.object_category
         """),
-        {"counter_date": since, "days": days},
+        {"start_date": start_date},
     )
     rows = result.fetchall()
     by_camera: dict[str, dict] = {}
