@@ -86,6 +86,20 @@ API Docs:    http://localhost:8000/docs      Password:  admin  (change immediate
 - **Locations** — organize cameras by physical location (Building, Floor, Entrance, etc.)
 - **Dashboard** — configurable 1/2/3/4 column grid with drag-and-drop, persisted in DB
 
+### AI Analytics & UI
+- **Object counter plugin** — real-time counting of person, vehicle, animal, livestock categories (5s dedup, 60s flush to DB)
+- **Per-camera statistics** — hourly aggregation, per-category mini-counts, camera-by-camera breakdown on Statistics page
+- **Bounding box annotation** — detection labels + colored boxes drawn directly on event snapshots (`cv2.rectangle` + `cv2.putText`, deterministic color per class)
+- **Event snapshots zoom** — click-to-zoom fullscreen lightbox with bottom caption, backdrop blur, Escape/X close
+- **Event pagination** — 25 per page with prev/next navigation
+- **License Plate Recognition (LPR)** — EasyOCR-based plate detection with 8 country pattern library (Монгол, Европ, АНУ, Япон, Хятад, Орос, Солонгос + custom regex)
+- **Smart alerts** — time-based, frequency-based, and zone-violation alert rules per camera
+
+### Recording Control
+- **Pause All** — global recording pause via round icon in top bar (green pulsating=active, red pulsating=paused), admin password confirmation. Stops ALL continuous + motion recorders. Viewing streams unaffected.
+- **Per-camera toggle** — quick pause/resume on each dashboard camera card, remembers previous recording mode (Redis-backed), no password needed for operator+
+- **Redis-backed state** — `nvr:recording:paused` key checked every reconcile cycle (30s), motion controller also guarded
+
 ### Security & Multi-User
 - **JWT authentication** — access (24h) + refresh (7d) tokens, Redis blacklist for revoked tokens
 - **RBAC** — admin, operator, viewer roles. Enforced via FastAPI dependency injection (`require_admin`, `require_operator`).
@@ -98,6 +112,7 @@ API Docs:    http://localhost:8000/docs      Password:  admin  (change immediate
 - **User profile** — password change, username display
 - **PWA support** — installable, offline AppShell cache
 - **Backup & restore** — encrypted pg_dump + config backup scripts (AES-256-CBC)
+- **Cleanup command** — `python /app/cleanup.py --before YYYY-MM-DD [--dry-run]` deletes old events, object counters, and snapshot files
 - **Docker log rotation** — `max-size: 10m, max-file: 3` on all 8 services
 - **Scheduled recording** — day-of-week + time range schedules per camera
 - **Real-time WebSocket** — `/api/v1/ws` pushes camera status, events, and network metrics to all connected clients
@@ -267,6 +282,7 @@ GET    /api/v1/cameras/{id}/live/status      # Relay status
 POST   /api/v1/cameras/{id}/ptz              # PTZ control
 POST   /api/v1/cameras/discover              # Start discovery scan
 GET    /api/v1/cameras/discover/{id}/status  # Scan status
+POST   /api/v1/cameras/{id}/recording/toggle # Quick pause/resume per camera
 
 GET    /api/v1/recordings                    # List recordings (paginated, filtered)
 GET    /api/v1/recordings/{id}               # Get recording details
@@ -292,11 +308,15 @@ GET    /api/v1/users                         # List users (admin CRUD)
 GET    /api/v1/system/health                 # System health
 GET    /api/v1/system/config                 # System config
 PATCH  /api/v1/system/config                 # Update config
+GET    /api/v1/system/recording/status       # Global pause status (no auth needed)
+POST   /api/v1/system/recording/pause        # Pause all recordings (admin password)
+POST   /api/v1/system/recording/resume       # Resume all recordings (admin password)
 
 WS     /api/v1/ws                            # Camera status + events WebSocket
 
 GET    /api/v1/counters/summary              # Object counter summary (?camera_id=&days=7)
 GET    /api/v1/counters/hourly               # Hourly breakdown (?camera_id=&date=YYYY-MM-DD)
+GET    /api/v1/counters/per-camera           # Per-camera totals with category breakdown
 
 GET    /api/v1/lpr/patterns                  # LPR country pattern library
 GET    /api/v1/lpr/readings                  # License plate readings (?camera_id=&plate_number=&days=7)
@@ -315,7 +335,8 @@ nvr/
 │   │   │   ├── core/         # Config, security, database
 │   │   │   ├── models/       # SQLAlchemy models
 │   │   │   ├── schemas/      # Pydantic schemas
-│   │   │   └── services/     # Business logic
+│   │   │   ├── services/     # Business logic
+│   │   └── cleanup.py    # Old events/counters cleanup CLI
 │   │   ├── alembic/          # DB migrations (9 versions)
 │   │   └── tests/            # pytest (64 tests)
 │   ├── web/                  # React + Vite frontend
