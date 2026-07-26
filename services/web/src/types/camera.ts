@@ -35,6 +35,7 @@ export interface Camera {
   notes: string | null;
   privacy_mode: string | null;
   ai_enabled: boolean;
+  ai_plugins: string[];
   ai_objects: string[] | null;
   ai_zones: { points: [number, number][] }[] | null;
   ai_sensitivity: string;
@@ -78,6 +79,7 @@ export interface CameraCreatePayload {
   notes?: string;
   ai_enabled?: boolean;
   ai_objects?: string[];
+  ai_plugins?: string[];
   ai_sensitivity?: string;
   ai_min_confidence?: number;
 }
@@ -103,6 +105,7 @@ export interface CameraUpdatePayload {
   privacy_mode?: string;
   ai_enabled?: boolean;
   ai_objects?: string[];
+  ai_plugins?: string[];
   ai_zones?: { points: [number, number][] }[] | null;
   ai_sensitivity?: string;
   ai_min_confidence?: number;

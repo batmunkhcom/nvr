@@ -30,6 +30,7 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
   const [aiSensitivity, setAiSensitivity] = useState("medium");
   const [aiConfidence, setAiConfidence] = useState("0.5");
   const [aiZones, setAiZones] = useState<AiZone[]>([]);
+  const [aiPlugins, setAiPlugins] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -57,6 +58,7 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
           points: z.points,
         }))
       );
+      setAiPlugins(camera.ai_plugins || []);
     }
   }, [camera]);
 
@@ -87,6 +89,7 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
         ai_sensitivity: aiSensitivity,
         ai_min_confidence: parseFloat(aiConfidence) || 0.5,
         ai_zones: aiZones,
+        ai_plugins: aiPlugins,
       });
       onClose();
     } catch (err: unknown) {
@@ -277,6 +280,37 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
                 <p className="text-[11px] text-gray-500 mt-1">Minimum AI confidence to record an event. Higher = fewer false alarms; 50% is a good default.</p>
               </div>
             </div>
+            {aiEnabled && (
+              <div className="mt-3 p-3 bg-gray-800/50 rounded border border-gray-700">
+                <label className="block text-xs text-gray-400 mb-2">AI Plugins</label>
+                <div className="flex flex-wrap gap-4">
+                  <label className="flex items-center gap-1.5 text-sm text-gray-300 cursor-pointer">
+                    <input type="checkbox"
+                      checked={aiPlugins.includes("counter")}
+                      onChange={() => setAiPlugins(aiPlugins.includes("counter") ? aiPlugins.filter(p => p !== "counter") : [...aiPlugins, "counter"])}
+                      className="rounded border-gray-600 bg-gray-700 text-blue-600" />
+                    Counter
+                    <span className="text-[11px] text-gray-500 ml-1">(person, vehicle, animal, livestock)</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 text-sm text-gray-300 cursor-pointer">
+                    <input type="checkbox"
+                      checked={aiPlugins.includes("lpr")}
+                      onChange={() => setAiPlugins(aiPlugins.includes("lpr") ? aiPlugins.filter(p => p !== "lpr") : [...aiPlugins, "lpr"])}
+                      className="rounded border-gray-600 bg-gray-700 text-blue-600" />
+                    LPR
+                    <span className="text-[11px] text-gray-500 ml-1">(license plate recognition)</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 text-sm text-gray-300 cursor-pointer">
+                    <input type="checkbox"
+                      checked={aiPlugins.includes("smart_alerts")}
+                      onChange={() => setAiPlugins(aiPlugins.includes("smart_alerts") ? aiPlugins.filter(p => p !== "smart_alerts") : [...aiPlugins, "smart_alerts"])}
+                      className="rounded border-gray-600 bg-gray-700 text-blue-600" />
+                    Smart Alerts
+                    <span className="text-[11px] text-gray-500 ml-1">(time, frequency, zone rules)</span>
+                  </label>
+                </div>
+              </div>
+            )}
             {motionSource === "server" && (
               <div className="mt-3">
                 <ZoneEditor cameraId={camera.id} zones={aiZones} onChange={setAiZones} />
