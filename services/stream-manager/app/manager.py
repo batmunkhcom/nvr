@@ -80,6 +80,14 @@ class StreamManager:
             transport,
             "-timeout",
             "10000000",
+            "-reconnect",
+            "1",
+            "-reconnect_at_eof",
+            "1",
+            "-reconnect_streamed",
+            "1",
+            "-reconnect_delay_max",
+            "5",
             "-i",
             stream_uri,
             "-c:v",
@@ -89,7 +97,7 @@ class StreamManager:
             "-tune",
             "zerolatency",
             "-g",
-            "5",
+            "15",
             "-b:v",
             bitrate,
             "-maxrate",
@@ -148,7 +156,6 @@ class StreamManager:
     ) -> None:
         """Monitor FFmpeg stderr, memory usage, and auto-reconnect."""
         breaker = cls._get_breaker(camera_id)
-        backoff = 1.0
 
         try:
             while True:
@@ -175,29 +182,25 @@ class StreamManager:
                 logger.warning("ffmpeg_exited", camera_id=camera_id, pid=process.pid, returncode=rc)
 
         if cls._running:
-            if rc != 0:
-                breaker.trip()
             jitter = asyncio.get_event_loop().time() % 1.0
-            backoff = 1.0 if rc == 0 else min(backoff, 5)
-            await asyncio.sleep(backoff + jitter)
-            backoff *= 2
+            await asyncio.sleep(1.0 + jitter)
 
             max_attempts = 5 if rc == 0 else 3
             transport_idx = TRANSPORT_ORDER.index("tcp")
             reconnected = False
             for attempt in range(max_attempts):
                 transport = TRANSPORT_ORDER[(transport_idx + attempt) % len(TRANSPORT_ORDER)]
-                if rc != 0 and await breaker.is_open():
-                    logger.warning("monitor_reconnect_breaker_open", camera_id=camera_id)
-                    break
                 try:
                     await cls.connect(camera_id, stream_uri, transport)
                     logger.info("stream_reconnected", camera_id=camera_id, transport=transport)
                     reconnected = True
                     break
                 except Exception as exc:
-                    logger.warning("monitor_reconnect_failed", camera_id=camera_id, error=str(exc))
-                    continue
+                    logger.warning("monitor_reconnect_failed", camera_id=camera_id, attempt=attempt+1, error=str(exc))
+                    await asyncio.sleep(2)
+            if not reconnected:
+                breaker.trip()
+                logger.warning("monitor_reconnect_exhausted", camera_id=camera_id)
             return reconnected
 
     @classmethod

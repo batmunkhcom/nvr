@@ -10,7 +10,7 @@ import { useStreamPlayer, type StreamType } from "../../hooks/useStreamPlayer";
 import { useVideoAudio } from "../../hooks/useVideoAudio";
 import { useVideoZoom } from "../../hooks/useVideoZoom";
 import apiClient from "../../api/client";
-import MiniLivePreview from "./MiniLivePreview";
+import LazyMiniPreview from "./LazyMiniPreview";
 import EmptyState from "../ui/EmptyState";
 import { useConfirm } from "../ui/ConfirmDialog";
 
@@ -130,7 +130,7 @@ function CameraTile({
         onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; onDragStart(index); }}
         className="absolute left-0 top-0 bottom-0 w-8 z-30 cursor-grab active:cursor-grabbing"
       />
-      {hasStream && <MiniLivePreview cameraId={camera.id} />}
+      {hasStream && <LazyMiniPreview cameraId={camera.id} />}
       {!hasStream && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
           <span className="text-gray-500 text-4xl font-light">{camera.name.charAt(0).toUpperCase()}</span>

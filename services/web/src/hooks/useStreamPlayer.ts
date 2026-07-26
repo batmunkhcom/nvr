@@ -58,9 +58,9 @@ export function useStreamPlayer({
     cleanupHls();
     const hls = new Hls({
       enableWorker: false,
-      maxBufferLength: 5,
-      maxMaxBufferLength: 8,
-      maxBufferHole: 0.5,
+      maxBufferLength: 10,
+      maxMaxBufferLength: 15,
+      maxBufferHole: 1.0,
       lowLatencyMode: true,
       liveDurationInfinity: false,
       liveSyncDurationCount: 3,
@@ -69,6 +69,7 @@ export function useStreamPlayer({
 
     let fatalCount = 0;
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      fatalCount = 0;
       if (!abortRef.current) { setState("playing"); videoRef.current?.play().catch(() => {}); }
     });
     hls.on(Hls.Events.ERROR, (_e, data) => {
@@ -76,9 +77,9 @@ export function useStreamPlayer({
         fatalCount++;
         cleanupHls();
         if (!abortRef.current) {
-          const retryDelay = fatalCount > 2 ? 5000 : 2000;
-          setRetrySec(Math.ceil(retryDelay / 1000));
-          setTimeout(() => { if (!abortRef.current) startStream(); }, retryDelay);
+          const delay = Math.min(2000 * Math.pow(2, fatalCount - 1), 15000);
+          setRetrySec(Math.ceil(delay / 1000));
+          setTimeout(() => { if (!abortRef.current) startStream(); }, delay);
         }
       }
     });
