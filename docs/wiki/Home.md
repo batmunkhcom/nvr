@@ -29,6 +29,14 @@ Built with **mBm AI Assistant** — an AI-powered engineering and operations ass
 - Idle stream reaper — relays stop automatically after 10 min of zero viewers
 - Audio playback, digital zoom (2D CSS), PTZ controls
 
+### Storage Backends (v0.02.0)
+- **Per-camera storage** — each camera can record to a different backend (local/NFS/SMB)
+- **Multi-backend catalog** — scans all mount points, auto-labels recordings by backend
+- **Multi-backend retention** — disk watermarks checked independently per backend
+- **Storage tiers** — hot/warm/cold migration by age, `storage_tiers` API + worker
+- **SeaweedFS FUSE support** — `weed mount` with native HA auto-failover across 4 filers
+- **S3 post-write upload** — closed segments uploaded to S3/MinIO asynchronously
+
 ### Recording
 - Motion-triggered or continuous recording per camera
 - 5-minute MP4 segments with `-c:v copy` (minimal CPU)
@@ -39,13 +47,14 @@ Built with **mBm AI Assistant** — an AI-powered engineering and operations ass
 ### AI Object Detection
 - YOLOv8n ONNX on sub-stream frames (0.5 FPS)
 - MOG2 motion gate saves ~80% CPU
-- Zone-based filtering, position-aware deduplication
-- Bounding box + label annotation on event snapshots
+- IoU multi-object tracking with parked-object protection — cars/bikes not re-detected
+- Per-class static cooldowns: vehicles 30 min, people 5 min
+- Zone-based filtering, bounding box + label annotation on event snapshots
 - Plugin counter — person/vehicle/animal/livestock with per-camera statistics
 - Motion-only mode for cameras without AI
 - LPR (license plate recognition) via EasyOCR
 
-### Recording Control (v0.01.42)
+### Recording Control
 - **Pause All** — global recording stop, admin password protected, streaming unaffected
 - **Per-camera toggle** — quick pause/resume on dashboard cards, remembers previous mode
 

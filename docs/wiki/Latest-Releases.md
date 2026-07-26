@@ -2,6 +2,49 @@
 
 > Auto-generated from CHANGELOG.md — updated on every docs/ push.
 
+## v0.02.0 (2026-07-26) — Storage & AI Rewrite
+
+### Per-Camera Storage Backends
+- **Admin panel → recording engine connected** — camera's `storage_backend_id` now determines where recordings are written. Each camera can be assigned to a different storage backend (local/NFS/SMB)
+- **Docker bind mount** — `STORAGE_HOST_PATH` env var replaces Docker named volume. Host path (e.g. `/data`) → container `/data/recordings`
+- **Multi-root catalog** — scans all active storage mount points, populates `recordings.storage_backend_id` automatically
+- **Multi-root retention** — disk watermarks checked per storage backend independently
+- **Multi-root analytics** — GB/day aggregated across all storage backends
+- **AI engine per-camera snapshots** — snapshot path resolved from camera's assigned storage backend
+
+### NFS/SMB Storage
+- `resolve_storage_path()` expanded to support `backend_type IN ('local', 'nfs', 'smb')`
+- NFS/SMB backends work as filesystem paths once mounted — no special code needed
+
+### SeaweedFS FUSE Support
+- `scripts/mount-seaweedfs.sh` — `weed mount -filer=<peers>` systemd service installer
+- FUSE client handles HA internally: 4 filer peers auto-failover
+- `SEAWEEDFS_MOUNT_PATH` + `SEAWEEDFS_FILER_PEERS` env vars (peers from .env, not hardcoded)
+- Docker bind mount: host `/mnt/seaweedfs` → container `/mnt/seaweedfs`
+
+### S3 Post-Write Upload
+- `s3_sync.py` worker — 60s interval, uploads closed segments from local → S3
+- Updates `recordings.storage_backend_id` + `file_path` after successful upload
+- Deletes local file after upload (retention fallback)
+- S3 multipart upload support (>5MB files) + real bucket quota detection
+
+### Storage Tiers & Migration
+- `tier_migration.py` worker — 1h interval, moves recordings hot→warm→cold by `retention_days`
+- Tiers CRUD API: `GET/POST/PATCH/DELETE /api/v1/storage/tiers`
+- `storage_migrations` table populated with migration history
+
+### AI Tracking v3 — Parked-Object Protection
+- **`TRACKLET_TIMEOUT_S`:** 5s → 120s — tracklets survive MOG2 motion-gate silence
+- **Stationary hysteresis:** 5 consecutive stationary frames → `is_parked=True` → exempt from timeout
+- **Per-class static cooldowns:** vehicles 30 min, people 5 min (was uniform 5 min)
+- Fixes: parked cars/bikes no longer re-detected as new objects each time MOG2 wakes up
+
+### S3Storage Improvements
+- Multipart upload for files > 5 MB (S3 minimum part size)
+- Real bucket quota detection via `get_bucket_quota()`
+- `_write_chunk()` implemented for streaming `copy_to()` between backends
+- `_finish_chunked_upload()` completes multipart assembly
+
 ## v0.01.44-45 (2026-07-26)
 
 - **IoU-based multi-object tracking** — per-class dedup replaced with Tracklet-based object tracking. Each object gets a unique `track_id`. IoU matching (threshold 0.3) links detections across frames. Moving objects: 15s cooldown. Stationary objects: 300s cooldown. Tracklet expiry: 5s unseen.
