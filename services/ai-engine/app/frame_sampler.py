@@ -78,6 +78,24 @@ def compute_iou(box_a: tuple[int, int, int, int], box_b: tuple[int, int, int, in
     return inter / union if union > 0 else 0.0
 
 
+RECORDING_PAUSE_KEY = "nvr:recording:paused"
+
+
+async def _check_paused() -> bool:
+    """Check the global recording pause flag in Redis."""
+    import redis.asyncio as aioredis
+
+    try:
+        host = os.environ.get("REDIS_HOST", "localhost")
+        port = int(os.environ.get("REDIS_PORT", "6379"))
+        redis = aioredis.from_url(f"redis://{host}:{port}/0", decode_responses=True)
+        val = await redis.get(RECORDING_PAUSE_KEY)
+        await redis.aclose()
+        return val == "true"
+    except Exception:
+        return False
+
+
 def build_rtsp_url(stream_uri: str, username: str | None, password: str | None) -> str:
     if not username or not password or not stream_uri.startswith("rtsp://"):
         return stream_uri
@@ -219,7 +237,7 @@ class FrameSampler:
             detections = self._filter_zones(detections, frame.shape[1], frame.shape[0])
 
             # call plugins with all visible detections (pre-cooldown)
-            if detections and self.plugins:
+            if detections and self.plugins and not await _check_paused():
                 now = datetime.now(UTC)
                 for plugin in self.plugins:
                     try:
@@ -232,7 +250,7 @@ class FrameSampler:
                         )
 
             detections = self._apply_tracking(detections, frame.shape[1], frame.shape[0])
-            if detections:
+            if detections and not await _check_paused():
                 await self._persist(detections, frame, cv2)
 
             elapsed = asyncio.get_running_loop().time() - started

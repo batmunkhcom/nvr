@@ -75,7 +75,7 @@ export function useToggleMonitoring() {
 export function useActiveAlerts(page = 1) {
   return useQuery({
     queryKey: ["network", "alerts", page],
-    queryFn: () => networkApi.getActiveAlerts(page, 50).then((r) => r.data),
+    queryFn: () => networkApi.getActiveAlerts(page, 5).then((r) => r.data),
     refetchInterval: 15_000,
   });
 }

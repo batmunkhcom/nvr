@@ -96,9 +96,22 @@ API Docs:    http://localhost:8000/docs      Password:  admin  (change immediate
 - **Smart alerts** — time-based, frequency-based, and zone-violation alert rules per camera
 
 ### Recording Control
-- **Pause All** — global recording pause via round icon in top bar (green pulsating=active, red pulsating=paused), admin password confirmation. Stops ALL continuous + motion recorders. Viewing streams unaffected.
+- **Pause All** — global recording pause via round icon in top bar (green pulsating=active, red pulsating=paused), admin password confirmation. Stops ALL continuous + motion recorders, AI event persistence, and object counting. Stream viewing unaffected.
 - **Per-camera toggle** — quick pause/resume on each dashboard camera card, remembers previous recording mode (Redis-backed), no password needed for operator+
-- **Redis-backed state** — `nvr:recording:paused` key checked every reconcile cycle (30s), motion controller also guarded
+- **Redis-backed state** — `nvr:recording:paused` key checked every reconcile cycle (30s), motion controller + AI engine also guarded
+
+| Pause All Effect | Status |
+|-----------------|--------|
+| FFmpeg recording (continuous) | 🛑 Stopped |
+| FFmpeg recording (motion) | 🛑 Stopped |
+| AI event persistence (DB) | 🛑 Stopped |
+| AI object counter (plugins) | 🛑 Stopped |
+| Snapshot files (disk) | 🛑 Stopped |
+| HLS live streaming | ✅ Active |
+| MOG2 motion detection | ✅ Active |
+| YOLO object detection | ✅ Active |
+| Network monitoring | ✅ Active |
+| API endpoints | ✅ Active |
 
 ### Security & Multi-User
 - **JWT authentication** — access (24h) + refresh (7d) tokens, Redis blacklist for revoked tokens

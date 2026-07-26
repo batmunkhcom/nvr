@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useEvents, useAcknowledgeEvent } from "../hooks/useEvents";
 import { useCameras } from "../hooks/useCameras";
 import { NvrEvent } from "../types/event";
-import { Check, AlertTriangle, Info, XCircle, Bell, Car, PersonStanding, Dog, Package, ChevronLeft, ChevronRight, X, Maximize2 } from "lucide-react";
+import { Check, AlertTriangle, Info, XCircle, Bell, Car, PersonStanding, Dog, Package, ChevronLeft, ChevronRight, X, Maximize2, Trash2 } from "lucide-react";
 import EmptyState from "../components/ui/EmptyState";
+import apiClient from "../api/client";
 
 const severityIcons: Record<string, typeof AlertTriangle> = {
   critical: XCircle,
@@ -46,6 +47,12 @@ export default function Events() {
   const [cameraFilter, setCameraFilter] = useState("");
   const [page, setPage] = useState(1);
   const [zoomedEvent, setZoomedEvent] = useState<NvrEvent | null>(null);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [cleanupBefore, setCleanupBefore] = useState("");
+  const [cleanupCamera, setCleanupCamera] = useState("");
+  const [cleanupPreview, setCleanupPreview] = useState<{event_count: number; snapshot_count: number} | null>(null);
+  const [cleanupLoading, setCleanupLoading] = useState(false);
+  const [cleanupError, setCleanupError] = useState("");
   const filters: Record<string, string> = { page: String(page) };
   if (cameraFilter) filters.camera_id = cameraFilter;
 
@@ -99,6 +106,12 @@ export default function Events() {
             ))}
           </select>
           <span className="text-sm text-gray-400">{meta?.total || 0} events</span>
+          <button
+            onClick={() => { setCleanupOpen(true); setCleanupPreview(null); setCleanupError(""); }}
+            className="flex items-center gap-1 px-3 py-1.5 bg-red-900/50 hover:bg-red-900/70 border border-red-800 rounded text-sm text-red-300"
+          >
+            <Trash2 size={14} /> Delete Older...
+          </button>
         </div>
       </div>
 
@@ -145,7 +158,36 @@ export default function Events() {
                       <p className="text-sm font-medium">{event.event_type.replace(/_/g, " ")}</p>
                       {objects.map((obj) => {
                         const ObjIcon = objectIcons[obj] || Package;
-                        return (
+  const handleCleanupPreview = async () => {
+    if (!cleanupBefore) return;
+    setCleanupLoading(true); setCleanupError("");
+    try {
+      const params: Record<string, string> = { before: cleanupBefore, dry_run: "true" };
+      if (cleanupCamera) params.camera_id = cleanupCamera;
+      const r = await apiClient.delete("/events/cleanup-by-date", { params });
+      setCleanupPreview(r.data?.data ?? null);
+    } catch (err: any) {
+      setCleanupError(err?.response?.data?.detail || "Preview failed");
+    } finally { setCleanupLoading(false); }
+  };
+
+  const handleCleanupDelete = async () => {
+    setCleanupLoading(true); setCleanupError("");
+    try {
+      const params: Record<string, string> = { before: cleanupBefore };
+      if (cleanupCamera) params.camera_id = cleanupCamera;
+      const r = await apiClient.delete("/events/cleanup-by-date", { params });
+      const d = r.data?.data;
+      setCleanupPreview({ event_count: 0, snapshot_count: 0 });
+      setCleanupError(`Deleted ${d?.deleted_events ?? 0} events, ${d?.deleted_snapshots ?? 0} snapshots.`);
+      // Refresh events list
+      window.location.reload();
+    } catch (err: any) {
+      setCleanupError(err?.response?.data?.detail || "Delete failed");
+    } finally { setCleanupLoading(false); }
+  };
+
+  return (
                           <span
                             key={obj}
                             className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-blue-900/50 text-blue-300 rounded text-[11px]"
@@ -195,6 +237,53 @@ export default function Events() {
             </div>
           )}
         </>
+      )}
+
+      {cleanupOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setCleanupOpen(false)}>
+          <div className="bg-gray-800 border border-gray-700 rounded-lg shadow-2xl w-96 p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-sm font-medium text-gray-200">Delete Events</span>
+              <button onClick={() => setCleanupOpen(false)} className="text-gray-500 hover:text-gray-300"><X size={16} /></button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Delete events before</label>
+                <input type="date" value={cleanupBefore} onChange={(e) => { setCleanupBefore(e.target.value); setCleanupPreview(null); }}
+                  className="w-full px-3 py-2 text-sm bg-gray-900 border border-gray-600 rounded text-gray-200 focus:outline-none focus:border-blue-500" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Camera (optional)</label>
+                <select value={cleanupCamera} onChange={(e) => setCleanupCamera(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-gray-900 border border-gray-600 rounded text-gray-200">
+                  <option value="">All Cameras</option>
+                  {(cameras || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+
+              {cleanupPreview && (
+                <div className="bg-gray-900 rounded p-3 text-xs text-gray-400">
+                  <p><span className="text-yellow-400 font-bold">{cleanupPreview.event_count}</span> events</p>
+                  <p><span className="text-yellow-400 font-bold">{cleanupPreview.snapshot_count}</span> snapshot files</p>
+                </div>
+              )}
+
+              {cleanupError && <p className="text-xs text-green-400">{cleanupError}</p>}
+
+              <div className="flex gap-2 pt-2">
+                <button onClick={handleCleanupPreview} disabled={!cleanupBefore || cleanupLoading}
+                  className="flex-1 px-3 py-2 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded disabled:opacity-30">
+                  {cleanupLoading ? "..." : "Preview"}
+                </button>
+                <button onClick={handleCleanupDelete} disabled={!cleanupPreview || cleanupPreview.event_count === 0 || cleanupLoading}
+                  className="flex-1 px-3 py-2 text-xs bg-red-700 hover:bg-red-600 text-white rounded disabled:opacity-30">
+                  {cleanupLoading ? "..." : `Delete ${cleanupPreview?.event_count ?? 0} Events`}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {zoomedEvent && (

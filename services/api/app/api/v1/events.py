@@ -1,10 +1,14 @@
-"""Events API endpoints — event feed, acknowledge, event rules CRUD."""
+"""Events API endpoints — event feed, acknowledge, event rules CRUD, bulk delete."""
 
+import os
 import uuid
+from datetime import date, datetime, timezone
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.database import get_db
@@ -66,11 +70,6 @@ async def get_event_snapshot(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Serve the AI detection snapshot JPEG (supports ?token= for <img> tags)."""
-    import os
-
-    from fastapi import HTTPException
-    from fastapi.responses import FileResponse
-
     event = await get_event(event_id, db)
     snapshot_path = event.snapshot_path
     if not snapshot_path or not os.path.exists(snapshot_path):
@@ -129,3 +128,70 @@ async def delete_event_rule_by_id(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     await delete_event_rule(rule_id, db)
+
+
+@router.delete("/cleanup-by-date")
+async def cleanup_events_by_date(
+    current_user: Annotated[dict, Depends(require_operator)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    before: str = Query(..., description="YYYY-MM-DD — delete events before this date"),
+    camera_id: uuid.UUID | None = Query(None),
+    dry_run: bool = Query(False),
+):
+    """Delete events (and their snapshot files) older than the given date.
+
+    ?before=2026-06-01&camera_id=uuid&dry_run=true
+    dry_run returns count without deleting.
+    """
+    try:
+        cutoff = date.fromisoformat(before)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    # Get snapshot paths before deleting
+    path_query = text(
+        "SELECT snapshot_path FROM events WHERE created_at < :cutoff AND snapshot_path IS NOT NULL"
+        + (" AND camera_id = :camera_id" if camera_id else "")
+    )
+    path_params: dict = {"cutoff": cutoff}
+    if camera_id:
+        path_params["camera_id"] = camera_id
+    path_result = await db.execute(path_query, path_params)
+    snapshot_paths = [r[0] for r in path_result.fetchall() if r[0]]
+
+    # Count query
+    count_query = text(
+        "SELECT COUNT(*) FROM events WHERE created_at < :cutoff"
+        + (" AND camera_id = :camera_id" if camera_id else "")
+    )
+    count_result = await db.execute(count_query, path_params)
+    event_count = count_result.scalar() or 0
+
+    if dry_run:
+        return {"data": {"event_count": event_count, "snapshot_count": len(snapshot_paths), "dry_run": True}}
+
+    # Delete events
+    delete_query = text(
+        "DELETE FROM events WHERE created_at < :cutoff"
+        + (" AND camera_id = :camera_id" if camera_id else "")
+    )
+    del_result = await db.execute(delete_query, path_params)
+    await db.commit()
+
+    # Remove snapshot files
+    removed_files = 0
+    for sp in snapshot_paths:
+        try:
+            if os.path.exists(sp):
+                os.unlink(sp)
+                removed_files += 1
+        except OSError:
+            pass
+
+    return {
+        "data": {
+            "deleted_events": del_result.rowcount or 0,
+            "deleted_snapshots": removed_files,
+            "dry_run": False,
+        }
+    }

@@ -2,6 +2,14 @@
 
 > Auto-generated from CHANGELOG.md — updated on every docs/ push.
 
+## v0.01.44-45 (2026-07-26)
+
+- **IoU-based multi-object tracking** — per-class dedup replaced with Tracklet-based object tracking. Each object gets a unique `track_id`. IoU matching (threshold 0.3) links detections across frames. Moving objects: 15s cooldown. Stationary objects: 300s cooldown. Tracklet expiry: 5s unseen.
+- **AI Pause** — AI engine respects `nvr:recording:paused` flag. When paused: no events written to DB, no snapshots saved, no counter plugin calls. MOG2 motion detection and YOLO inference continue (for heartbeat).
+- **Events bulk delete** — `DELETE /api/v1/events/cleanup-by-date?before=YYYY-MM-DD&camera_id=uuid&dry_run=true`. Frontend modal with date picker, camera selector, preview count, and confirm delete. Snapshot files cleaned up.
+- **Network alerts pagination** — Active alerts reduced from 50/page to 5/page.
+- **Cross-Camera Tracking research** — `docs/wiki/Cross-Camera-Tracking.md` with Re-ID engine design, GPU (Tesla T4) plan, BGE-M3 analysis, 2D/3D options.
+
 ## v0.01.42 (2026-07-26)
 
 - **Pause All** — global recording pause via round icon (green/red pulsating) in Topbar, admin password confirmation modal, stops ALL continuous + motion recorders. Stream viewing unaffected.
