@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useEvents, useAcknowledgeEvent } from "../hooks/useEvents";
 import { useCameras } from "../hooks/useCameras";
 import { NvrEvent } from "../types/event";
-import { Check, AlertTriangle, Info, XCircle, Bell, Car, PersonStanding, Dog, Package, ChevronLeft, ChevronRight } from "lucide-react";
+import { Check, AlertTriangle, Info, XCircle, Bell, Car, PersonStanding, Dog, Package, ChevronLeft, ChevronRight, X, Maximize2 } from "lucide-react";
 import EmptyState from "../components/ui/EmptyState";
 
 const severityIcons: Record<string, typeof AlertTriangle> = {
@@ -42,6 +42,7 @@ function detectedObjects(event: NvrEvent): string[] {
 export default function Events() {
   const [cameraFilter, setCameraFilter] = useState("");
   const [page, setPage] = useState(1);
+  const [zoomedEvent, setZoomedEvent] = useState<NvrEvent | null>(null);
   const filters: Record<string, string> = { page: String(page) };
   if (cameraFilter) filters.camera_id = cameraFilter;
 
@@ -58,6 +59,13 @@ export default function Events() {
     for (const c of cameras || []) map[c.id] = c.name;
     return map;
   }, [cameras]);
+
+  useEffect(() => {
+    if (!zoomedEvent) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setZoomedEvent(null); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [zoomedEvent]);
 
   if (isLoading) {
     return (
@@ -112,16 +120,21 @@ export default function Events() {
                   }`}
                 >
                   {event.snapshot_path ? (
-                    <img
-                      src={eventSnapshotUrl(event.id)}
-                      alt="detection"
-                      loading="lazy"
-                      className="w-24 h-14 object-cover rounded bg-gray-900 flex-shrink-0"
-                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                    />
+                    <div className="relative group cursor-pointer flex-shrink-0" onClick={() => setZoomedEvent(event)}>
+                      <img
+                        src={eventSnapshotUrl(event.id)}
+                        alt="detection"
+                        loading="lazy"
+                        className="w-40 h-24 object-cover rounded bg-gray-900"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 rounded transition-colors flex items-center justify-center">
+                        <Maximize2 size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                    </div>
                   ) : (
-                    <div className="w-24 h-14 rounded bg-gray-900 flex items-center justify-center flex-shrink-0">
-                      <Icon className={color} size={18} />
+                    <div className="w-40 h-24 rounded bg-gray-900 flex items-center justify-center flex-shrink-0">
+                      <Icon className={color} size={24} />
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
@@ -179,6 +192,32 @@ export default function Events() {
             </div>
           )}
         </>
+      )}
+
+      {zoomedEvent && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+          onClick={() => setZoomedEvent(null)}
+        >
+          <button
+            onClick={() => setZoomedEvent(null)}
+            className="absolute top-4 right-4 p-2 bg-gray-800 hover:bg-gray-700 rounded text-gray-400 z-10"
+          >
+            <X size={20} />
+          </button>
+          <img
+            src={eventSnapshotUrl(zoomedEvent.id)}
+            alt="detection full"
+            className="max-w-[90vw] max-h-[90vh] object-contain rounded"
+            onClick={(e) => e.stopPropagation()}
+            onError={(e) => { setZoomedEvent(null); }}
+          />
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-gray-500 bg-black/60 px-3 py-1 rounded">
+            {zoomedEvent.event_type.replace(/_/g, " ")} &middot;{" "}
+            {cameraNames[zoomedEvent.camera_id] || "Camera"} &middot;{" "}
+            {new Date(zoomedEvent.start_time || zoomedEvent.created_at).toLocaleString()}
+          </div>
+        </div>
       )}
     </div>
   );
