@@ -2,7 +2,7 @@
 
 ## Overview
 
-YOLOv8n ONNX object detection on camera sub-streams with MOG2 motion gating, zone filtering, and position-aware deduplication.
+YOLOv8n ONNX object detection on camera sub-streams with MOG2 motion gating, zone filtering, and IoU-based multi-object tracking with parked-object protection.
 
 ---
 
@@ -46,9 +46,9 @@ RTSP Sub-stream (0.5 FPS, 640px width)
             │
             ▼
 ┌───────────────────┐
-│  Position Dedup     │  Static object: 1 event/5min (STATIC_COOLDOWN_S)
-│                     │  Moved (>0.10 normalized): immediate event
-│  Min event gap: 5s │  per class (MIN_EVENT_GAP_S)
+│  Position Dedup     │  Static object: person 5min, vehicle 30min
+│                     │  Parked after 5 stationary frames → survives timeouts
+│  Min event gap: 2s  │  Moved (>0.10 normalized): 15s cooldown
 └────────┬──────────┘
             │
        ┌────┴────┐
@@ -117,9 +117,11 @@ Cameras with `recording_mode='motion'` and `ai_enabled=False` get a **motion-onl
 
 ---
 
-## IoU-Based Multi-Object Tracking (v0.01.44)
+## IoU-Based Multi-Object Tracking (v0.01.44 → v0.01.53)
 
 Per-class dedup replaced with per-object Tracklet tracking. Each detected object gets a unique `track_id` and is tracked independently across frames.
+
+v0.01.53 adds **parked-object protection** to prevent repeated detection of stationary cars/bikes that get re-detected every time MOG2 wakes up.
 
 ### Architecture
 
@@ -140,12 +142,14 @@ Detections (per frame, 0.5 FPS)
    Existing        New Object
    Tracklet        → Tracklet created
    → check move    → event fired immediately
+   → check parked
    → check cooldown
         │
    ┌────┴────┐
    ▼         ▼
  Moved     Stationary
- 15s gap   300s gap
+ 15s gap   person: 5min / vehicle: 30min
+           After 5 frames → parked → survives timeout
 ```
 
 ### Tracklet Data Structure
@@ -159,26 +163,41 @@ Detections (per frame, 0.5 FPS)
 | `last_seen_ts` | float | Last time object was detected |
 | `last_cx`, `last_cy` | float | Normalised centre for movement detection |
 | `stationary_count` | int | Consecutive frames without movement |
+| `is_parked` | bool | True after STATIONARY_HYSTERESIS (5) frames — exempt from timeout |
 
 ### Tracking Constants
 
 | Constant | Value | Description |
 |----------|-------|-------------|
 | `IOU_MATCH_THRESHOLD` | 0.30 | Minimum IoU to match same object |
-| `TRACKLET_TIMEOUT_S` | 5.0 | Unseen objects expire after 5s |
+| `TRACKLET_TIMEOUT_S` | 120.0 | Unseen objects expire after 2 min (was 5s) |
 | `MOVING_COOLDOWN_S` | 15.0 | Moving objects: max 1 event/15s |
-| `STATIC_COOLDOWN_S` | 300.0 | Stationary: max 1 event/300s |
+| `PERSON_STATIC_COOLDOWN_S` | 300.0 | Stationary people: max 1 event/5min |
+| `VEHICLE_STATIC_COOLDOWN_S` | 1800.0 | Stationary vehicles: max 1 event/30min |
 | `MIN_EVENT_GAP_S` | 2.0 | Absolute minimum between any events |
 | `POSITION_TOLERANCE` | 0.10 | Normalised centre movement threshold |
+| `STATIONARY_HYSTERESIS` | 5 | Consecutive frames before parked state |
+
+### Parked-Object Protection (v0.01.53)
+
+The root cause of repeated detections: when MOG2 settles (no motion), YOLO stops running. After the old 5s timeout, tracklets expired. When any motion triggered YOLO again, stationary objects were treated as NEW — firing events.
+
+**Fix:** Three layers of protection:
+
+1. **Timeout lengthened:** 5s → 120s — tracklet survives MOG2 silence
+2. **Parked state:** After 5 consecutive stationary frames, `is_parked=True`. Parked tracklets are **exempt from timeout** — they survive indefinitely
+3. **Per-class cooldowns:** Vehicles get 30-minute static cooldown vs 5-minute for people. A parked car fires at most 1 event per half hour
 
 ### Before vs After
 
-| Scenario | Before (per-class) | After (per-object) |
+| Scenario | Before (v0.01.44) | After (v0.01.53) |
 |----------|-------------------|-------------------|
-| Moving car | ~6 events (5s gap) | 1 event (15s cooldown) |
-| Two cars simultaneously | 1 event (class collapsed) | 2 separate events |
-| Parked car (10 min) | 2 events (300s each) | 2 events (same) |
-| Person exiting + re-entering frame | Missed if <300s | New tracklet → event |
+| Moving car | 1 event (15s cooldown) | Same |
+| Two cars simultaneously | 2 separate events | Same |
+| Parked car (MOG2 silence → motion triggers YOLO) | NEW event every time | Tracklet survives → NO new event |
+| Parked car (30 min) | Could fire every 5 min | 1 event per 30 min max |
+| Parked bike (2 hours) | Re-detected repeatedly | 1 event per 30 min if visible |
+| Person exiting + re-entering | New tracklet → event | Same |
 
 ### Event Format Change
 

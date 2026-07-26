@@ -127,7 +127,7 @@ All Python files use 4-space indentation. Use `textwrap.dedent()` when writing v
 
 1. `FrameSampler` per camera: RTSP sub-stream at 2fps → MOG2 motion gate → shared YOLOv8n ONNX session
 2. Detections filtered by `ai_objects`, `ai_min_confidence` (clamped 0.05–0.95), and `ai_zones` polygons (bottom-center of bbox must be inside a zone; empty zones = whole frame)
-3. **Position-aware dedup**: static object = 1 event per 5 min; moved object = immediate event
+3. **IoU multi-object tracking**: Tracklets matched across frames via IoU > 0.3. New objects fire immediately. Moving: 1 event/15s. Stationary: persons 5 min, vehicles 30 min. Parked objects (5+ stationary frames) exempt from timeout (120s) — no re-detection when MOG2 wakes up.
 4. Events → `events` table (plain SQL) + JPEG snapshot at `{STORAGE_LOCAL_PATH}/snapshots/` + Redis pub
 5. Model: `yolov8n.onnx` in `ai_models` volume at `/app/models` (exported on host via ultralytics, not in image)
 6. Media auth: `<img>/<video>` use `?token=` query param (get_current_user accepts it)
