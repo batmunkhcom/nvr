@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Maximize, Minimize, Square, Volume2, VolumeX,
-  ChevronUp, ChevronDown, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RefreshCw,
+  ChevronUp, ChevronDown, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, RefreshCw, RotateCcw,
 } from "lucide-react";
 import { useCameras } from "../hooks/useCameras";
 import apiClient from "../api/client";
@@ -26,7 +26,7 @@ export default function LiveView() {
   });
 
   const { muted, toggleMute, attachVideo: attachWithAudio } = useVideoAudio(attachVideo);
-  const { scale, zoomIn: digiZoomIn, zoomOut: digiZoomOut, reset, transformStyle, onWheel, onMouseDown, onMouseMove, onMouseUp, onDoubleClick } = useVideoZoom();
+  const { scale, zoomIn: digiZoomIn, zoomOut: digiZoomOut, reset, transformStyle, marquee, onWheel, onMouseDown, onMouseMove, onMouseUp, onDoubleClick } = useVideoZoom({ marquee: true });
 
   const stopStream = useCallback(async () => {
     if (!camera) return;
@@ -85,6 +85,25 @@ export default function LiveView() {
           className={`w-full h-full object-contain ${isPlaying ? "" : "hidden"}`}
           style={transformStyle} />
 
+        {/* Marquee selection overlay */}
+        {marquee && (
+          <div
+            className="absolute border-2 border-dashed border-blue-400 bg-blue-500/20 pointer-events-none z-20"
+            style={{
+              left: marquee.left,
+              top: marquee.top,
+              width: marquee.width,
+              height: marquee.height,
+            }}
+          />
+        )}
+        {/* Zoom badge */}
+        {scale > 1 && (
+          <span className="absolute top-2 right-2 bg-black/75 text-white text-xs px-2 py-0.5 rounded z-20 pointer-events-none font-mono">
+            {scale.toFixed(1)}x
+          </span>
+        )}
+
         {!isPlaying && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-600 gap-3">
             {state === "connecting" && (
@@ -125,16 +144,19 @@ export default function LiveView() {
           {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
         </button>
         {scale > 1 && (
-          <button onClick={reset}
-            className="px-2 py-1 bg-blue-600 rounded text-white text-xs hover:bg-blue-500"
-            title="Reset zoom">
-            {scale.toFixed(1)}x
-          </button>
+          <>
+            <button onClick={reset}
+              className="p-2 bg-gray-800 hover:bg-gray-700 rounded text-gray-400 hover:text-white"
+              title="Reset zoom">
+              <RotateCcw size={18} />
+            </button>
+            <span className="text-xs text-gray-400 font-mono">{scale.toFixed(1)}x</span>
+          </>
         )}
         <button onClick={digiZoomOut} disabled={scale <= 1}
           className="p-2 bg-gray-800 hover:bg-gray-700 rounded disabled:opacity-30" title="Digital zoom out">
           <ZoomOut size={18} /></button>
-        <button onClick={digiZoomIn} disabled={scale >= 4}
+        <button onClick={digiZoomIn} disabled={scale >= 16}
           className="p-2 bg-gray-800 hover:bg-gray-700 rounded disabled:opacity-30" title="Digital zoom in">
           <ZoomIn size={18} /></button>
         {camera.has_ptz && isPlaying && (

@@ -171,9 +171,7 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
           poster={poster}
           playsInline
           preload="auto"
-          className={`bg-black rounded ${
-            isFullscreen ? "w-full h-full object-contain" : "w-full h-full"
-          } ${className}`}
+          className={`w-full h-full object-contain ${className}`}
           style={transformStyle}
         />
         {/* Marquee selection overlay */}

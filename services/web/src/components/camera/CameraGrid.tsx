@@ -472,7 +472,7 @@ function ExpandedView({ camera, onClose }: { camera: Camera; onClose: () => void
                 title="Zoom out">
                 <ZoomOut size={14} />
               </button>
-              <button onClick={zoomIn} disabled={scale >= 4}
+              <button onClick={zoomIn} disabled={scale >= 16}
                 className="p-1 rounded bg-gray-800 hover:bg-gray-700 disabled:opacity-30 text-gray-400 hover:text-white"
                 title="Zoom in">
                 <ZoomIn size={14} />
