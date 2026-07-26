@@ -14,7 +14,19 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MOUNT_POINT="${SEAWEEDFS_MOUNT_PATH:-/mnt/seaweedfs}"
-FILER_PEERS="10.10.95.102:8888,10.10.95.104:8888,10.10.95.106:8888,10.10.95.107:8888"
+
+# Load env file if present (for SEAWEEDFS_FILER_PEERS)
+ENV_FILE="$SCRIPT_DIR/../.env"
+if [ -f "$ENV_FILE" ]; then
+    set -a; source "$ENV_FILE"; set +a
+fi
+FILER_PEERS="${SEAWEEDFS_FILER_PEERS:-}"
+
+if [ -z "$FILER_PEERS" ]; then
+    echo "ERROR: SEAWEEDFS_FILER_PEERS not set in .env"
+    echo "Example: SEAWEEDFS_FILER_PEERS=10.10.95.102:8888,10.10.95.104:8888,..."
+    exit 1
+fi
 
 mkdir -p "$MOUNT_POINT"
 
