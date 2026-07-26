@@ -50,7 +50,7 @@ async def load_ai_cameras(session: AsyncSession) -> list[dict]:
 async def insert_detection_event(
     session: AsyncSession,
     camera_id: str,
-    objects: dict[str, float],
+    objects: list[dict],
     model_name: str,
     snapshot_path: str | None,
     start_time: datetime,

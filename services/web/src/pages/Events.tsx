@@ -35,8 +35,11 @@ function eventSnapshotUrl(eventId: string): string {
 
 function detectedObjects(event: NvrEvent): string[] {
   const objects = event.metadata?.objects;
-  if (objects && typeof objects === "object") return Object.keys(objects);
-  return [];
+  if (!objects || typeof objects !== "object") return [];
+  if (Array.isArray(objects)) {
+    return objects.map((o: any) => o.class || o.class_name || "").filter(Boolean);
+  }
+  return Object.keys(objects);
 }
 
 export default function Events() {

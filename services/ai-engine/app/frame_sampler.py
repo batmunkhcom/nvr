@@ -1,14 +1,22 @@
 """Frame sampler — RTSP sub-stream reader with motion gate + YOLO detection.
 
 Reads frames directly as numpy arrays (no JPEG round-trip), gates on MOG2
-motion, runs the shared ONNX detector off the event loop, applies per-class
-cooldowns, persists events + JPEG snapshots, and broadcasts over Redis.
+motion, runs the shared ONNX detector off the event loop, applies IoU-based
+per-object tracking with moving/stationary cooldowns, persists events + JPEG
+snapshots, and broadcasts over Redis.
+
+Tracking (v2): IoU-based multi-object tracklet tracking replaces the old
+per-class dedup. Each object gets a unique track_id. Moving objects fire
+events every MOVING_COOLDOWN_S (15s); stationary objects every
+STATIC_COOLDOWN_S (300s). Tracklets expire after TRACKLET_TIMEOUT_S (5s)
+of being unseen.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import quote, urlparse, urlunparse
 
@@ -21,17 +29,53 @@ from .detector import AIDetector, MotionDetector
 logger = structlog.get_logger()
 
 TARGET_FPS = 0.5
-STATIC_COOLDOWN_S = 300  # same object in same place -> 1 event per 5 min
-MIN_EVENT_GAP_S = 5  # never more than 1 event per class per 5s
-POSITION_TOLERANCE = 0.10  # normalized box-center movement = new object
 RECONNECT_BASE_S = 5
 RECONNECT_MAX_S = 120
 FRAME_WIDTH = 640
 DEFAULT_OBJECTS = ["person", "car", "truck", "bus", "motorcycle", "bicycle"]
 MOTION_CHANNEL = "nvr:motion"
-MOTION_OFF_S = 30.0   # silence this long -> motion inactive
-MOTION_HEARTBEAT_S = 30.0   # re-publish active state (recording engine recovery)
-MOTION_COOLDOWN_S = 60.0   # min gap between recording starts after motion stops
+MOTION_OFF_S = 30.0
+MOTION_HEARTBEAT_S = 30.0
+MOTION_COOLDOWN_S = 60.0
+
+# ── IoU tracking constants ──
+IOU_MATCH_THRESHOLD = 0.30          # IoU > this → same tracked object
+TRACKLET_TIMEOUT_S = 5.0            # unseen this long → remove tracklet
+MOVING_COOLDOWN_S = 15.0            # moving object: at most 1 event per N seconds
+STATIC_COOLDOWN_S = 300.0           # stationary object: at most 1 event per N seconds
+MIN_EVENT_GAP_S = 2.0               # absolute minimum gap between any two events
+POSITION_TOLERANCE = 0.10           # normalized centre movement threshold
+
+
+@dataclass
+class Tracklet:
+    """A tracked object instance (per camera).
+
+    Matched across frames via IoU.  One camera can hold multiple tracklets
+    of the same class (e.g. two cars visible simultaneously).
+    """
+
+    id: str
+    cls: str
+    bbox: tuple[int, int, int, int]
+    last_event_ts: float
+    last_seen_ts: float
+    last_cx: float = 0.0
+    last_cy: float = 0.0
+    stationary_count: int = 0
+
+
+def compute_iou(box_a: tuple[int, int, int, int], box_b: tuple[int, int, int, int]) -> float:
+    """Intersection-over-Union between two bounding boxes."""
+    x1 = max(box_a[0], box_b[0])
+    y1 = max(box_a[1], box_b[1])
+    x2 = min(box_a[2], box_b[2])
+    y2 = min(box_a[3], box_b[3])
+    inter = max(0, x2 - x1) * max(0, y2 - y1)
+    area_a = (box_a[2] - box_a[0]) * (box_a[3] - box_a[1])
+    area_b = (box_b[2] - box_b[0]) * (box_b[3] - box_b[1])
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
 
 
 def build_rtsp_url(stream_uri: str, username: str | None, password: str | None) -> str:
@@ -77,7 +121,7 @@ class FrameSampler:
         self._motion = MotionDetector(sensitivity=ai_sensitivity or "medium")
         self._event_callback = event_callback
         self._running = False
-        self._last_events: dict[str, tuple[float, float, float]] = {}
+        self._tracklets: list[Tracklet] = []
         self._task: asyncio.Task | None = None
         self._motion_active = False
         self._last_motion_ts = 0.0
@@ -187,43 +231,104 @@ class FrameSampler:
                             plugin=plugin.name if hasattr(plugin, "name") else "unknown",
                         )
 
-            detections = self._apply_cooldown(detections, frame.shape[1], frame.shape[0])
+            detections = self._apply_tracking(detections, frame.shape[1], frame.shape[0])
             if detections:
                 await self._persist(detections, frame, cv2)
 
             elapsed = asyncio.get_running_loop().time() - started
             await asyncio.sleep(max(0.05, frame_interval - elapsed))
 
-    def _apply_cooldown(self, detections: list[dict], frame_w: int, frame_h: int) -> list[dict]:
-        """Position-aware event dedup.
+    def _apply_tracking(self, detections: list[dict], frame_w: int, frame_h: int) -> list[dict]:
+        """IoU-based multi-object tracking with moving/stationary cooldowns.
 
-        A detection is a NEW event when:
-        - the class has no recent event, or
-        - the object moved significantly (new arrival / object in motion).
+        Each detection is matched to an existing Tracklet by IoU.  New
+        objects create a tracklet and always fire an event on first sight.
+        Existing objects check movement and cooldown before re-firing.
 
-        A static object (parked car, standing person) re-fires at most once
-        per STATIC_COOLDOWN_S so events are not spammed.
+        Moving objects fire at most once per MOVING_COOLDOWN_S (15s);
+        stationary objects at most once per STATIC_COOLDOWN_S (300s).
+        Tracklets unseen for TRACKLET_TIMEOUT_S (5s) are purged.
         """
         now_ts = datetime.now(UTC).timestamp()
-        fresh = []
-        for det in detections:
-            cls = det["class"]
+
+        # Purge expired tracklets
+        self._tracklets = [
+            t for t in self._tracklets if now_ts - t.last_seen_ts < TRACKLET_TIMEOUT_S
+        ]
+
+        fresh: list[dict] = []
+        unmatched = list(range(len(detections)))
+
+        # Try to match each existing tracklet to a detection
+        for t in self._tracklets:
+            best_idx = -1
+            best_iou = IOU_MATCH_THRESHOLD
+
+            for i in unmatched:
+                det = detections[i]
+                if det["class"] != t.cls:
+                    continue
+                box = det.get("box")
+                if not box or len(box) != 4:
+                    continue
+                iou = compute_iou(t.bbox, (int(box[0]), int(box[1]), int(box[2]), int(box[3])))
+                if iou > best_iou:
+                    best_iou = iou
+                    best_idx = i
+
+            if best_idx >= 0:
+                det = detections[best_idx]
+                box = det["box"]
+                cx = (box[0] + box[2]) / 2 / max(frame_w, 1)
+                cy = (box[1] + box[3]) / 2 / max(frame_h, 1)
+
+                t.bbox = (int(box[0]), int(box[1]), int(box[2]), int(box[3]))
+                t.last_seen_ts = now_ts
+
+                moved = abs(cx - t.last_cx) + abs(cy - t.last_cy) > POSITION_TOLERANCE
+                if not moved:
+                    t.stationary_count += 1
+                else:
+                    t.stationary_count = 0
+
+                t.last_cx = cx
+                t.last_cy = cy
+
+                gap = now_ts - t.last_event_ts
+                if gap >= MIN_EVENT_GAP_S:
+                    if moved:
+                        if gap >= MOVING_COOLDOWN_S:
+                            t.last_event_ts = now_ts
+                            det["track_id"] = t.id
+                            fresh.append(det)
+                    else:
+                        if gap >= STATIC_COOLDOWN_S:
+                            t.last_event_ts = now_ts
+                            det["track_id"] = t.id
+                            fresh.append(det)
+
+                unmatched.remove(best_idx)
+
+        # Remaining detections → new tracklets (always fire a first event)
+        for i in unmatched:
+            det = detections[i]
             box = det.get("box") or [0, 0, 0, 0]
-            cx = ((box[0] + box[2]) / 2) / max(frame_w, 1)
-            cy = ((box[1] + box[3]) / 2) / max(frame_h, 1)
-
-            last = self._last_events.get(cls)
-            if last is not None:
-                last_ts, last_cx, last_cy = last
-                gap = now_ts - last_ts
-                moved = abs(cx - last_cx) + abs(cy - last_cy) > POSITION_TOLERANCE
-                if gap < MIN_EVENT_GAP_S:
-                    continue
-                if not moved and gap < STATIC_COOLDOWN_S:
-                    continue
-
-            self._last_events[cls] = (now_ts, cx, cy)
+            tid = f"{det['class']}_{len(self._tracklets)}_{int(now_ts * 1000) % 100000}"
+            cx = (box[0] + box[2]) / 2 / max(frame_w, 1)
+            cy = (box[1] + box[3]) / 2 / max(frame_h, 1)
+            t = Tracklet(
+                id=tid,
+                cls=det["class"],
+                bbox=(int(box[0]), int(box[1]), int(box[2]), int(box[3])),
+                last_event_ts=now_ts,
+                last_seen_ts=now_ts,
+                last_cx=cx,
+                last_cy=cy,
+            )
+            self._tracklets.append(t)
+            det["track_id"] = tid
             fresh.append(det)
+
         return fresh
 
     def _filter_zones(self, detections: list[dict], frame_w: int, frame_h: int) -> list[dict]:
@@ -277,7 +382,15 @@ class FrameSampler:
 
     async def _persist(self, detections: list[dict], frame: np.ndarray, cv2) -> None:
         now = datetime.now(UTC)
-        objects = {d["class"]: d["confidence"] for d in detections}
+        objects = [
+            {
+                "class": d["class"],
+                "confidence": d["confidence"],
+                "track_id": d.get("track_id", ""),
+                "box": d.get("box", []),
+            }
+            for d in detections
+        ]
 
         snapshot_path = None
         try:
@@ -303,11 +416,11 @@ class FrameSampler:
             return
 
         if self._event_callback:
-            await self._event_callback(self.camera_id, list(objects.keys()), snapshot_path)
+            await self._event_callback(self.camera_id, [o["class"] for o in objects], snapshot_path)
         logger.info(
             "ai_detection",
             camera=self.camera_name,
-            objects=list(objects.keys()),
+            objects=[o["class"] for o in objects],
         )
 
     @staticmethod
