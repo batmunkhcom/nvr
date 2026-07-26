@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState } from "react";
-import { Volume2, VolumeX, Download } from "lucide-react";
+import { Volume2, VolumeX, Download, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
+import { useVideoZoom } from "../../hooks/useVideoZoom";
 
 interface Props {
   src: string;
@@ -25,6 +26,10 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
   const isPlayingRef = useRef(false);
   const hasErrorRef = useRef(false);
   const checkRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const { scale, zoomIn, zoomOut, reset, transformStyle, marquee,
+          onWheel, onMouseDown, onMouseMove, onMouseUp, onDoubleClick } =
+    useVideoZoom({ marquee: true });
 
   useEffect(() => {
     const video = videoRef.current;
@@ -130,16 +135,45 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
           </div>
         </div>
       )}
-      <video
-        ref={videoRef}
-        controls={controls}
-        muted={muted}
-        autoPlay={autoPlay}
-        poster={poster}
-        playsInline
-        preload="auto"
-        className={`w-full max-w-3xl aspect-video bg-black rounded ${className}`}
-      />
+      <div
+        className="relative overflow-hidden rounded bg-black"
+        onWheel={onWheel}
+        onMouseDown={onMouseDown}
+        onMouseMove={onMouseMove}
+        onMouseUp={onMouseUp}
+        onDoubleClick={onDoubleClick}
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        <video
+          ref={videoRef}
+          controls={controls}
+          muted={muted}
+          autoPlay={autoPlay}
+          poster={poster}
+          playsInline
+          preload="auto"
+          className={`w-full max-w-3xl aspect-video bg-black rounded ${className}`}
+          style={transformStyle}
+        />
+        {/* Marquee selection overlay */}
+        {marquee && (
+          <div
+            className="absolute border-2 border-dashed border-blue-400 bg-blue-500/20 pointer-events-none z-20"
+            style={{
+              left: marquee.left,
+              top: marquee.top,
+              width: marquee.width,
+              height: marquee.height,
+            }}
+          />
+        )}
+        {/* Zoom indicator badge */}
+        {scale > 1 && (
+          <span className="absolute top-2 right-2 bg-black/75 text-white text-xs px-2 py-0.5 rounded z-20 pointer-events-none font-mono">
+            {scale.toFixed(1)}x
+          </span>
+        )}
+      </div>
       <div className="flex items-center gap-1 mt-2 flex-wrap">
         <button onClick={() => {
           const video = videoRef.current;
@@ -175,6 +209,34 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
             {s}x
           </button>
         ))}
+        <span className="text-gray-600 mx-1">|</span>
+        <span className="text-xs text-gray-500">Zoom:</span>
+        <button
+          onClick={zoomOut}
+          disabled={scale <= 1}
+          className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white disabled:opacity-30"
+          title="Zoom out"
+        >
+          <ZoomOut size={14} />
+        </button>
+        <span className="text-xs text-gray-400 font-mono min-w-[36px] text-center">{scale.toFixed(1)}x</span>
+        <button
+          onClick={zoomIn}
+          disabled={scale >= 16}
+          className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white disabled:opacity-30"
+          title="Zoom in"
+        >
+          <ZoomIn size={14} />
+        </button>
+        {scale > 1 && (
+          <button
+            onClick={reset}
+            className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white"
+            title="Reset zoom"
+          >
+            <RotateCcw size={14} />
+          </button>
+        )}
       </div>
     </div>
   );

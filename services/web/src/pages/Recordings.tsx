@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import { useRecordings, useTimeline, useRecordingStreamUrl, useDeleteRecording, useBulkDeleteRecordings, recordingThumbnailUrl } from "../hooks/useRecordings";
 import { useCameras } from "../hooks/useCameras";
 import { TimelinePlayer, RecordingPlayer } from "../components/recording";
@@ -154,6 +154,15 @@ export default function Recordings() {
   const meta = recordings?.metadata;
   const totalPages = meta ? Math.ceil(meta.total / meta.per_page) : 1;
 
+  useEffect(() => {
+    if (!activePlaybackId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { setActivePlaybackId(null); setSeekOffset(undefined); }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [activePlaybackId]);
+
   return (
     <div className="page-enter">
         <div className="flex items-center justify-between mb-4">
@@ -246,28 +255,44 @@ export default function Recordings() {
             )}
 
             {activePlaybackId && (
-              <div className="mb-4 relative">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-semibold text-gray-300">
-                    Now Playing {seekOffset !== undefined && `(from ${Math.floor(seekOffset / 60)}:${String(Math.floor(seekOffset % 60)).padStart(2, "0")})`}
-                  </h3>
-                  <button
-                    onClick={() => { setActivePlaybackId(null); setSeekOffset(undefined); }}
-                    className="p-1 bg-gray-800 hover:bg-gray-700 rounded text-gray-400"
-                  >
-                    <X size={16} />
-                  </button>
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+                onClick={() => { setActivePlaybackId(null); setSeekOffset(undefined); }}
+              >
+                <div
+                  className="relative w-full max-w-4xl mx-4 bg-gray-900 rounded-lg border border-gray-700 shadow-2xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between p-3 border-b border-gray-800">
+                    <h3 className="text-sm font-semibold text-gray-300 truncate">
+                      {activeRecording?.camera_name || "Recording"}{" — "}
+                      {activeRecording
+                        ? new Date(activeRecording.start_time).toLocaleString()
+                        : "Playback"}
+                      {seekOffset !== undefined &&
+                        ` (seek ${Math.floor(seekOffset / 60)}:${String(Math.floor(seekOffset % 60)).padStart(2, "0")})`}
+                    </h3>
+                    <button
+                      onClick={() => { setActivePlaybackId(null); setSeekOffset(undefined); }}
+                      className="p-1.5 hover:bg-gray-700 rounded text-gray-400 hover:text-white"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                  <div className="p-2">
+                    <RecordingPlayer
+                      key={activePlaybackId}
+                      src={streamUrl}
+                      startOffset={seekOffset}
+                      controls={true}
+                      autoPlay={true}
+                      filename={activeRecording
+                        ? `${activeRecording.camera_name || "recording"}_${(activeRecording.start_time || "").replace(/[:+T]/g, "_").slice(0, 19)}.mp4`
+                        : undefined}
+                      onDownload={activeRecording ? () => handleDownload(activeRecording) : undefined}
+                    />
+                  </div>
                 </div>
-                <RecordingPlayer
-                  key={activePlaybackId}
-                  src={streamUrl}
-                  startOffset={seekOffset}
-                  className="max-h-96"
-                  filename={activeRecording
-                    ? `${activeRecording.camera_name || "recording"}_${(activeRecording.start_time || "").replace(/[:+T]/g, "_").slice(0, 19)}.mp4`
-                    : undefined}
-                  onDownload={activeRecording ? () => handleDownload(activeRecording) : undefined}
-                />
               </div>
             )}
 
