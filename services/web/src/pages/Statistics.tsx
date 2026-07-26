@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useCameras } from "../hooks/useCameras";
-import { useCounterSummary, useCounterHourly } from "../hooks/useCounters";
+import { useCounterSummary, useCounterHourly, useCounterPerCamera } from "../hooks/useCounters";
 import CounterCards from "../components/statistics/CounterCards";
-import type { CounterHourly } from "../hooks/useCounters";
+import type { CounterHourly, CounterPerCamera } from "../hooks/useCounters";
+import { PersonStanding, Car, PawPrint, Tractor, BarChart3, Camera } from "lucide-react";
 
 function HourlyTable({ data }: { data: CounterHourly[] }) {
-  if (!data.length) return null;
+  if (!data.length) return <p className="text-sm text-gray-500">No data for this date.</p>;
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -34,6 +35,45 @@ function HourlyTable({ data }: { data: CounterHourly[] }) {
   );
 }
 
+function PerCameraGrid({ data }: { data: CounterPerCamera[] }) {
+  if (!data.length) return <p className="text-sm text-gray-500">No cameras with counter data yet.</p>;
+  const cats = [
+    { key: "person" as const, icon: PersonStanding, color: "text-green-400", label: "Persons" },
+    { key: "vehicle" as const, icon: Car, color: "text-blue-400", label: "Vehicles" },
+    { key: "animal" as const, icon: PawPrint, color: "text-yellow-400", label: "Animals" },
+    { key: "livestock" as const, icon: Tractor, color: "text-purple-400", label: "Livestock" },
+  ];
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+      {data.map((cam) => {
+        const total = (cam.person ?? 0) + (cam.vehicle ?? 0) + (cam.animal ?? 0) + (cam.livestock ?? 0);
+        return (
+          <div key={cam.camera_id} className="bg-gray-900 rounded border border-gray-800 p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Camera size={14} className="text-gray-400" />
+              <span className="text-sm font-medium text-gray-200">{cam.camera_name}</span>
+              <span className="text-[11px] text-gray-600 ml-auto">{total} total</span>
+            </div>
+            <div className="grid grid-cols-4 gap-1.5">
+              {cats.map((cat) => {
+                const Icon = cat.icon;
+                const val = cam[cat.key] ?? 0;
+                return (
+                  <div key={cat.key} className="text-center">
+                    <Icon size={12} className={`mx-auto mb-0.5 ${cat.color}`} />
+                    <div className="text-xs font-bold">{val}</div>
+                    <div className="text-[9px] text-gray-500">{cat.label}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function StatisticsPage() {
   const [cameraFilter, setCameraFilter] = useState("");
   const [days, setDays] = useState(7);
@@ -42,8 +82,14 @@ export default function StatisticsPage() {
   const { data: cameras } = useCameras();
   const { data: summary } = useCounterSummary(cameraFilter || undefined, days);
   const { data: hourly } = useCounterHourly(cameraFilter || "none", todayISO);
+  const { data: perCamera } = useCounterPerCamera(days);
 
   const hasHourly = cameraFilter && hourly && hourly.length > 0;
+  const isAllCameras = !cameraFilter;
+
+  const totalObjects = summary
+    ? (summary.person ?? 0) + (summary.vehicle ?? 0) + (summary.animal ?? 0) + (summary.livestock ?? 0)
+    : 0;
 
   return (
     <div className="page-enter">
@@ -71,9 +117,38 @@ export default function StatisticsPage() {
           <option value={7}>Last 7 days</option>
           <option value={30}>Last 30 days</option>
         </select>
+        {summary && (
+          <span className="text-xs text-gray-500 ml-auto">
+            {totalObjects.toLocaleString()} objects &middot; {days === 1 ? "today" : `last ${days} days`}
+          </span>
+        )}
       </div>
 
-      {summary && <CounterCards data={summary} />}
+      {summary && (
+        <>
+          <div className="flex items-center gap-2 mb-3">
+            <BarChart3 size={16} className="text-blue-400" />
+            <span className="text-sm font-medium text-gray-300">
+              {isAllCameras ? "All Cameras" : (cameras || []).find(c => c.id === cameraFilter)?.name || "Camera"}
+            </span>
+            <span className="text-xs text-gray-500">
+              {days === 1 ? "today" : `${days}-day summary`}
+            </span>
+          </div>
+          <CounterCards data={summary} />
+        </>
+      )}
+
+      {isAllCameras && perCamera && perCamera.length > 0 && (
+        <div className="mt-6">
+          <div className="flex items-center gap-2 mb-3">
+            <Camera size={16} className="text-gray-400" />
+            <span className="text-sm font-medium text-gray-300">Per Camera Breakdown</span>
+            <span className="text-xs text-gray-500">({perCamera.length} cameras)</span>
+          </div>
+          <PerCameraGrid data={perCamera} />
+        </div>
+      )}
 
       {hasHourly && (
         <div className="mt-6">

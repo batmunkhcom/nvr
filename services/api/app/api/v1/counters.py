@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.database import get_db
 from ...middleware.auth import get_current_user
-from ...services.counter_service import get_counter_hourly, get_counter_summary
+from ...services.counter_service import get_counter_hourly, get_counter_summary, get_counter_per_camera
 
 logger = structlog.get_logger()
 
@@ -43,4 +43,14 @@ async def counter_hourly(
         from fastapi import HTTPException
         raise HTTPException(400, "Invalid date format. Use YYYY-MM-DD")
     data = await get_counter_hourly(db, str(camera_id), parsed_date)
+    return {"data": data}
+
+
+@router.get("/per-camera")
+async def counter_per_camera(
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    days: int = Query(7, ge=1, le=90),
+):
+    data = await get_counter_per_camera(db, days)
     return {"data": data}

@@ -16,6 +16,15 @@ export interface CounterHourly {
   livestock: number;
 }
 
+export interface CounterPerCamera {
+  camera_id: string;
+  camera_name: string;
+  person?: number;
+  vehicle?: number;
+  animal?: number;
+  livestock?: number;
+}
+
 export function useCounterSummary(cameraId?: string, days = 1) {
   return useQuery({
     queryKey: ["counters", "summary", cameraId, days],
@@ -39,5 +48,16 @@ export function useCounterHourly(cameraId: string, date: string) {
       return (res.data?.data || []) as CounterHourly[];
     },
     enabled: !!cameraId && !!date,
+  });
+}
+
+export function useCounterPerCamera(days = 7) {
+  return useQuery({
+    queryKey: ["counters", "per-camera", days],
+    queryFn: async () => {
+      const res = await apiClient.get("/counters/per-camera", { params: { days } });
+      return (res.data?.data || []) as CounterPerCamera[];
+    },
+    refetchInterval: 60_000,
   });
 }
