@@ -5,11 +5,12 @@ motion, runs the shared ONNX detector off the event loop, applies IoU-based
 per-object tracking with moving/stationary cooldowns, persists events + JPEG
 snapshots, and broadcasts over Redis.
 
-Tracking (v2): IoU-based multi-object tracklet tracking replaces the old
-per-class dedup. Each object gets a unique track_id. Moving objects fire
-events every MOVING_COOLDOWN_S (15s); stationary objects every
-STATIC_COOLDOWN_S (300s). Tracklets expire after TRACKLET_TIMEOUT_S (5s)
-of being unseen.
+Tracking (v3): IoU-based multi-object tracklet tracking. Each object gets a
+unique track_id. Moving objects fire events every MOVING_COOLDOWN_S (15s);
+stationary objects: persons every 5 min, vehicles every 30 min. After 5
+consecutive stationary frames the tracklet is 'parked' and survives timeouts
+indefinitely, preventing re-detection of parked cars/bikes.
+Tracklets expire after TRACKLET_TIMEOUT_S (120s) if not parked.
 """
 
 from __future__ import annotations
@@ -40,11 +41,15 @@ MOTION_COOLDOWN_S = 60.0
 
 # ── IoU tracking constants ──
 IOU_MATCH_THRESHOLD = 0.30          # IoU > this → same tracked object
-TRACKLET_TIMEOUT_S = 5.0            # unseen this long → remove tracklet
+TRACKLET_TIMEOUT_S = 120.0          # unseen this long → remove tracklet (2 min)
 MOVING_COOLDOWN_S = 15.0            # moving object: at most 1 event per N seconds
-STATIC_COOLDOWN_S = 300.0           # stationary object: at most 1 event per N seconds
+PERSON_STATIC_COOLDOWN_S = 300.0    # stationary person/animal: 5 min
+VEHICLE_STATIC_COOLDOWN_S = 1800.0  # stationary vehicle: 30 min
 MIN_EVENT_GAP_S = 2.0               # absolute minimum gap between any two events
 POSITION_TOLERANCE = 0.10           # normalized centre movement threshold
+STATIONARY_HYSTERESIS = 5           # consecutive stationary frames → parked
+
+VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle", "bicycle"}
 
 
 @dataclass
@@ -63,6 +68,7 @@ class Tracklet:
     last_cx: float = 0.0
     last_cy: float = 0.0
     stationary_count: int = 0
+    is_parked: bool = False
 
 
 def compute_iou(box_a: tuple[int, int, int, int], box_b: tuple[int, int, int, int]) -> float:
@@ -265,16 +271,21 @@ class FrameSampler:
         objects create a tracklet and always fire an event on first sight.
         Existing objects check movement and cooldown before re-firing.
 
-        Moving objects fire at most once per MOVING_COOLDOWN_S (15s);
-        stationary objects at most once per STATIC_COOLDOWN_S (300s).
-        Tracklets unseen for TRACKLET_TIMEOUT_S (5s) are purged.
+        Moving objects fire at most once per MOVING_COOLDOWN_S (15s).
+        Stationary objects: persons 5 min, vehicles 30 min.
+        After STATIONARY_HYSTERESIS (5) consecutive stationary frames, the
+        tracklet is marked 'parked' and survives TRACKLET_TIMEOUT_S expiry
+        indefinitely — parked cars/bikes won't be re-detected as new.
         """
         now_ts = datetime.now(UTC).timestamp()
 
-        # Purge expired tracklets
-        self._tracklets = [
-            t for t in self._tracklets if now_ts - t.last_seen_ts < TRACKLET_TIMEOUT_S
-        ]
+        # Purge expired tracklets (keep parked ones — they survive timeouts)
+        alive: list[Tracklet] = []
+        for t in self._tracklets:
+            age = now_ts - t.last_seen_ts
+            if t.is_parked or age < TRACKLET_TIMEOUT_S:
+                alive.append(t)
+        self._tracklets = alive
 
         fresh: list[dict] = []
         unmatched = list(range(len(detections)))
@@ -308,12 +319,19 @@ class FrameSampler:
                 moved = abs(cx - t.last_cx) + abs(cy - t.last_cy) > POSITION_TOLERANCE
                 if not moved:
                     t.stationary_count += 1
+                    if t.stationary_count >= STATIONARY_HYSTERESIS:
+                        t.is_parked = True
                 else:
                     t.stationary_count = 0
+                    t.is_parked = False
 
                 t.last_cx = cx
                 t.last_cy = cy
 
+                static_cooldown = (
+                    VEHICLE_STATIC_COOLDOWN_S if t.cls in VEHICLE_CLASSES
+                    else PERSON_STATIC_COOLDOWN_S
+                )
                 gap = now_ts - t.last_event_ts
                 if gap >= MIN_EVENT_GAP_S:
                     if moved:
@@ -322,7 +340,7 @@ class FrameSampler:
                             det["track_id"] = t.id
                             fresh.append(det)
                     else:
-                        if gap >= STATIC_COOLDOWN_S:
+                        if gap >= static_cooldown:
                             t.last_event_ts = now_ts
                             det["track_id"] = t.id
                             fresh.append(det)
