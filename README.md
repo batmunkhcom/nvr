@@ -90,7 +90,9 @@ API Docs:    http://localhost:8000/docs      Password:  admin  (change immediate
 - **Object counter plugin** — real-time counting of person, vehicle, animal, livestock categories (5s dedup, 60s flush to DB)
 - **Per-camera statistics** — hourly aggregation, per-category mini-counts, camera-by-camera breakdown on Statistics page
 - **Bounding box annotation** — detection labels + colored boxes drawn directly on event snapshots (`cv2.rectangle` + `cv2.putText`, deterministic color per class)
+- **IoU-based object tracking** — per-object Tracklet tracking replaces per-class dedup. Each object gets a unique `track_id`. Moving objects: 15s recool, stationary: 300s recool.
 - **Event snapshots zoom** — click-to-zoom fullscreen lightbox with bottom caption, backdrop blur, Escape/X close
+- **Events bulk delete** — "Delete Older..." button on Events page, date picker + camera filter, preview count, cleans up snapshots too
 - **Event pagination** — 25 per page with prev/next navigation
 - **License Plate Recognition (LPR)** — EasyOCR-based plate detection with 8 country pattern library (Монгол, Европ, АНУ, Япон, Хятад, Орос, Солонгос + custom regex)
 - **Smart alerts** — time-based, frequency-based, and zone-violation alert rules per camera
@@ -308,6 +310,7 @@ GET    /api/v1/events                        # List events (paginated, filtered)
 GET    /api/v1/events/{id}                   # Get event details
 GET    /api/v1/events/{id}/snapshot          # Get event snapshot
 PATCH  /api/v1/events/{id}/acknowledge       # Acknowledge event
+DELETE /api/v1/events/cleanup-by-date        # Delete events older than date (?before=YYYY-MM-DD&camera_id=&dry_run=)
 WS     /api/v1/events/stream                 # Real-time event WebSocket
 
 GET    /api/v1/network/metrics               # Latest metrics all cameras

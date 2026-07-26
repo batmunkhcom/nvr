@@ -117,6 +117,95 @@ Cameras with `recording_mode='motion'` and `ai_enabled=False` get a **motion-onl
 
 ---
 
+## IoU-Based Multi-Object Tracking (v0.01.44)
+
+Per-class dedup replaced with per-object Tracklet tracking. Each detected object gets a unique `track_id` and is tracked independently across frames.
+
+### Architecture
+
+```
+Detections (per frame, 0.5 FPS)
+        │
+        ▼
+┌─────────────────────────────────┐
+│  IoU Matching                    │
+│  → for each existing Tracklet:   │
+│    find best match by IoU>0.3    │
+│  → unmatched: new Tracklet       │
+│  → matched: update position      │
+└──────────────┬──────────────────┘
+               │
+        ┌──────┴──────┐
+        ▼              ▼
+   Existing        New Object
+   Tracklet        → Tracklet created
+   → check move    → event fired immediately
+   → check cooldown
+        │
+   ┌────┴────┐
+   ▼         ▼
+ Moved     Stationary
+ 15s gap   300s gap
+```
+
+### Tracklet Data Structure
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | str | Unique id: `car_0_12345` |
+| `cls` | str | COCO class name |
+| `bbox` | (x1,y1,x2,y2) | Last known bounding box |
+| `last_event_ts` | float | Last time an event was fired |
+| `last_seen_ts` | float | Last time object was detected |
+| `last_cx`, `last_cy` | float | Normalised centre for movement detection |
+| `stationary_count` | int | Consecutive frames without movement |
+
+### Tracking Constants
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `IOU_MATCH_THRESHOLD` | 0.30 | Minimum IoU to match same object |
+| `TRACKLET_TIMEOUT_S` | 5.0 | Unseen objects expire after 5s |
+| `MOVING_COOLDOWN_S` | 15.0 | Moving objects: max 1 event/15s |
+| `STATIC_COOLDOWN_S` | 300.0 | Stationary: max 1 event/300s |
+| `MIN_EVENT_GAP_S` | 2.0 | Absolute minimum between any events |
+| `POSITION_TOLERANCE` | 0.10 | Normalised centre movement threshold |
+
+### Before vs After
+
+| Scenario | Before (per-class) | After (per-object) |
+|----------|-------------------|-------------------|
+| Moving car | ~6 events (5s gap) | 1 event (15s cooldown) |
+| Two cars simultaneously | 1 event (class collapsed) | 2 separate events |
+| Parked car (10 min) | 2 events (300s each) | 2 events (same) |
+| Person exiting + re-entering frame | Missed if <300s | New tracklet → event |
+
+### Event Format Change
+
+Events `metadata.objects` changed from `{class: confidence}` dict to list format:
+```json
+// Before
+{"objects": {"car": 0.85, "person": 0.72}}
+
+// After (v0.01.44+)
+{"objects": [
+  {"class": "car", "confidence": 0.85, "track_id": "car_0_45231", "box": [120, 80, 380, 260]},
+  {"class": "person", "confidence": 0.72, "track_id": "person_1_45231", "box": [400, 50, 600, 350]}
+]}
+```
+
+Frontend `Events.tsx` handles both formats for backward compatibility.
+
+### Pause All Integration (v0.01.45)
+
+When `nvr:recording:paused` is `true`, the AI engine:
+- Skips `_persist()` — no events written to DB, no snapshots saved
+- Skips plugin calls — object counter, smart alerts, LPR paused
+- Keeps MOG2 motion detection and YOLO inference active (for motion heartbeat)
+- Tracking continues internally but events are not fired
+
+---
+
 ## AI Plugin System
 
 ### Object Counter Plugin
