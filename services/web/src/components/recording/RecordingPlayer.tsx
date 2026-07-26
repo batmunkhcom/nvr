@@ -153,7 +153,9 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
       )}
       <div
         ref={wrapperRef}
-        className={`relative overflow-hidden rounded bg-black ${isFullscreen ? "h-full w-full" : ""}`}
+        className={`relative overflow-hidden rounded bg-black ${
+          isFullscreen ? "w-full h-full" : "w-full max-w-3xl aspect-video"
+        }`}
         onWheel={onWheel}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
@@ -169,7 +171,9 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
           poster={poster}
           playsInline
           preload="auto"
-          className={`bg-black rounded ${isFullscreen ? "w-full h-full object-contain" : "w-full max-w-3xl aspect-video"} ${className}`}
+          className={`bg-black rounded ${
+            isFullscreen ? "w-full h-full object-contain" : "w-full h-full"
+          } ${className}`}
           style={transformStyle}
         />
         {/* Marquee selection overlay */}
