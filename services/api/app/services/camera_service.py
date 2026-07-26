@@ -1,9 +1,12 @@
 """Camera service — business logic for camera CRUD, discovery orchestration, connection testing."""
 
 import contextlib
+import hashlib
+import re
 import uuid
 from datetime import UTC, datetime
 
+import httpx
 import structlog
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
@@ -355,3 +358,95 @@ def _camera_to_response(camera: Camera) -> dict:
                 result["storage_backend_name"] = camera.storage_backend.name
 
     return result
+
+
+async def _http_digest_request(
+    method: str,
+    url: str,
+    username: str,
+    password: str,
+    timeout: float = 10.0,
+) -> int:
+    """Send an HTTP request with digest auth to a Dahua/Hikvision camera."""
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        try:
+            resp = await client.request(method, url)
+        except httpx.ConnectError:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Camera unreachable: connection refused",
+            )
+
+        if resp.status_code != 401:
+            return resp.status_code
+
+        auth_header = resp.headers.get("WWW-Authenticate", "")
+        if not auth_header.lower().startswith("digest "):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Camera auth scheme not supported: {auth_header[:50]}",
+            )
+
+        realm = _digest_param(auth_header, "realm")
+        nonce = _digest_param(auth_header, "nonce")
+        uri = url.split("://", 1)[-1].split("/", 1)[-1] if "/" in url.split("://", 1)[-1] else "/"
+        ha1 = hashlib.md5(f"{username}:{realm}:{password}".encode()).hexdigest()
+        ha2 = hashlib.md5(f"{method}:{uri}".encode()).hexdigest()
+        digest_response = hashlib.md5(f"{ha1}:{nonce}:{ha2}".encode()).hexdigest()
+        auth_value = (
+            f'Digest username="{username}", realm="{realm}", nonce="{nonce}", '
+            f'uri="{uri}", response="{digest_response}"'
+        )
+
+        try:
+            resp2 = await client.request(method, url, headers={"Authorization": auth_value})
+        except httpx.ConnectError:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Camera unreachable on second attempt",
+            )
+
+        return resp2.status_code
+
+
+def _digest_param(header: str, name: str) -> str:
+    m = re.search(rf'{name}="([^"]*)"', header, re.IGNORECASE)
+    return m.group(1) if m else ""
+
+
+async def reboot_camera(camera: Camera) -> dict:
+    """Send reboot command to a Dahua camera via HTTP API."""
+    password = decrypt_password_aes(camera.encrypted_password) if camera.encrypted_password else ""
+    ip = str(camera.ip_address)
+    url = f"http://{ip}/cgi-bin/magicBox.cgi?action=reboot"
+
+    status_code = await _http_digest_request("GET", url, camera.username, password, timeout=10.0)
+
+    if status_code in (200, 302, 303):
+        logger.info("camera_reboot_sent", camera=camera.name, ip=ip)
+        return {"status": "reboot_sent", "camera_name": camera.name, "ip": ip}
+
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail=f"Reboot failed: HTTP {status_code}",
+    )
+
+
+async def sync_camera_time(camera: Camera) -> dict:
+    """Sync camera internal clock using Dahua HTTP API."""
+    password = decrypt_password_aes(camera.encrypted_password) if camera.encrypted_password else ""
+    ip = str(camera.ip_address)
+    now = datetime.now(UTC)
+    time_str = now.strftime("%Y-%m-%d%%20%H:%M:%S")
+    url = f"http://{ip}/cgi-bin/global.cgi?action=setCurrentTime&time={time_str}"
+
+    status_code = await _http_digest_request("GET", url, camera.username, password, timeout=10.0)
+
+    if status_code in (200, 302, 303):
+        logger.info("camera_time_synced", camera=camera.name, ip=ip, time=now.isoformat())
+        return {"status": "time_synced", "camera_name": camera.name, "time": now.isoformat()}
+
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail=f"Time sync failed: HTTP {status_code}",
+    )

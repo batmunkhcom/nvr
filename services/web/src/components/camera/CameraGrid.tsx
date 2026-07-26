@@ -5,7 +5,7 @@ import { useCameras, useCameraMutations } from "../../hooks/useCameras";
 import { useUiPreference } from "../../hooks/useUiPreference";
 import { useEvents } from "../../hooks/useEvents";
 import { Camera } from "../../types/camera";
-import { LayoutGrid, Play, MoreVertical, Wifi, Pencil, Trash2, MonitorPlay, GripVertical, X, Loader2, RefreshCw, Volume2, VolumeX, ZoomIn, ZoomOut, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Video, VideoOff } from "lucide-react";
+import { LayoutGrid, Play, MoreVertical, Wifi, Pencil, Trash2, MonitorPlay, GripVertical, X, Loader2, RefreshCw, Volume2, VolumeX, ZoomIn, ZoomOut, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Video, VideoOff, Power, Clock } from "lucide-react";
 import { useStreamPlayer, type StreamType } from "../../hooks/useStreamPlayer";
 import { useVideoAudio } from "../../hooks/useVideoAudio";
 import { useVideoZoom } from "../../hooks/useVideoZoom";
@@ -83,6 +83,8 @@ function CameraTile({
   const [menuOpen, setMenuOpen] = useState(false);
   const [testing, setTesting] = useState(false);
   const [toggling, setToggling] = useState(false);
+  const [rebooting, setRebooting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const clickRef = useRef(0);
   const dot = statusColors[camera.status] || statusColors.unknown;
   const border = hasMotion ? "border-red-500" : (statusBorder[camera.status] || statusBorder.unknown);
@@ -135,6 +137,22 @@ function CameraTile({
     } catch {} finally {
       setToggling(false);
     }
+  };
+
+  const handleReboot = async () => {
+    setMenuOpen(false);
+    const ok = await confirm(`Reboot camera "${camera.name}" (${camera.ip_address})?`);
+    if (!ok) return;
+    setRebooting(true);
+    try { await apiClient.post(`/cameras/${camera.id}/reboot`); } catch {}
+    setRebooting(false);
+  };
+
+  const handleSyncTime = async () => {
+    setMenuOpen(false);
+    setSyncing(true);
+    try { await apiClient.post(`/cameras/${camera.id}/sync-time`); } catch {}
+    setSyncing(false);
   };
 
   return (
@@ -215,6 +233,21 @@ function CameraTile({
               className="flex items-center gap-2 w-full px-3 py-2 text-xs text-gray-200 hover:bg-gray-700 disabled:opacity-50"
             >
               <Wifi size={13} /> {testing ? "Testing..." : "Test Connection"}
+            </button>
+            <div className="border-t border-gray-700 my-1" />
+            <button
+              onClick={handleSyncTime}
+              disabled={syncing}
+              className="flex items-center gap-2 w-full px-3 py-2 text-xs text-gray-200 hover:bg-gray-700 disabled:opacity-50"
+            >
+              <Clock size={13} /> {syncing ? "Syncing..." : "Sync Time"}
+            </button>
+            <button
+              onClick={handleReboot}
+              disabled={rebooting}
+              className="flex items-center gap-2 w-full px-3 py-2 text-xs text-orange-400 hover:bg-gray-700 disabled:opacity-50"
+            >
+              <Power size={13} /> {rebooting ? "Rebooting..." : "Reboot Camera"}
             </button>
             <div className="border-t border-gray-700 my-1" />
             <button

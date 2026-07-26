@@ -25,6 +25,8 @@ from ...services.camera_service import (
     get_camera,
     get_camera_response,
     list_cameras,
+    reboot_camera,
+    sync_camera_time,
     test_camera_connection,
     update_camera,
 )
@@ -335,3 +337,31 @@ async def toggle_camera_recording(
     await db.flush()
     await db.refresh(camera)
     return {"data": camera_to_dict(camera)}
+
+
+@router.post("/{camera_id}/reboot")
+async def reboot_camera_endpoint(
+    camera_id: uuid.UUID,
+    current_user: Annotated[dict, Depends(require_operator)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Reboot a camera via Dahua HTTP API (magicBox reboot)."""
+    camera = await get_camera(camera_id, db)
+    if camera is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
+    result = await reboot_camera(camera)
+    return {"data": result}
+
+
+@router.post("/{camera_id}/sync-time")
+async def sync_camera_time_endpoint(
+    camera_id: uuid.UUID,
+    current_user: Annotated[dict, Depends(require_operator)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Sync camera internal clock to server time via Dahua HTTP API."""
+    camera = await get_camera(camera_id, db)
+    if camera is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
+    result = await sync_camera_time(camera)
+    return {"data": result}

@@ -90,6 +90,34 @@ export default function Events() {
     );
   }
 
+  const handleCleanupPreview = async () => {
+    if (!cleanupBefore) return;
+    setCleanupLoading(true); setCleanupError("");
+    try {
+      const params: Record<string, string> = { before: cleanupBefore, dry_run: "true" };
+      if (cleanupCamera) params.camera_id = cleanupCamera;
+      const r = await apiClient.delete("/events/cleanup-by-date", { params });
+      setCleanupPreview(r.data?.data ?? null);
+    } catch (err: any) {
+      setCleanupError(err?.response?.data?.detail || "Preview failed");
+    } finally { setCleanupLoading(false); }
+  };
+
+  const handleCleanupDelete = async () => {
+    setCleanupLoading(true); setCleanupError("");
+    try {
+      const params: Record<string, string> = { before: cleanupBefore };
+      if (cleanupCamera) params.camera_id = cleanupCamera;
+      const r = await apiClient.delete("/events/cleanup-by-date", { params });
+      const d = r.data?.data;
+      setCleanupPreview({ event_count: 0, snapshot_count: 0 });
+      setCleanupError(`Deleted ${d?.deleted_events ?? 0} events, ${d?.deleted_snapshots ?? 0} snapshots.`);
+      window.location.reload();
+    } catch (err: any) {
+      setCleanupError(err?.response?.data?.detail || "Delete failed");
+    } finally { setCleanupLoading(false); }
+  };
+
   return (
     <div className="page-enter">
       <div className="flex items-center justify-between mb-4">
@@ -156,38 +184,9 @@ export default function Events() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-medium">{event.event_type.replace(/_/g, " ")}</p>
-                      {objects.map((obj) => {
-                        const ObjIcon = objectIcons[obj] || Package;
-  const handleCleanupPreview = async () => {
-    if (!cleanupBefore) return;
-    setCleanupLoading(true); setCleanupError("");
-    try {
-      const params: Record<string, string> = { before: cleanupBefore, dry_run: "true" };
-      if (cleanupCamera) params.camera_id = cleanupCamera;
-      const r = await apiClient.delete("/events/cleanup-by-date", { params });
-      setCleanupPreview(r.data?.data ?? null);
-    } catch (err: any) {
-      setCleanupError(err?.response?.data?.detail || "Preview failed");
-    } finally { setCleanupLoading(false); }
-  };
-
-  const handleCleanupDelete = async () => {
-    setCleanupLoading(true); setCleanupError("");
-    try {
-      const params: Record<string, string> = { before: cleanupBefore };
-      if (cleanupCamera) params.camera_id = cleanupCamera;
-      const r = await apiClient.delete("/events/cleanup-by-date", { params });
-      const d = r.data?.data;
-      setCleanupPreview({ event_count: 0, snapshot_count: 0 });
-      setCleanupError(`Deleted ${d?.deleted_events ?? 0} events, ${d?.deleted_snapshots ?? 0} snapshots.`);
-      // Refresh events list
-      window.location.reload();
-    } catch (err: any) {
-      setCleanupError(err?.response?.data?.detail || "Delete failed");
-    } finally { setCleanupLoading(false); }
-  };
-
-  return (
+                       {objects.map((obj) => {
+                         const ObjIcon = objectIcons[obj] || Package;
+                         return (
                           <span
                             key={obj}
                             className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-blue-900/50 text-blue-300 rounded text-[11px]"
