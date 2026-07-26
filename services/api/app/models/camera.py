@@ -150,6 +150,12 @@ class Camera(Base):
     ai_min_confidence: Mapped[float] = mapped_column(
         Float, nullable=False, default=0.5, server_default="0.5"
     )
+    ai_plugins: Mapped[list[str] | None] = mapped_column(
+        JSON, nullable=True, default=list, server_default="'[]'"
+    )
+    lpr_config: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True, default=None,
+    )
     display_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

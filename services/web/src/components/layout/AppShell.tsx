@@ -13,6 +13,8 @@ import NetworkDashboard from "../../pages/NetworkDashboard";
 import WizardPage from "../../pages/wizard/Wizard";
 import LiveView from "../../pages/LiveViewPage";
 import Profile from "../../pages/Profile";
+import LPRReadings from "../../pages/LPRReadings";
+import StatisticsPage from "../../pages/Statistics";
 
 export default function AppShell() {
   return (
@@ -32,8 +34,10 @@ export default function AppShell() {
              <Route path="/events" element={<Events />} />
              <Route path="/storage" element={<Storage />} />
              <Route path="/locations" element={<LocationsPage />} />
-             <Route path="/settings" element={<Settings />} />
+              <Route path="/settings" element={<Settings />} />
               <Route path="/settings/users" element={<Users />} />
+              <Route path="/statistics" element={<StatisticsPage />} />
+              <Route path="/lpr" element={<LPRReadings />} />
               <Route path="/profile" element={<Profile />} />
            </Routes>
          </main>

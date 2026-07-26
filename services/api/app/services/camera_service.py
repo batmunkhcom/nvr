@@ -113,11 +113,19 @@ async def create_camera(body: CameraCreate, db: AsyncSession) -> Camera:
         ai_objects=body.ai_objects,
         ai_sensitivity=body.ai_sensitivity,
         ai_min_confidence=body.ai_min_confidence,
+        ai_plugins=body.ai_plugins,
+        lpr_config=body.lpr_config,
         created_at=now,
         updated_at=now,
     )
     db.add(camera)
     await db.flush()
+
+    max_order_result = await db.execute(select(func.coalesce(func.max(Camera.display_order), 0)))
+    max_order = max_order_result.scalar() or 0
+    camera.display_order = max_order + 1
+    await db.flush()
+
     logger.info("camera_created", camera_id=str(camera.id), name=camera.name)
 
     try:
@@ -313,6 +321,8 @@ def _camera_to_response(camera: Camera) -> dict:
         "ai_zones": camera.ai_zones,
         "ai_sensitivity": camera.ai_sensitivity,
         "ai_min_confidence": camera.ai_min_confidence,
+        "ai_plugins": camera.ai_plugins,
+        "lpr_config": camera.lpr_config,
         "max_resolution": camera.max_resolution,
         "recording_mode": camera.recording_mode,
         "recording_stream": camera.recording_stream,

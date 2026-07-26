@@ -19,6 +19,7 @@ import structlog
 from . import db
 from .detector import AIDetector
 from .frame_sampler import FrameSampler
+from .plugins import get_plugins_for_camera, start_all, stop_all
 
 logger = structlog.get_logger()
 
@@ -42,6 +43,7 @@ def _signature(cam: dict) -> tuple:
         cam["onvif_events_service_url"],
         cam["ai_enabled"],
         cam.get("recording_mode"),
+        json.dumps(cam.get("ai_plugins"), sort_keys=True),
     )
 
 
@@ -105,6 +107,8 @@ def _build_worker(cam: dict):
     # (no YOLO) when AI detection is disabled for this camera
     motion_only = not cam["ai_enabled"] and cam.get("recording_mode") == "motion"
 
+    plugins = get_plugins_for_camera(cam.get("ai_plugins"))
+
     return FrameSampler(
         camera_id=cam["id"],
         camera_name=cam["name"],
@@ -117,6 +121,7 @@ def _build_worker(cam: dict):
         ai_zones=cam["ai_zones"],
         motion_only=motion_only,
         event_callback=_broadcast_event,
+        plugins=plugins,
     )
 
 
@@ -149,6 +154,8 @@ async def _broadcast_event(camera_id: str, objects: list, snapshot_path: str | N
 async def main() -> None:
     logger.info("ai_engine_starting", version="1.0.0")
 
+    await start_all()
+
     detector = AIDetector.shared()
     model_ok = await detector.initialize()
     if not model_ok:
@@ -168,6 +175,7 @@ async def main() -> None:
 
     for worker in list(_workers.values()):
         await worker.stop()
+    await stop_all()
     await db.engine.dispose()
     logger.info("ai_engine_stopped")
 

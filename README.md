@@ -40,6 +40,10 @@ Centralized Network Video Recorder for managing IP cameras (ONVIF, RTSP, Hikvisi
 - **JPEG snapshots** saved with each detection event (token-authenticated)
 - **Events feed** with object badges, snapshot thumbnails, camera filter, severity levels, acknowledge action
 - **Motion-only mode** — cameras with `recording_mode='motion'` and `ai_enabled=False` get motion-only sampler (MOG2 gate, no YOLO) that publishes to Redis `nvr:motion`
+- **Plugin architecture** — extendable AI analytics via per-camera plugin system
+- **Object counter** — real-time person, vehicle, animal, livestock counting with hourly aggregation
+- **License Plate Recognition (LPR)** — EasyOCR-based plate detection with 8 country pattern library (Монгол, Европ, АНУ, Япон, Хятад, Орос, Солонгос + custom regex)
+- **Smart alerts** — time-based, frequency-based, and zone-violation alert rules per camera
 
 ### Network Monitoring
 - **Real-time bandwidth** — inbound (RTSP) and outbound (FFmpeg relay) Mbps per camera
@@ -184,12 +188,31 @@ Not actively used (disabled in current deploy): `nvr-mosquitto` (MQTT), `nvr-chr
 
 ## Quick Start
 
-### Prerequisites
-- Docker & Docker Compose v2.22+
-- Python 3.13 (for scripts/seed_db.py)
-- FFmpeg 5.x+ (in stream-manager container)
+```bash
+curl -fsSL https://raw.githubusercontent.com/batmunkhcom/nvr/master/install.sh | bash
+```
 
-### Setup
+That's it. The script handles everything — system checks, Docker build, DB setup, admin user creation.
+
+### Install Options
+
+| Mode | Command |
+|------|---------|
+| **Interactive** (asks for DB, admin, ports, path) | `curl -fsSL https://raw.githubusercontent.com/batmunkhcom/nvr/master/install.sh \| bash` |
+| **Non-interactive** (auto-generated, random admin password shown at end) | `curl -fsSL https://raw.githubusercontent.com/batmunkhcom/nvr/master/install.sh \| bash -s -- --no-prompt` |
+| **Custom directory** | `INSTALL_DIR=/opt/nvr curl -fsSL https://raw.githubusercontent.com/batmunkhcom/nvr/master/install.sh \| bash` |
+| **Reconfigure only** (existing project, just regenerate .env + restart) | `cd /path/to/nvr && ./install.sh` then choose mode 3 |
+
+After install, default credentials are printed. Change the admin password immediately.
+
+```
+Web UI:      http://localhost:3000
+API Docs:    http://localhost:8000/docs
+Username:    admin
+Password:    admin   (or random password if --no-prompt)
+```
+
+### Manual Setup (for developers)
 
 ```bash
 # 1. Copy and edit environment
@@ -210,6 +233,13 @@ docker compose up -d
 open http://localhost:3000
 # Default login: admin / admin
 ```
+
+### Prerequisites
+
+- **Docker** 20.10+ & **Docker Compose** v2.22+
+- **Git** & **curl**
+- Linux x86_64 (Ubuntu 22.04+, Debian 12+, RHEL 9+)
+- 4 CPU cores, 8 GB RAM, 20 GB free disk (minimum)
 
 ### Development
 
@@ -294,6 +324,12 @@ GET    /api/v1/system/config                 # System config
 PATCH  /api/v1/system/config                 # Update config
 
 WS     /api/v1/ws                            # Camera status + events WebSocket
+
+GET    /api/v1/counters/summary              # Object counter summary (?camera_id=&days=7)
+GET    /api/v1/counters/hourly               # Hourly breakdown (?camera_id=&date=YYYY-MM-DD)
+
+GET    /api/v1/lpr/patterns                  # LPR country pattern library
+GET    /api/v1/lpr/readings                  # License plate readings (?camera_id=&plate_number=&days=7)
 ```
 
 ---

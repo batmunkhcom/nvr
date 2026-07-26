@@ -60,26 +60,25 @@ class FrameSampler:
         ai_zones: list | None = None,
         motion_only: bool = False,
         event_callback=None,
+        plugins: list | None = None,
     ):
         self.camera_id = camera_id
         self.camera_name = camera_name
         self.stream_url = build_rtsp_url(stream_uri, username, password)
         self.ai_objects = set(ai_objects or DEFAULT_OBJECTS)
         self.ai_min_confidence = ai_min_confidence or 0.5
-        # clamp misconfigured values (e.g. "2" from system_config)
         if self.ai_min_confidence > 1:
             self.ai_min_confidence = 0.5
         self.ai_zones = [z for z in (ai_zones or []) if len(z.get("points", [])) >= 3]
         self.motion_only = motion_only
+        self.plugins = plugins or []
 
         self._detector = AIDetector.shared()
         self._motion = MotionDetector(sensitivity=ai_sensitivity or "medium")
         self._event_callback = event_callback
         self._running = False
-        # class -> (last_event_ts, center_x_norm, center_y_norm)
         self._last_events: dict[str, tuple[float, float, float]] = {}
         self._task: asyncio.Task | None = None
-        # motion recording trigger state
         self._motion_active = False
         self._last_motion_ts = 0.0
         self._last_motion_pub_ts = 0.0
@@ -174,6 +173,20 @@ class FrameSampler:
                 if d["class"] in self.ai_objects and d["confidence"] >= self.ai_min_confidence
             ]
             detections = self._filter_zones(detections, frame.shape[1], frame.shape[0])
+
+            # call plugins with all visible detections (pre-cooldown)
+            if detections and self.plugins:
+                now = datetime.now(UTC)
+                for plugin in self.plugins:
+                    try:
+                        await plugin.on_detection(self.camera_id, detections, frame, now)
+                    except Exception:
+                        logger.warning(
+                            "plugin_on_detection_failed",
+                            camera=self.camera_name,
+                            plugin=plugin.name if hasattr(plugin, "name") else "unknown",
+                        )
+
             detections = self._apply_cooldown(detections, frame.shape[1], frame.shape[0])
             if detections:
                 await self._persist(detections, frame, cv2)

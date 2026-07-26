@@ -1,8 +1,10 @@
 import CameraGrid from "../components/camera/CameraGrid";
+import CounterCards from "../components/statistics/CounterCards";
 import { useCameras } from "../hooks/useCameras";
 import { useStorageUsage } from "../hooks/useRecordings";
 import { useEvents } from "../hooks/useEvents";
 import { useNvrWebSocket } from "../hooks/useWebSocket";
+import { useCounterSummary } from "../hooks/useCounters";
 import apiClient from "../api/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Video, HardDrive, Bell, Film, AlertTriangle } from "lucide-react";
@@ -21,6 +23,7 @@ export default function Dashboard() {
   const { data: cameras } = useCameras();
   const usage = useStorageUsage();
   const { data: events } = useEvents();
+  const { data: counterSummary } = useCounterSummary();
   const qc = useQueryClient();
 
   const onCameraStatus = useCallback(
@@ -28,7 +31,10 @@ export default function Dashboard() {
     [qc],
   );
   const onEvent = useCallback(
-    () => { qc.invalidateQueries({ queryKey: ["events"] }); },
+    () => {
+      qc.invalidateQueries({ queryKey: ["events"] });
+      qc.invalidateQueries({ queryKey: ["counters"] });
+    },
     [qc],
   );
   useNvrWebSocket(onCameraStatus, onEvent);
@@ -117,6 +123,13 @@ export default function Dashboard() {
           <div className="text-[10px] text-gray-500 mt-0.5">24h write volume</div>
         </div>
       </div>
+
+      {counterSummary && (
+        <div className="mb-4">
+          <div className="text-xs text-gray-500 mb-2">Object Counters</div>
+          <CounterCards data={counterSummary} />
+        </div>
+      )}
 
       <h2 className="text-sm font-semibold text-gray-400 mb-3">Camera Grid</h2>
       <CameraGrid />

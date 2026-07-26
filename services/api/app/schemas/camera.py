@@ -26,6 +26,8 @@ class CameraCreate(BaseModel):
     ai_objects: list[str] | None = None
     ai_sensitivity: str = "medium"
     ai_min_confidence: float = 0.5
+    ai_plugins: list[str] | None = None
+    lpr_config: dict | None = None
 
 
 class CameraUpdate(BaseModel):
@@ -53,6 +55,8 @@ class CameraUpdate(BaseModel):
     ai_zones: list | None = None
     ai_sensitivity: str | None = None
     ai_min_confidence: float | None = None
+    ai_plugins: list[str] | None = None
+    lpr_config: dict | None = None
 
 
 class CameraResponse(BaseModel):
@@ -81,6 +85,8 @@ class CameraResponse(BaseModel):
     ai_zones: list | None = None
     ai_sensitivity: str = "medium"
     ai_min_confidence: float = 0.5
+    ai_plugins: list[str] | None = None
+    lpr_config: dict | None = None
     max_resolution: str | None = None
     recording_mode: str
     recording_stream: str | None = None
@@ -103,6 +109,8 @@ class CameraResponse(BaseModel):
     ai_zones: list | None = None
     ai_sensitivity: str = "medium"
     ai_min_confidence: float = 0.5
+    ai_plugins: list[str] | None = None
+    lpr_config: dict | None = None
     created_at: str
     updated_at: str
 

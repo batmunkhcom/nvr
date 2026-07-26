@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir "redis>=5.2" "httpx>=0.28" \
     "tenacity>=9.0" "pydantic>=2.10" \
     "sqlalchemy[asyncio]>=2.0" "asyncpg>=0.30" \
     "cryptography>=43.0" "onnxruntime>=1.20" "opencv-python-headless>=4.10" \
-    "numpy>=2.2"
+    "numpy>=2.2" "easyocr>=1.7"
 
 RUN mkdir -p /app/models
 COPY services/ai-engine/ ./services/ai-engine/

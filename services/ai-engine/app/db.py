@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 import structlog
 from sqlalchemy import text
@@ -33,7 +33,7 @@ async def load_ai_cameras(session: AsyncSession) -> list[dict]:
             SELECT id, name, motion_source, stream_main_uri, stream_sub_uri,
                    username, encrypted_password, ai_objects, ai_sensitivity,
                    ai_min_confidence, ai_zones, ai_enabled, recording_mode,
-                   onvif_events_service_url
+                   onvif_events_service_url, ai_plugins, lpr_config
             FROM cameras
             WHERE is_active AND (ai_enabled OR recording_mode = 'motion')
             """
@@ -77,6 +77,38 @@ async def insert_detection_event(
     await session.commit()
 
 
+async def upsert_object_counter(
+    session: AsyncSession,
+    camera_id: str,
+    object_category: str,
+    counter_date: date,
+    hour: int,
+    count: int,
+) -> None:
+    """Upsert hourly object counter — increments existing count."""
+    await session.execute(
+        text(
+            """
+            INSERT INTO object_counters
+                (id, camera_id, object_category, counter_date, hour, count)
+            VALUES
+                (gen_random_uuid(), CAST(:camera_id AS uuid), :object_category,
+                 :counter_date, :hour, :count)
+            ON CONFLICT (camera_id, object_category, counter_date, hour)
+            DO UPDATE SET count = object_counters.count + EXCLUDED.count
+            """
+        ),
+        {
+            "camera_id": camera_id,
+            "object_category": object_category,
+            "counter_date": counter_date,
+            "hour": hour,
+            "count": count,
+        },
+    )
+    await session.commit()
+
+
 def decrypt_password(encrypted: str | None) -> str | None:
     if not encrypted:
         return None
@@ -87,6 +119,44 @@ def decrypt_password(encrypted: str | None) -> str | None:
     except Exception:
         logger.warning("camera_password_decrypt_failed")
         return None
+
+
+async def insert_license_plate(
+    session: AsyncSession,
+    camera_id: str,
+    plate_number: str,
+    country_code: str,
+    pattern_name: str,
+    confidence: float,
+    detected_at: datetime,
+    plate_image_path: str | None = None,
+    snapshot_path: str | None = None,
+) -> None:
+    """Persist a license plate reading."""
+    await session.execute(
+        text(
+            """
+            INSERT INTO license_plates
+                (id, camera_id, plate_number, country_code, pattern_name,
+                 confidence, detected_at, snapshot_path, plate_image_path)
+            VALUES
+                (gen_random_uuid(), CAST(:camera_id AS uuid), :plate_number,
+                 :country_code, :pattern_name, :confidence, :detected_at,
+                 :snapshot_path, :plate_image_path)
+            """
+        ),
+        {
+            "camera_id": camera_id,
+            "plate_number": plate_number,
+            "country_code": country_code,
+            "pattern_name": pattern_name,
+            "confidence": confidence,
+            "detected_at": detected_at,
+            "snapshot_path": snapshot_path,
+            "plate_image_path": plate_image_path,
+        },
+    )
+    await session.commit()
 
 
 class RedisPublisher:

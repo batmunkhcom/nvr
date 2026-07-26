@@ -4,6 +4,7 @@ import {
   MapPin, Clock, Users, Settings, Wifi,
   ChevronsLeft, ChevronsRight,
   BookOpen, ExternalLink, Code, MessageSquare,
+  BarChart3, CarFront,
 } from "lucide-react";
 import { useUiPreference } from "../../hooks/useUiPreference";
 import { useLocale } from "../../i18n/LocaleContext";
@@ -17,8 +18,10 @@ export default function Sidebar() {
   const navItems = [
      { to: "/dashboard", icon: LayoutDashboard, key: "nav.dashboard" },
      { to: "/cameras", icon: Video, key: "nav.cameras" },
+     { to: "/statistics", icon: BarChart3, label: "Statistics" },
      { to: "/network", icon: Wifi, key: "nav.network" },
      { to: "/recordings", icon: Film, key: "nav.recordings" },
+     { to: "/lpr", icon: CarFront, label: "LPR" },
      { to: "/events", icon: Bell, key: "nav.events" },
      { to: "/storage", icon: HardDrive, key: "nav.storage" },
      { to: "/locations", icon: MapPin, label: "Locations", admin: true },
