@@ -7,6 +7,9 @@ for cameras with recording_mode='motion'.
 Stop is delayed by `recording.motion_stop_delay_s` (default 30s) so brief
 motion gaps don't split the recording; each new motion event cancels the
 pending stop.
+
+Respects global pause: when `nvr:recording:paused` is true, no motion
+recorder will be started.
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 
 import structlog
 from sqlalchemy import text
@@ -25,6 +29,20 @@ from .recorder import CameraRecorder
 logger = structlog.get_logger()
 
 DEFAULT_STOP_DELAY_S = 30
+RECORDING_PAUSE_KEY = "nvr:recording:paused"
+REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
+
+
+async def _check_paused() -> bool:
+    try:
+        import redis.asyncio as aioredis
+        redis = aioredis.from_url(f"redis://{REDIS_HOST}:{REDIS_PORT}/0", decode_responses=True)
+        val = await redis.get(RECORDING_PAUSE_KEY)
+        await redis.aclose()
+        return val == "true"
+    except Exception:
+        return False
 
 
 class MotionRecorderController:
@@ -40,6 +58,8 @@ class MotionRecorderController:
         self._stop_timers: dict[str, asyncio.Task] = {}
 
     async def handle_event(self, camera_id: str, active: bool) -> None:
+        if await _check_paused():
+            return
         if active:
             timer = self._stop_timers.pop(camera_id, None)
             if timer and not timer.done():

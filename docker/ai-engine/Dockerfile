@@ -20,4 +20,6 @@ RUN mkdir -p /app/models
 COPY services/ai-engine/ ./services/ai-engine/
 COPY packages/ ./packages/
 
-CMD ["python", "-m", "services.ai_engine.app.main"]
+WORKDIR /app/services/ai-engine
+ENV PYTHONPATH=/app/services/ai-engine:/app/packages/common
+CMD ["python", "-m", "app.main"]

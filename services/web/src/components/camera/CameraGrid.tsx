@@ -5,7 +5,7 @@ import { useCameras, useCameraMutations } from "../../hooks/useCameras";
 import { useUiPreference } from "../../hooks/useUiPreference";
 import { useEvents } from "../../hooks/useEvents";
 import { Camera } from "../../types/camera";
-import { LayoutGrid, Play, MoreVertical, Wifi, Pencil, Trash2, MonitorPlay, GripVertical, X, Loader2, RefreshCw, Volume2, VolumeX, ZoomIn, ZoomOut, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { LayoutGrid, Play, MoreVertical, Wifi, Pencil, Trash2, MonitorPlay, GripVertical, X, Loader2, RefreshCw, Volume2, VolumeX, ZoomIn, ZoomOut, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Video, VideoOff } from "lucide-react";
 import { useStreamPlayer, type StreamType } from "../../hooks/useStreamPlayer";
 import { useVideoAudio } from "../../hooks/useVideoAudio";
 import { useVideoZoom } from "../../hooks/useVideoZoom";
@@ -79,8 +79,10 @@ function CameraTile({
 }) {
   const navigate = useNavigate();
   const { deleteCamera, testCamera } = useCameraMutations();
+  const qc = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [toggling, setToggling] = useState(false);
   const clickRef = useRef(0);
   const dot = statusColors[camera.status] || statusColors.unknown;
   const border = hasMotion ? "border-red-500" : (statusBorder[camera.status] || statusBorder.unknown);
@@ -115,6 +117,24 @@ function CameraTile({
     const ok = await confirm(`Delete "${camera.name}"?`);
     if (!ok) return;
     deleteCamera.mutate(camera.id);
+  };
+
+  const isRecording = camera.recording_mode === "continuous" || camera.recording_mode === "motion";
+
+  const handleToggleRecording = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setToggling(true);
+    try {
+      const r = await apiClient.post(`/cameras/${camera.id}/recording/toggle`);
+      const updated = r.data?.data;
+      if (updated) {
+        qc.setQueryData<Camera[]>(["cameras"], (prev) =>
+          prev?.map((c) => (c.id === camera.id ? { ...c, recording_mode: updated.recording_mode } : c))
+        );
+      }
+    } catch {} finally {
+      setToggling(false);
+    }
   };
 
   return (
@@ -156,7 +176,19 @@ function CameraTile({
         )}
       </div>
 
-      <div className="absolute top-2 right-2 z-20" onClick={(e) => e.stopPropagation()}>
+      <div className="absolute top-2 right-2 z-20 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+        <button
+          onClick={handleToggleRecording}
+          disabled={toggling}
+          className="opacity-0 group-hover:opacity-100 hover:bg-gray-700 rounded-full p-1 transition-all disabled:opacity-50"
+          title={isRecording ? "Pause recording for this camera" : "Resume recording for this camera"}
+        >
+          {isRecording ? (
+            <Video size={14} className="text-green-500" />
+          ) : (
+            <VideoOff size={14} className="text-red-400" />
+          )}
+        </button>
         <button
           onClick={() => setMenuOpen(!menuOpen)}
           className="opacity-0 group-hover:opacity-100 hover:bg-gray-700 rounded p-1 transition-all"

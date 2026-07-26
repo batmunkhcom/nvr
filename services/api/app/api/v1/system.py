@@ -1,4 +1,4 @@
-"""System endpoints — health, metrics, config, logs."""
+"""System endpoints — health, metrics, config, logs, recording pause."""
 
 from datetime import UTC, datetime
 from typing import Annotated, Any
@@ -9,9 +9,12 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.database import get_db
+from ...core.redis import get_redis
+from ...core.security import verify_password
 from ...middleware.auth import get_current_user, require_admin
 from ...models.camera import Camera
 from ...models.system_config import SystemConfig
+from ...models.user import User
 from ...services.recording_service import get_recording_stats
 from ...services.self_test import run_self_test
 
@@ -96,6 +99,59 @@ async def update_system_config(
         db.add(config)
     await db.flush()
     return {"data": {"key": key, "value": value}}
+
+
+class PasswordConfirm(BaseModel):
+    admin_password: str
+
+
+RECORDING_PAUSE_KEY = "nvr:recording:paused"
+
+
+@router.get("/recording/status")
+async def get_recording_status():
+    """Return whether recording is globally paused."""
+    redis = await get_redis()
+    paused = await redis.get(RECORDING_PAUSE_KEY)
+    return {"data": {"paused": paused == "true"}}
+
+
+@router.post("/recording/pause")
+async def pause_all_recordings(
+    body: PasswordConfirm,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Globally pause ALL camera recordings. Requires admin password."""
+    await _verify_recordings_admin(body.admin_password, current_user, db)
+    redis = await get_redis()
+    await redis.set(RECORDING_PAUSE_KEY, "true")
+    return {"data": {"paused": True}}
+
+
+@router.post("/recording/resume")
+async def resume_all_recordings(
+    body: PasswordConfirm,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Resume all recordings after a global pause."""
+    await _verify_recordings_admin(body.admin_password, current_user, db)
+    redis = await get_redis()
+    await redis.set(RECORDING_PAUSE_KEY, "false")
+    return {"data": {"paused": False}}
+
+
+async def _verify_recordings_admin(admin_password: str, current_user: dict, db: AsyncSession) -> None:
+    """Verify that the provided password matches the current user and they have admin role."""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+    result = await db.execute(select(User).where(User.username == current_user["username"]))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    if not verify_password(admin_password, user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password")
 
 
 @router.get("/ui-config")

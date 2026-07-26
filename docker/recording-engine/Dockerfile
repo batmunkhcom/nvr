@@ -17,4 +17,6 @@ RUN pip install --no-cache-dir "fastapi>=0.115" "uvicorn[standard]>=0.34" \
 COPY services/recording-engine/ ./services/recording-engine/
 COPY packages/ ./packages/
 
-CMD ["python", "-m", "services.recording_engine.app.main"]
+WORKDIR /app/services/recording-engine
+ENV PYTHONPATH=/app/services/recording-engine:/app/packages/common
+CMD ["python", "-m", "app.main"]

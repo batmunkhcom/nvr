@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.database import get_db
+from ...core.redis import get_redis
 from ...middleware.auth import get_current_user, require_operator
 from ...schemas.camera import (
     CameraCreate,
@@ -21,6 +22,7 @@ from ...services.camera_service import (
     camera_to_dict,
     create_camera,
     delete_camera,
+    get_camera,
     get_camera_response,
     list_cameras,
     test_camera_connection,
@@ -297,3 +299,39 @@ async def stop_talk(
     current_user: Annotated[dict, Depends(require_operator)],
 ):
     await stop_talk_session(session_id)
+
+
+CAMERA_PAUSE_PREFIX = "camera:pause"
+
+
+@router.post("/{camera_id}/recording/toggle")
+async def toggle_camera_recording(
+    camera_id: uuid.UUID,
+    current_user: Annotated[dict, Depends(require_operator)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Toggle a single camera's recording on/off.
+
+    Pausing saves the current recording_mode to Redis and sets it to 'disabled'.
+    Unpausing restores the previous mode.
+    """
+    camera = await get_camera(camera_id, db)
+    if camera is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
+
+    redis = await get_redis()
+    pause_key = f"{CAMERA_PAUSE_PREFIX}:{camera_id}"
+
+    if camera.recording_mode == "disabled":
+        prev_mode = await redis.get(pause_key) or "continuous"
+        camera.recording_mode = prev_mode
+        await redis.delete(pause_key)
+    elif camera.recording_mode == "never":
+        camera.recording_mode = "continuous"
+    else:
+        await redis.set(pause_key, camera.recording_mode)
+        camera.recording_mode = "disabled"
+
+    await db.flush()
+    await db.refresh(camera)
+    return {"data": camera_to_dict(camera)}

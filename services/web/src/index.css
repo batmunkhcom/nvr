@@ -84,3 +84,12 @@ body {
 .page-enter {
   animation: page-fade-in 0.2s ease-out both;
 }
+
+/* ── Recording pause/play pulse ── */
+@keyframes pulse-recording {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.animate-pulse-recording {
+  animation: pulse-recording 2s ease-in-out infinite;
+}

@@ -7,13 +7,18 @@ Loops:
 - analytics: GB/day measurement + capacity projection into system_config
 
 Self-contained: uses plain SQL (no cross-service model imports).
+
+Pause All: checks Redis key `nvr:recording:paused` each reconcile cycle.
+When active, stops ALL continuous + motion recorders and refuses to start new ones.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 import signal
 
+import redis.asyncio as aioredis
 import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -34,6 +39,21 @@ SessionFactory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commi
 
 _recorders: dict[str, CameraRecorder] = {}  # continuous-mode recorders (reconcile-managed)
 _motion_controller = MotionRecorderController(SessionFactory)
+
+REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
+RECORDING_PAUSE_KEY = "nvr:recording:paused"
+
+
+async def _check_paused() -> bool:
+    """Check the global pause flag in Redis. Returns True if paused."""
+    try:
+        redis = aioredis.from_url(f"redis://{REDIS_HOST}:{REDIS_PORT}/0", decode_responses=True)
+        val = await redis.get(RECORDING_PAUSE_KEY)
+        await redis.aclose()
+        return val == "true"
+    except Exception:
+        return False
 
 
 async def _load_cameras() -> list[dict]:
@@ -82,6 +102,19 @@ def _decrypt(encrypted: str | None) -> str | None:
 
 
 async def _reconcile() -> None:
+    if await _check_paused():
+        for cam_id in list(_recorders):
+            r = _recorders.pop(cam_id, None)
+            if r:
+                await r.stop()
+                logger.info("recorder_stopped_paused", camera_id=cam_id)
+        for cam_id in list(_motion_controller.recorders):
+            r = _motion_controller.recorders.pop(cam_id, None)
+            if r:
+                await r.stop()
+                logger.info("motion_recorder_stopped_paused", camera_id=cam_id)
+        return
+
     try:
         cameras = await _load_cameras()
     except Exception:
