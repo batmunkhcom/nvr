@@ -20,6 +20,7 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
   const [streamMain, setStreamMain] = useState("");
   const [streamSub, setStreamSub] = useState("");
   const [recordingMode, setRecordingMode] = useState("continuous");
+  const [recordingStream, setRecordingStream] = useState("");
   const [isActive, setIsActive] = useState(true);
   const [locationId, setLocationId] = useState("");
   const [storageBackendId, setStorageBackendId] = useState("");
@@ -41,6 +42,7 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
       setStreamMain(camera.stream_main_uri || "");
       setStreamSub(camera.stream_sub_uri || "");
       setRecordingMode(camera.recording_mode || "continuous");
+      setRecordingStream(camera.recording_stream || "");
       setIsActive(camera.status !== "offline");
       setLocationId(camera.location_id || "");
       setStorageBackendId(camera.storage_backend_id || "");
@@ -75,6 +77,7 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
         stream_main_uri: streamMain || undefined,
         stream_sub_uri: streamSub || undefined,
         recording_mode: recordingMode,
+        recording_stream: recordingStream || null,
         is_active: isActive,
         location_id: locationId || null,
         storage_backend_id: storageBackendId || undefined,
@@ -187,6 +190,21 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
               </select>
               <p className="text-[11px] text-gray-500 mt-1">Continuous = 24/7 recording. Never = recording off (live view only).</p>
             </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Recording Stream</label>
+              <select
+                value={recordingStream}
+                onChange={(e) => setRecordingStream(e.target.value)}
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-gray-100 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+              >
+                <option value="">System Default</option>
+                <option value="main">Main (high quality)</option>
+                <option value="sub">Sub (low bitrate)</option>
+              </select>
+              <p className="text-[11px] text-gray-500 mt-1">Override system default. Sub = ~10x less disk.</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-gray-400 mb-1">Active</label>
               <label className="flex items-center gap-2 pt-1">

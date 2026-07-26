@@ -2,7 +2,7 @@
 
 Centralized Network Video Recorder for managing IP cameras (ONVIF, RTSP, Hikvision, Dahua, Axis, Reolink) with live monitoring, motion-triggered recording, AI object detection, and network health monitoring.
 
-Built with **mBm AI Assistant** — an AI-powered engineering and operations assistant by [mBm TECHNOLOGY LLC](https://mbm.mn).
+> Built with **mBm AI Assistant** — an AI-powered engineering and operations assistant by [mBm TECHNOLOGY LLC](https://mbm.mn).
 
 ---
 

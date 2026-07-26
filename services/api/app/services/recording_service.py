@@ -303,18 +303,27 @@ async def get_timeline_segments(
 
 
 async def get_storage_usage(db: AsyncSession) -> dict:
-    """Aggregate storage usage across all backends."""
+    """Aggregate storage usage — uses real filesystem stats, not stale DB rows."""
+    import shutil
+
     result = await db.execute(select(StorageBackend).where(StorageBackend.is_active.is_(True)))
     backends = result.scalars().all()
 
-    total = sum(b.total_bytes for b in backends)
-    available = sum(b.available_bytes for b in backends)
-    used = total - available
+    mount_point = backends[0].mount_point if backends else "/data/recordings"
+    try:
+        usage = shutil.disk_usage(mount_point)
+        total = usage.total
+        free = usage.free
+        used = usage.used
+    except OSError:
+        total = sum(b.total_bytes for b in backends)
+        free = sum(b.available_bytes for b in backends)
+        used = total - free
 
     return {
         "total_bytes": total,
-        "used_bytes": max(used, 0),
-        "free_bytes": max(available, 0),
+        "used_bytes": used,
+        "free_bytes": free,
         "backends": [_backend_to_dict(b) for b in backends],
     }
 

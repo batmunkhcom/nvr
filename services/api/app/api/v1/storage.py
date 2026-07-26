@@ -79,13 +79,14 @@ async def get_usage(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     storage = await get_storage_usage(db)
-    free_pct = (storage["free_bytes"] / max(storage["total_bytes"], 1)) * 100
+    used_pct = round((storage["used_bytes"] / max(storage["total_bytes"], 1)) * 100, 1)
+    used_pct = max(0.0, min(100.0, used_pct))
     return {
         "data": {
             "total_bytes": storage["total_bytes"],
             "used_bytes": storage["used_bytes"],
             "free_bytes": storage["free_bytes"],
-            "used_pct": round(100 - free_pct, 1),
+            "used_pct": used_pct,
             "recording_hours_available": int(storage["free_bytes"] / (1024 * 1024 * 5))
             if storage["free_bytes"] > 0
             else 0,

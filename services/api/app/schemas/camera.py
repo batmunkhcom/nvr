@@ -15,6 +15,7 @@ class CameraCreate(BaseModel):
     stream_sub_uri: str | None = None
     stream_audio_uri: str | None = None
     recording_mode: str = "continuous"
+    recording_stream: str | None = None
     stream_transport: str = "tcp"
     tags: list[str] | None = None
     location: str | None = None
@@ -37,6 +38,7 @@ class CameraUpdate(BaseModel):
     stream_sub_uri: str | None = None
     stream_audio_uri: str | None = None
     recording_mode: str | None = None
+    recording_stream: str | None = None
     stream_transport: str | None = None
     is_active: bool | None = None
     tags: list[str] | None = None
@@ -81,6 +83,7 @@ class CameraResponse(BaseModel):
     ai_min_confidence: float = 0.5
     max_resolution: str | None = None
     recording_mode: str
+    recording_stream: str | None = None
     stream_transport: str
     ptz_presets: list | None = None
     status: str

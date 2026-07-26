@@ -39,6 +39,7 @@ export interface Camera {
   ai_zones: { points: [number, number][] }[] | null;
   ai_sensitivity: string;
   ai_min_confidence: number;
+  recording_stream: string | null;
   display_order: number;
   created_at: string;
   updated_at: string;
@@ -68,6 +69,7 @@ export interface CameraCreatePayload {
   stream_sub_uri?: string;
   stream_audio_uri?: string;
   recording_mode: string;
+  recording_stream?: string | null;
   stream_transport: string;
   tags?: string[];
   location?: string;
@@ -90,6 +92,7 @@ export interface CameraUpdatePayload {
   stream_sub_uri?: string;
   stream_audio_uri?: string;
   recording_mode?: string;
+  recording_stream?: string | null;
   stream_transport?: string;
   is_active?: boolean;
   tags?: string[];

@@ -89,6 +89,9 @@ class Camera(Base):
     recording_mode: Mapped[str] = mapped_column(
         String(20), nullable=False, default="continuous", server_default="continuous"
     )
+    recording_stream: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, default=None, server_default=None
+    )
     stream_transport: Mapped[str] = mapped_column(
         String(20), nullable=False, default="tcp", server_default="tcp"
     )

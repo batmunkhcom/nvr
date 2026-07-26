@@ -23,6 +23,7 @@ export default function CameraAddDialog({ open, onClose }: Props) {
   const [locationId, setLocationId] = useState("");
   const [storageBackendId, setStorageBackendId] = useState("");
   const [notes, setNotes] = useState("");
+  const [recordingStream, setRecordingStream] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -61,6 +62,7 @@ export default function CameraAddDialog({ open, onClose }: Props) {
         stream_main_uri: streamMain || undefined,
         stream_sub_uri: streamSub || undefined,
         recording_mode: "continuous",
+        recording_stream: recordingStream || null,
         stream_transport: "tcp",
         location_id: locationId || undefined,
         storage_backend_id: storageBackendId || undefined,
@@ -189,6 +191,19 @@ export default function CameraAddDialog({ open, onClose }: Props) {
             placeholder="rtsp://192.168.1.100:554/Streaming/Channels/102"
             hint="Lower-resolution stream used for the dashboard grid, AI detection and recording — saves bandwidth and disk. Highly recommended."
           />
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Recording Stream</label>
+            <select
+              value={recordingStream}
+              onChange={(e) => setRecordingStream(e.target.value)}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-gray-100 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+            >
+              <option value="">System Default</option>
+              <option value="main">Main (high quality)</option>
+              <option value="sub">Sub (low bitrate)</option>
+            </select>
+            <p className="text-[11px] text-gray-500 mt-1">Override system default. Sub = ~10x less disk.</p>
+          </div>
           <LocationSelect value={locationId} onChange={setLocationId} />
           <StorageBackendSelect value={storageBackendId} onChange={setStorageBackendId} />
           <div className="flex gap-2 pt-2">

@@ -67,15 +67,17 @@ def build_ffmpeg_args(stream_url: str, camera_dir: str, segment_seconds: int, *,
     HEVC  → transcoded to H.264 (Chrome has limited HEVC support).
     Other → passthrough, no filter."""
     output_pattern = os.path.join(camera_dir, "%Y/%m/%d/%Y%m%d_%H%M%S.mp4")
+
+    input_flags = ["-rtsp_transport", "tcp", "-timeout", "15000000"]
+    if video_codec == "hevc":
+        input_flags += ["-fflags", "+genpts"]
+
     args = [
         config.FFMPEG_PATH,
         "-hide_banner",
         "-loglevel",
         "warning",
-        "-rtsp_transport",
-        "tcp",
-        "-timeout",
-        "15000000",
+        *input_flags,
         "-i",
         stream_url,
     ]
@@ -85,6 +87,11 @@ def build_ffmpeg_args(stream_url: str, camera_dir: str, segment_seconds: int, *,
             "-preset", "ultrafast",
             "-crf", "20",
             "-pix_fmt", "yuv420p",
+            "-color_range", "tv",
+            "-colorspace", "bt709",
+            "-color_trc", "bt709",
+            "-color_primaries", "bt709",
+            "-flags", "+global_header",
         ]
     else:
         args += ["-c:v", "copy"]

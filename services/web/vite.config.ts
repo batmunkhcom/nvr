@@ -50,6 +50,7 @@ export default defineConfig({
         target: process.env.VITE_API_URL || "http://localhost:8000",
         changeOrigin: true,
         ws: true,
+        timeout: 300000,
       },
       "/ws": {
         target: (process.env.VITE_API_URL || "http://localhost:8000").replace("http", "ws"),

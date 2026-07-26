@@ -145,7 +145,7 @@ async def stream_recording(
     ts = recording.start_time.strftime("%Y-%m-%d_%H%M%S") if recording.start_time else str(recording_id)[:8]
     filename = f"recording_{recording.camera_id}_{ts}.mp4" if hasattr(recording, "camera_id") else f"recording_{recording_id}.mp4"
 
-    def file_iterator(path: str, offset: int, remaining: int, chunk_size: int = 1024 * 1024):
+    def file_iterator(path: str, offset: int, remaining: int, chunk_size: int = 1024 * 64):
         with open(path, "rb") as f:
             f.seek(offset)
             left = remaining
@@ -156,13 +156,15 @@ async def stream_recording(
                 left -= len(chunk)
                 yield chunk
 
-    headers = {"Accept-Ranges": "bytes"}
+    headers = {
+        "Accept-Ranges": "bytes",
+        "X-Accel-Buffering": "no",
+        "Cache-Control": "no-cache",
+    }
     if download:
         headers["Content-Disposition"] = f'attachment; filename="{filename}"'
 
-    is_full_range = (start == 0 and end == file_size - 1)
-
-    if range and not is_full_range:
+    if range:
         return StreamingResponse(
             file_iterator(file_path, start, end - start + 1),
             status_code=206,

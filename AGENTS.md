@@ -1,5 +1,29 @@
 # AGENTS.md — mBm NVR System
 
+## Agent Workflow: Comprehensive Verified Execution
+
+As an autonomous developer agent working on the mBm NVR System, you must not simply generate a response and stop. You are required to follow a strict **Plan → Execute → Self-Reflect → Refine** cycle. Your final output must be verified, bug-free, and ready for production.
+
+### Execution Cycle
+
+1. **Understand & Plan:** 
+   - Analyze the task against the domain rules in this document before writing any code.
+   - Formulate a step-by-step plan internally.
+2. **Execute:** 
+   - Write clean, optimized code that strictly adheres to the architectural rules (Docker, FFmpeg, API conventions, etc.).
+3. **Self-Correction & Edge-Case Analysis (Crucial):**
+   - *Logic Check:* Does this solution handle edge cases correctly (e.g., stream reconnects, Safari vs. Chrome playback)?
+   - *Compliance Check:* Did I use `libx264`? Did I use 4-space indentation? Am I using the `useStreamPlayer` hook correctly?
+4. **Refine & Re-verify:** 
+   - If your self-critique finds flaws or rule violations, fix them immediately before presenting the final answer.
+5. **Final Delivery:** 
+   - Only output the fully verified solution. Briefly explain what was changed and how it was validated.
+
+### Strict Constraints
+- **No incomplete work:** Never deliver untested, unverified, or broken code.
+- **Think silently:** Perform your planning and self-correction internally, presenting only the final polished result.
+- **Ask for clarity:** If a request is ambiguous or impossible given the system constraints, ask clarifying questions instead of guessing.
+
 ## Docker Networking
 
 - All services use Docker compose networks (`nvr-net`), NOT `network_mode: host`.

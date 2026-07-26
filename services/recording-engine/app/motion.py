@@ -97,7 +97,8 @@ class MotionRecorderController:
                 result = await session.execute(
                     text(
                         """
-                        SELECT id, name, stream_main_uri, stream_sub_uri,
+                        SELECT id, name, recording_stream,
+                               stream_main_uri, stream_sub_uri,
                                username, encrypted_password
                         FROM cameras
                         WHERE id = :id AND is_active AND recording_mode = 'motion'
@@ -110,7 +111,7 @@ class MotionRecorderController:
                     return None
                 cam = dict(row._mapping)
                 cam["id"] = str(cam["id"])
-                stream_pref = await config.get_config_str(session, "recording.stream")
+                stream_pref = cam.get("recording_stream") or await config.get_config_str(session, "recording.stream") or "sub"
                 if stream_pref == "sub":
                     cam["stream_uri"] = cam["stream_sub_uri"] or cam["stream_main_uri"]
                 else:

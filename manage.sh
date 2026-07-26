@@ -394,27 +394,6 @@ show_status() {
   echo "── Infrastructure ──"
   docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "  No containers"
   echo ""
-  echo "── Dev Processes ──"
-  if [[ -f "${PID_DIR}/api.pid" ]]; then
-    PID=$(cat "${PID_DIR}/api.pid")
-    if kill -0 "$PID" 2>/dev/null; then
-      echo "  API:     PID $PID  → ${API_URL} (docs: ${API_DOCS})"
-    else
-      echo "  API:     (stale PID $PID — not running)"
-    fi
-  else
-    echo "  API:     not running"
-  fi
-  if [[ -f "${PID_DIR}/web.pid" ]]; then
-    PID=$(cat "${PID_DIR}/web.pid")
-    if kill -0 "$PID" 2>/dev/null; then
-      echo "  Web UI:  PID $PID  → ${WEB_URL}"
-    else
-      echo "  Web UI:  (stale PID $PID — not running)"
-    fi
-  else
-    echo "  Web UI:  not running"
-  fi
   echo "── URLs ──"
   echo "  Web UI:  ${WEB_URL}"
   echo "  API:     ${API_URL}"
@@ -468,68 +447,21 @@ all_setup() {
 }
 
 # ────────────────────────────────────────
-#  START / STOP / STATUS
+#  START / STOP / RESTART
 # ────────────────────────────────────────
-PID_DIR="${PROJECT_DIR}/.pids"
 
 start_cmd() {
-  load_env
-  mkdir -p "$PID_DIR"
-
   echo ""
   echo -e "${GREEN}══════ Starting NVR System ══════${NC}"
   echo ""
-
-  # Check prerequisites
-  if ! command -v ffmpeg &>/dev/null; then
-    warn "ffmpeg not found — live streaming will not work"
-    info "  Install: apt-get install ffmpeg"
-  fi
-  if ! python3 -c "import cryptography" 2>/dev/null; then
-    warn "cryptography module not found — camera auth will fail"
-    info "  Install: pip install cryptography --break-system-packages"
-  fi
-
-  # 1. Infrastructure
-  info "[1/5] Starting infrastructure (DB, Redis, MinIO, MediaMTX)..."
-  docker compose up -d nvr-db nvr-redis nvr-mediamtx 2>/dev/null
-  info "  Waiting for services to be healthy..."
-  sleep 4
-
-  # 2. DB migrations
-  info "[2/5] Running DB migrations..."
-  cd services/api
-  PYTHONPATH="${PROJECT_DIR}/services/api:${PROJECT_DIR}/packages/common" \
-    python3 -m alembic upgrade head 2>&1 | tail -1
-  cd "$PROJECT_DIR"
-
-  # 3. API
-  info "[3/5] Starting API (port 8000)..."
-  fuser -k 8000/tcp 2>/dev/null || true
-  sleep 0.5
-  cd services/api
-  PYTHONPATH="${PROJECT_DIR}/services/api:${PROJECT_DIR}/packages/common" \
-    setsid python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 \
-    </dev/null >"${PID_DIR}/api.log" 2>&1 &
-  echo $! > "${PID_DIR}/api.pid"
-  cd "$PROJECT_DIR"
-  ok "  API PID: $(cat "${PID_DIR}/api.pid")"
-
-  # 4. Web UI
-  info "[4/5] Starting Web UI (port 3000)..."
-  fuser -k 3000/tcp 2>/dev/null || true
-  sleep 0.5
-  cd services/web
-  npm install --silent 2>/dev/null || true
-  setsid npx vite --host 0.0.0.0 --port 3000 --strictPort \
-    </dev/null >"${PID_DIR}/web.log" 2>&1 &
-  echo $! > "${PID_DIR}/web.pid"
-  cd "$PROJECT_DIR"
-  ok "  Web UI PID: $(cat "${PID_DIR}/web.pid")"
-
-  # 5. Verify
-  info "[5/5] Verifying services..."
-  sleep 3
+  info "Starting all NVR services via Docker..."
+  docker compose up -d
+  info "Waiting for services to be healthy..."
+  sleep 5
+  info "Running DB migrations..."
+  docker exec nvr-api alembic upgrade head 2>&1 | tail -2 || true
+  echo ""
+  ok "NVR system started — http://localhost:3000"
   echo ""
   show_status
 }
@@ -538,41 +470,7 @@ stop_cmd() {
   echo ""
   echo -e "${YELLOW}══════ Stopping NVR System ══════${NC}"
   echo ""
-
-  # Kill API
-  if [[ -f "${PID_DIR}/api.pid" ]]; then
-    PID=$(cat "${PID_DIR}/api.pid")
-    if kill -0 "$PID" 2>/dev/null; then
-      info "Stopping API (PID: $PID)..."
-      kill "$PID" 2>/dev/null
-      sleep 0.5
-      kill -9 "$PID" 2>/dev/null || true
-      rm -f "${PID_DIR}/api.pid"
-      ok "  API stopped"
-    else
-      rm -f "${PID_DIR}/api.pid"
-    fi
-  fi
-  # Force-free port 8000
-  fuser -k 8000/tcp 2>/dev/null || true
-
-  # Kill Web UI
-  if [[ -f "${PID_DIR}/web.pid" ]]; then
-    PID=$(cat "${PID_DIR}/web.pid")
-    if kill -0 "$PID" 2>/dev/null; then
-      info "Stopping Web UI (PID: $PID)..."
-      kill "$PID" 2>/dev/null
-      sleep 0.5
-      kill -9 "$PID" 2>/dev/null || true
-      rm -f "${PID_DIR}/web.pid"
-      ok "  Web UI stopped"
-    else
-      rm -f "${PID_DIR}/web.pid"
-    fi
-  fi
-
-  # Stop Docker containers
-  info "Stopping Docker containers..."
+  info "Stopping all NVR containers..."
   docker compose down 2>/dev/null
   ok "All services stopped"
   echo ""

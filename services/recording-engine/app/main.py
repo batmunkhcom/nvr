@@ -42,7 +42,8 @@ async def _load_cameras() -> list[dict]:
         result = await session.execute(
             text(
                 """
-                SELECT id, name, recording_mode, stream_main_uri, stream_sub_uri,
+                SELECT id, name, recording_mode, recording_stream,
+                       stream_main_uri, stream_sub_uri,
                        username, encrypted_password
                 FROM cameras
                 WHERE is_active
@@ -53,12 +54,13 @@ async def _load_cameras() -> list[dict]:
         )
         rows = result.fetchall()
 
-        stream_pref = await config.get_config_str(session, "recording.stream")
+        stream_pref_default = await config.get_config_str(session, "recording.stream") or "sub"
 
     cameras = []
     for row in rows:
         cam = dict(row._mapping)
         cam["id"] = str(cam["id"])
+        stream_pref = cam.get("recording_stream") or stream_pref_default
         if stream_pref == "sub":
             cam["stream_uri"] = cam["stream_sub_uri"] or cam["stream_main_uri"]
         else:

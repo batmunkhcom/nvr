@@ -34,7 +34,7 @@ const LABELS: Record<string, [string, string | undefined, "text" | "number" | "t
   "mediamtx.hls_url": ["MediaMTX HLS URL", "Base URL used by browsers to play HLS streams. Must be reachable from client machines.", "text"],
   "recording.retention_days": ["Retention (days)", "Maximum days to keep recordings. Circular cleanup deletes earlier when the disk watermark is hit, whichever comes first.", "number"],
   "recording.segment_seconds": ["Segment Length (s)", "Length of one recording file. 300s is a good balance: shorter = finer deletion granularity, longer = fewer files.", "number"],
-  "recording.stream": ["Recording Stream", "'sub' = low bitrate sub-stream (~10x less disk, good for evidence). 'main' = full quality.", "select", ["sub", "main"]],
+  "recording.stream": ["Recording Stream (System Default)", "Fallback when a camera has no override. 'sub' = low bitrate sub-stream (~10x less disk, good for evidence). 'main' = full quality. Per-camera override available in camera settings.", "select", ["sub", "main"]],
   "storage.max_usage_percent": ["Disk Max Usage (%)", "When the recordings disk exceeds this, the oldest recordings are deleted automatically. Keeps the system from ever filling the disk.", "number"],
   "storage.min_free_gb": ["Disk Min Free (GB)", "Always keep at least this much free space. If free space drops below, oldest recordings are deleted until it recovers.", "number"],
   "notification.channels_enabled": ["Enabled Channels", 'JSON list of notification channels, e.g. ["telegram","webhook"]', "text"],

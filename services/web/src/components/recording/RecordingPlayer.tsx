@@ -18,6 +18,13 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
   const videoRef = useRef<HTMLVideoElement>(null);
   const [speed, setSpeed] = useState(1);
   const [muted, setMuted] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [hasError, setHasError] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [debugInfo, setDebugInfo] = useState("");
+  const isPlayingRef = useRef(false);
+  const hasErrorRef = useRef(false);
+  const checkRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -27,29 +34,102 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !src) return;
 
-    const seekIfNeeded = () => {
-      if (startOffset && startOffset > 0 && Number.isFinite(video.duration)) {
-        video.currentTime = Math.min(startOffset, Math.max(0, video.duration - 0.5));
+    setIsPlaying(false);
+    setHasError(false);
+    setErrorMsg("");
+    isPlayingRef.current = false;
+    hasErrorRef.current = false;
+
+    if (checkRef.current) clearInterval(checkRef.current);
+
+    let cancelled = false;
+    let blobUrl: string | null = null;
+
+    const onError = () => {
+      if (cancelled) return;
+      hasErrorRef.current = true;
+      const codes: Record<number, string> = {
+        1: "MEDIA_ERR_ABORTED",
+        2: "MEDIA_ERR_NETWORK — check server, auth, or CORS",
+        3: "MEDIA_ERR_DECODE — unsupported codec",
+        4: "MEDIA_ERR_SRC_NOT_SUPPORTED",
+      };
+      setErrorMsg(codes[video.error?.code || 0] || `Error ${video.error?.code}`);
+      setHasError(true);
+    };
+    video.addEventListener("error", onError);
+
+    const loadAndPlay = async () => {
+      try {
+        setDebugInfo("fetching...");
+        const resp = await fetch(src);
+        if (cancelled) return;
+        if (!resp.ok) {
+          setErrorMsg(`HTTP ${resp.status}: ${resp.statusText}`);
+          setHasError(true);
+          return;
+        }
+        setDebugInfo("downloading...");
+        const blob = await resp.blob();
+        if (cancelled) return;
+        blobUrl = URL.createObjectURL(blob);
+        video.src = blobUrl;
+        video.muted = muted;
+        if (autoPlay) video.play().catch(() => {});
+        setDebugInfo("playing...");
+      } catch (e: any) {
+        if (!cancelled) {
+          setErrorMsg(e.message || "Fetch failed");
+          setHasError(true);
+        }
       }
     };
+    loadAndPlay();
 
-    video.addEventListener("loadedmetadata", seekIfNeeded, { once: true });
-    video.src = src;
-    video.muted = muted;
-    if (autoPlay) video.play().catch(() => {});
+    checkRef.current = setInterval(() => {
+      const rs = video.readyState;
+      const rl = ["NONE","META","CUR","FUTURE","FULL"];
+      setDebugInfo(`rs=${rl[rs]}(${rs}) paused=${video.paused} t=${video.currentTime.toFixed(1)} ns=${video.networkState}`);
+      if (hasErrorRef.current || cancelled) return;
+      if (video.readyState >= 2 && !video.paused && video.currentTime > 0) {
+        if (!isPlayingRef.current) {
+          isPlayingRef.current = true;
+          setIsPlaying(true);
+          if (startOffset && startOffset > 0 && Number.isFinite(video.duration)) {
+            video.currentTime = Math.min(startOffset, Math.max(0, video.duration - 0.5));
+          }
+        }
+      }
+    }, 300);
 
     return () => {
-      video.removeEventListener("loadedmetadata", seekIfNeeded);
+      cancelled = true;
+      if (checkRef.current) clearInterval(checkRef.current);
+      video.removeEventListener("error", onError);
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
       video.pause();
-      video.src = "";
-      video.load();
     };
-  }, [src, autoPlay, startOffset]);
+  }, [src, autoPlay]);
 
   return (
     <div className="relative">
+      {!isPlaying && !hasError && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 z-10 rounded pointer-events-none">
+          <div className="animate-spin h-8 w-8 border-2 border-blue-500 border-t-transparent rounded-full mb-2" />
+          <p className="text-gray-400 text-sm">Loading video...</p>
+          <p className="text-gray-600 text-[10px] mt-1 font-mono">{debugInfo}</p>
+        </div>
+      )}
+      {hasError && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/90 z-10 rounded">
+          <div className="text-center p-4">
+            <p className="text-red-400 text-sm font-medium mb-2">Playback Error</p>
+            <p className="text-gray-500 text-xs max-w-xs break-all">{errorMsg}</p>
+          </div>
+        </div>
+      )}
       <video
         ref={videoRef}
         controls={controls}
