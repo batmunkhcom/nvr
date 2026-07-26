@@ -1,10 +1,9 @@
-import { useState, useEffect } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { ArrowUp, ArrowDown, AlertTriangle, Wifi, Loader2 } from "lucide-react";
 import { useCameras, useCameraMutations } from "../hooks/useCameras";
 import type { Camera, TestResult } from "../types/camera";
 import CameraAddDialog from "../components/camera/CameraAddDialog";
-import CameraEditDialog from "../components/camera/CameraEditDialog";
 import DiscoveryModal from "../components/camera/DiscoveryModal";
 import EmptyState from "../components/ui/EmptyState";
 import { useConfirm } from "../components/ui/ConfirmDialog";
@@ -36,25 +35,20 @@ export default function Cameras() {
   const { deleteCamera, testCamera, reorderCameras } = useCameraMutations();
   const { confirm } = useConfirm();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
   const [showAdd, setShowAdd] = useState(false);
-  const [editCam, setEditCam] = useState<Camera | null>(null);
   const [showDiscovery, setShowDiscovery] = useState(false);
   const [testingAll, setTestingAll] = useState(false);
   const [testing, setTesting] = useState<Set<string>>(new Set());
   const [testResult, setTestResult] = useState<Record<string, TestResult>>({});
 
   // Handle ?edit={id} query param from dashboard tile menu
-  useEffect(() => {
-    const editId = searchParams.get("edit");
-    if (editId && cameras) {
-      const cam = cameras.find((c) => c.id === editId);
-      if (cam) {
-        setEditCam(cam);
-        setSearchParams({}, { replace: true });
-      }
+  const editIdFromUrl = new URLSearchParams(window.location.search).get("edit");
+  if (editIdFromUrl && cameras) {
+    const cam = cameras.find((c) => c.id === editIdFromUrl);
+    if (cam) {
+      navigate(`/cameras/${cam.id}/edit`, { replace: true });
     }
-  }, [searchParams, cameras, setSearchParams]);
+  }
 
   const handleTest = async (id: string) => {
     setTesting((prev) => new Set([...prev, id]));
@@ -289,7 +283,7 @@ export default function Cameras() {
                   {testing.has(cam.id) ? <Loader2 size={12} className="animate-spin inline" /> : "Test"}
                 </button>
                 <button
-                  onClick={() => setEditCam(cam)}
+                  onClick={() => navigate(`/cameras/${cam.id}/edit`)}
                   title="Edit"
                   className="px-2 py-1 text-xs text-gray-400 hover:bg-gray-800 rounded"
                 >
@@ -309,11 +303,6 @@ export default function Cameras() {
       )}
 
       <CameraAddDialog open={showAdd} onClose={() => setShowAdd(false)} />
-      <CameraEditDialog
-        open={!!editCam}
-        onClose={() => setEditCam(null)}
-        camera={editCam}
-      />
       <DiscoveryModal open={showDiscovery} onClose={() => setShowDiscovery(false)} />
     </div>
   );

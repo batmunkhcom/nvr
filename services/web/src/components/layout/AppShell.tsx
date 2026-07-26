@@ -15,6 +15,7 @@ import LiveView from "../../pages/LiveViewPage";
 import Profile from "../../pages/Profile";
 import LPRReadings from "../../pages/LPRReadings";
 import StatisticsPage from "../../pages/Statistics";
+import CameraEditPage from "../../pages/CameraEditPage";
 
 export default function AppShell() {
   return (
@@ -26,7 +27,8 @@ export default function AppShell() {
            <Routes>
              <Route path="/" element={<Navigate to="/dashboard" replace />} />
              <Route path="/dashboard" element={<Dashboard />} />
-             <Route path="/cameras" element={<Cameras />} />
+              <Route path="/cameras" element={<Cameras />} />
+              <Route path="/cameras/:cameraId/edit" element={<CameraEditPage />} />
              <Route path="/network" element={<NetworkDashboard />} />
              <Route path="/wizard" element={<WizardPage />} />
              <Route path="/live/:cameraId" element={<LiveView />} />
