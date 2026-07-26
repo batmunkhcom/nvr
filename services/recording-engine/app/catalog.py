@@ -1,9 +1,12 @@
 """Segment catalog — reconciles on-disk MP4 segments with the recordings table.
 
-Scans STORAGE_LOCAL_PATH/<camera_id>/YYYY/MM/DD/*.mp4:
+Scans all active storage roots (from config.get_storage_roots()) for new
+closed segments. Each root is a mount_point from a storage_backend.
+
 - New closed segments (mtime older than STABLE_SECONDS) get a DB row so the
   API/Recordings page can list and stream them.
 - DB rows whose files disappeared (deleted by retention) are removed.
+- storage_backend_id is populated based on which mount_point the file lives under.
 Idempotent — safe to run repeatedly and after crashes.
 """
 
@@ -133,35 +136,41 @@ class SegmentCatalog:
         self._session_factory = session_factory
 
     async def scan(self) -> dict:
-        """One full reconciliation pass over the recordings directory."""
+        """One full reconciliation pass over all storage roots."""
         stats = {"registered": 0, "purged_rows": 0, "errors": 0}
-        base = config.STORAGE_LOCAL_PATH
-        if not os.path.isdir(base):
-            return stats
+        roots = config.get_storage_roots()
 
         async with self._session_factory() as session:
             known_paths = await self._load_known_paths(session)
             camera_modes = await self._load_camera_modes(session)
-            disk_files = self._walk_segments(base)
+            backend_map = await self._load_backend_map(session)
 
-            thumb_budget = 200  # backfill limit per scan
-            for path in sorted(disk_files):
-                if path in known_paths:
-                    if (
-                        thumb_budget > 0
-                        and self._needs_thumbnail(path)
-                        and await _make_thumbnail(path)
-                    ):
-                        thumb_budget -= 1
+            all_disk_files: set[str] = set()
+            thumb_budget = 200
+
+            for base in roots:
+                if not os.path.isdir(base):
                     continue
-                try:
-                    if await self._register(session, path, base, camera_modes):
-                        stats["registered"] += 1
-                except Exception:
-                    stats["errors"] += 1
-                    logger.warning("catalog_register_failed", path=path, exc_info=True)
+                disk_files = self._walk_segments(base)
+                all_disk_files.update(disk_files)
 
-            stats["purged_rows"] = await self._purge_missing(session, known_paths, disk_files)
+                for path in sorted(disk_files):
+                    if path in known_paths:
+                        if (
+                            thumb_budget > 0
+                            and self._needs_thumbnail(path)
+                            and await _make_thumbnail(path)
+                        ):
+                            thumb_budget -= 1
+                        continue
+                    try:
+                        if await self._register(session, path, base, camera_modes, backend_map):
+                            stats["registered"] += 1
+                    except Exception:
+                        stats["errors"] += 1
+                        logger.warning("catalog_register_failed", path=path, exc_info=True)
+
+            stats["purged_rows"] = await self._purge_missing(session, known_paths, all_disk_files)
             await session.commit()
 
         if stats["registered"] or stats["purged_rows"]:
@@ -175,6 +184,10 @@ class SegmentCatalog:
     async def _load_camera_modes(self, session: AsyncSession) -> dict[str, str]:
         result = await session.execute(text("SELECT id, recording_mode FROM cameras"))
         return {str(row[0]): row[1] for row in result.fetchall()}
+
+    async def _load_backend_map(self, session: AsyncSession) -> dict[str, str]:
+        """Returns {mount_point: backend_id} for all active filesystem backends."""
+        return await config.load_all_backend_mounts(session)
 
     @staticmethod
     def _needs_thumbnail(segment_path: str) -> bool:
@@ -207,7 +220,8 @@ class SegmentCatalog:
         return found
 
     async def _register(
-        self, session: AsyncSession, path: str, base: str, camera_modes: dict[str, str]
+        self, session: AsyncSession, path: str, base: str, camera_modes: dict[str, str],
+        backend_map: dict[str, str],
     ) -> bool:
         """Insert a recordings row for a closed segment. Returns True if inserted."""
         start_time = _parse_start_time(os.path.basename(path))
@@ -226,7 +240,6 @@ class SegmentCatalog:
             duration = min(mtime_age, 600.0)
         end_time = start_time + timedelta(seconds=duration)
 
-        # camera id is the first path component under the base dir
         rel = os.path.relpath(path, base)
         camera_id = rel.split(os.sep)[0]
         try:
@@ -234,6 +247,7 @@ class SegmentCatalog:
         except ValueError:
             return False
 
+        storage_backend_id = self._resolve_backend_id(path, backend_map)
         recording_type = "motion" if camera_modes.get(camera_id) == "motion" else "continuous"
         if await _make_thumbnail(path) is None:
             logger.warning("thumbnail_generation_failed", path=path)
@@ -242,9 +256,9 @@ class SegmentCatalog:
                 """
                 INSERT INTO recordings
                     (id, camera_id, file_path, file_size_bytes, duration_seconds,
-                     start_time, end_time, recording_type)
+                     start_time, end_time, recording_type, storage_backend_id)
                 VALUES (:id, :camera_id, :file_path, :size, :duration,
-                        :start_time, :end_time, :recording_type)
+                        :start_time, :end_time, :recording_type, :storage_backend_id)
                 ON CONFLICT DO NOTHING
                 """
             ),
@@ -257,9 +271,18 @@ class SegmentCatalog:
                 "start_time": start_time,
                 "end_time": end_time,
                 "recording_type": recording_type,
+                "storage_backend_id": storage_backend_id,
             },
         )
         return True
+
+    @staticmethod
+    def _resolve_backend_id(path: str, backend_map: dict[str, str]) -> str | None:
+        """Find which backend this file belongs to by matching mount_point prefix."""
+        for mount_point, backend_id in sorted(backend_map.items(), key=lambda x: -len(x[0])):
+            if path.startswith(mount_point):
+                return backend_id
+        return None
 
     async def _purge_missing(
         self, session: AsyncSession, known_paths: set[str], disk_files: set[str]

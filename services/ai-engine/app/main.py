@@ -122,6 +122,7 @@ def _build_worker(cam: dict):
         motion_only=motion_only,
         event_callback=_broadcast_event,
         plugins=plugins,
+        storage_path=cam.get("storage_mount_point"),
     )
 
 

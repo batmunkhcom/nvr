@@ -13,6 +13,7 @@ services:
     volumes:
       - ./config:/app/config:ro
       - ${STORAGE_HOST_PATH:-/data}:/data/recordings
+      - ${NFS_STORAGE_PATH:-/mnt/seaweedfs}:${NFS_STORAGE_PATH:-/mnt/seaweedfs}
     # Runtime volumes removed — code is baked into image
 
   nvr-stream-manager:

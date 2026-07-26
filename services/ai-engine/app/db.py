@@ -30,12 +30,15 @@ async def load_ai_cameras(session: AsyncSession) -> list[dict]:
     result = await session.execute(
         text(
             """
-            SELECT id, name, motion_source, stream_main_uri, stream_sub_uri,
-                   username, encrypted_password, ai_objects, ai_sensitivity,
-                   ai_min_confidence, ai_zones, ai_enabled, recording_mode,
-                   onvif_events_service_url, ai_plugins, lpr_config
-            FROM cameras
-            WHERE is_active AND (ai_enabled OR recording_mode = 'motion')
+            SELECT c.id, c.name, c.motion_source, c.stream_main_uri, c.stream_sub_uri,
+                   c.username, c.encrypted_password, c.ai_objects, c.ai_sensitivity,
+                   c.ai_min_confidence, c.ai_zones, c.ai_enabled, c.recording_mode,
+                   c.onvif_events_service_url, c.ai_plugins, c.lpr_config,
+                   sb.mount_point AS storage_mount_point
+            FROM cameras c
+            LEFT JOIN storage_backends sb
+                ON c.storage_backend_id = sb.id AND sb.is_active
+            WHERE c.is_active AND (c.ai_enabled OR c.recording_mode = 'motion')
             """
         )
     )

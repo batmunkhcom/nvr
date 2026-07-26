@@ -80,13 +80,14 @@ class MotionRecorderController:
             return
         async with self._session_factory() as session:
             segment_seconds = await config.get_config_int(session, "recording.segment_seconds")
+        output_base = cam.get("output_base", config.STORAGE_LOCAL_PATH)
         recorder = CameraRecorder(
             camera_id=cam["id"],
             camera_name=cam["name"],
             stream_uri=cam["stream_uri"],
             username=cam["username"],
             password=_decrypt(cam["encrypted_password"]),
-            output_base=config.STORAGE_LOCAL_PATH,
+            output_base=output_base,
             segment_seconds=segment_seconds,
         )
         self.recorders[camera_id] = recorder
@@ -117,11 +118,14 @@ class MotionRecorderController:
                 result = await session.execute(
                     text(
                         """
-                        SELECT id, name, recording_stream,
-                               stream_main_uri, stream_sub_uri,
-                               username, encrypted_password
-                        FROM cameras
-                        WHERE id = :id AND is_active AND recording_mode = 'motion'
+                        SELECT c.id, c.name, c.recording_stream,
+                               c.stream_main_uri, c.stream_sub_uri,
+                               c.username, c.encrypted_password,
+                               sb.mount_point AS storage_mount_point
+                        FROM cameras c
+                        LEFT JOIN storage_backends sb
+                            ON c.storage_backend_id = sb.id AND sb.is_active
+                        WHERE c.id = :id AND c.is_active AND c.recording_mode = 'motion'
                         """
                     ),
                     {"id": camera_id},
@@ -136,6 +140,7 @@ class MotionRecorderController:
                     cam["stream_uri"] = cam["stream_sub_uri"] or cam["stream_main_uri"]
                 else:
                     cam["stream_uri"] = cam["stream_main_uri"] or cam["stream_sub_uri"]
+                cam["output_base"] = cam.get("storage_mount_point") or config.STORAGE_LOCAL_PATH
                 return cam
         except Exception:
             logger.warning("motion_camera_load_failed", camera_id=camera_id, exc_info=True)

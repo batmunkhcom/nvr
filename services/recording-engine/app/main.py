@@ -29,6 +29,8 @@ from .catalog import SegmentCatalog
 from .motion import MotionRecorderController, motion_listener_loop
 from .recorder import CameraRecorder
 from .retention import RetentionManager
+from .s3_sync import S3SyncWorker
+from .tier_migration import TierMigrationWorker, MIGRATE_INTERVAL
 
 logger = structlog.get_logger()
 
@@ -64,7 +66,7 @@ async def _load_cameras() -> list[dict]:
                 """
                 SELECT id, name, recording_mode, recording_stream,
                        stream_main_uri, stream_sub_uri,
-                       username, encrypted_password
+                       username, encrypted_password, storage_backend_id
                 FROM cameras
                 WHERE is_active
                   AND recording_mode NOT IN ('disabled', 'never', 'motion')
@@ -80,6 +82,7 @@ async def _load_cameras() -> list[dict]:
     for row in rows:
         cam = dict(row._mapping)
         cam["id"] = str(cam["id"])
+        cam["storage_backend_id"] = str(cam["storage_backend_id"]) if cam.get("storage_backend_id") else None
         stream_pref = cam.get("recording_stream") or stream_pref_default
         if stream_pref == "sub":
             cam["stream_uri"] = cam["stream_sub_uri"] or cam["stream_main_uri"]
@@ -128,22 +131,33 @@ async def _reconcile() -> None:
 
     async with SessionFactory() as session:
         segment_seconds = await config.get_config_int(session, "recording.segment_seconds")
+        camera_storage_map = await config.build_camera_storage_map(session)
 
+    active_roots = {config.STORAGE_LOCAL_PATH}
     for cam in cameras:
         if cam["id"] in _recorders or not cam["stream_uri"]:
             continue
+        output_base = camera_storage_map.get(cam["id"], config.STORAGE_LOCAL_PATH)
+        active_roots.add(output_base)
         recorder = CameraRecorder(
             camera_id=cam["id"],
             camera_name=cam["name"],
             stream_uri=cam["stream_uri"],
             username=cam["username"],
             password=_decrypt(cam["encrypted_password"]),
-            output_base=config.STORAGE_LOCAL_PATH,
+            output_base=output_base,
             segment_seconds=segment_seconds,
         )
         _recorders[cam["id"]] = recorder
         recorder.start()
-        logger.info("recorder_added", camera=cam["name"], camera_id=cam["id"])
+        logger.info(
+            "recorder_added",
+            camera=cam["name"],
+            camera_id=cam["id"],
+            output_base=output_base,
+        )
+
+    config.ACTIVE_STORAGE_ROOTS = active_roots | {v for v in camera_storage_map.values()}
 
 
 async def _reconcile_loop() -> None:
@@ -170,6 +184,28 @@ async def _retention_loop() -> None:
         except Exception:
             logger.warning("retention_run_failed", exc_info=True)
         await _interruptible_sleep(config.RETENTION_INTERVAL)
+
+
+async def _s3_sync_loop() -> None:
+    from .s3_sync import S3SyncWorker, SYNC_INTERVAL
+
+    sync = S3SyncWorker(SessionFactory)
+    while not SHUTDOWN.is_set():
+        try:
+            await sync.run()
+        except Exception:
+            logger.warning("s3_sync_failed", exc_info=True)
+        await _interruptible_sleep(SYNC_INTERVAL)
+
+
+async def _tier_migration_loop() -> None:
+    migration = TierMigrationWorker(SessionFactory)
+    while not SHUTDOWN.is_set():
+        try:
+            await migration.run()
+        except Exception:
+            logger.warning("tier_migration_failed", exc_info=True)
+        await _interruptible_sleep(MIGRATE_INTERVAL)
 
 
 async def _analytics_loop() -> None:
@@ -207,6 +243,8 @@ async def main() -> None:
         asyncio.create_task(_catalog_loop()),
         asyncio.create_task(_retention_loop()),
         asyncio.create_task(_analytics_loop()),
+        asyncio.create_task(_s3_sync_loop()),
+        asyncio.create_task(_tier_migration_loop()),
         asyncio.create_task(motion_listener_loop(_motion_controller, SHUTDOWN)),
     ]
 

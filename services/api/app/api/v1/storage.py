@@ -12,11 +12,16 @@ from ...core.database import get_db
 from ...middleware.auth import get_current_user, require_admin
 from ...services.recording_service import (
     create_storage_backend,
+    create_storage_tier,
     delete_storage_backend,
+    delete_storage_tier,
     get_storage_backend,
+    get_storage_tier,
     get_storage_usage,
     list_storage_backends,
+    list_storage_tiers,
     update_storage_backend,
+    update_storage_tier,
 )
 
 logger = structlog.get_logger()
@@ -196,3 +201,106 @@ def _backend_to_response(b) -> dict:
         "health_status": b.health_status,
         "last_health_check": b.last_health_check.isoformat() if b.last_health_check else None,
     }
+
+
+class TierCreate(BaseModel):
+    name: str
+    backend_id: uuid.UUID
+    priority_level: int
+    retention_days: int
+    applies_to_types: list[str] | None = None
+    min_free_bytes: int = 10_737_418_240
+    max_used_percent: int = 90
+
+
+class TierUpdate(BaseModel):
+    name: str | None = None
+    priority_level: int | None = None
+    retention_days: int | None = None
+    applies_to_types: list[str] | None = None
+    min_free_bytes: int | None = None
+    max_used_percent: int | None = None
+    is_active: bool | None = None
+
+
+def _tier_to_response(t) -> dict:
+    return {
+        "id": str(t.id),
+        "name": t.name,
+        "backend_id": str(t.backend_id),
+        "priority_level": t.priority_level,
+        "retention_days": t.retention_days,
+        "applies_to_types": t.applies_to_types,
+        "min_free_bytes": t.min_free_bytes,
+        "max_used_percent": t.max_used_percent,
+        "is_active": t.is_active,
+        "created_at": t.created_at.isoformat() if t.created_at else None,
+    }
+
+
+@router.get("/tiers")
+async def get_tiers(
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    return await list_storage_tiers(db)
+
+
+@router.post("/tiers", status_code=status.HTTP_201_CREATED)
+async def add_tier(
+    body: TierCreate,
+    current_user: Annotated[dict, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    tier = await create_storage_tier(
+        db,
+        name=body.name,
+        backend_id=body.backend_id,
+        priority_level=body.priority_level,
+        retention_days=body.retention_days,
+        applies_to_types=body.applies_to_types,
+        min_free_bytes=body.min_free_bytes,
+        max_used_percent=body.max_used_percent,
+    )
+    return {"data": _tier_to_response(tier)}
+
+
+@router.get("/tiers/{tier_id}")
+async def get_tier(
+    tier_id: uuid.UUID,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    tier = await get_storage_tier(tier_id, db)
+    return {"data": _tier_to_response(tier)}
+
+
+@router.patch("/tiers/{tier_id}")
+async def edit_tier(
+    tier_id: uuid.UUID,
+    body: TierUpdate,
+    current_user: Annotated[dict, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    tier = await update_storage_tier(
+        tier_id,
+        db,
+        name=body.name,
+        priority_level=body.priority_level,
+        retention_days=body.retention_days,
+        applies_to_types=body.applies_to_types,
+        min_free_bytes=body.min_free_bytes,
+        max_used_percent=body.max_used_percent,
+        is_active=body.is_active,
+    )
+    return {"data": _tier_to_response(tier)}
+
+
+@router.delete("/tiers/{tier_id}")
+async def remove_tier(
+    tier_id: uuid.UUID,
+    current_user: Annotated[dict, Depends(require_admin)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    await delete_storage_tier(tier_id, db)
+    return {"data": {"deleted": str(tier_id)}}

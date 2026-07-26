@@ -123,6 +123,7 @@ class FrameSampler:
         motion_only: bool = False,
         event_callback=None,
         plugins: list | None = None,
+        storage_path: str | None = None,
     ):
         self.camera_id = camera_id
         self.camera_name = camera_name
@@ -134,6 +135,7 @@ class FrameSampler:
         self.ai_zones = [z for z in (ai_zones or []) if len(z.get("points", [])) >= 3]
         self.motion_only = motion_only
         self.plugins = plugins or []
+        self.storage_path = storage_path or os.environ.get("STORAGE_LOCAL_PATH", "/data/recordings")
 
         self._detector = AIDetector.shared()
         self._motion = MotionDetector(sensitivity=ai_sensitivity or "medium")
@@ -466,9 +468,7 @@ class FrameSampler:
         return frame
 
     async def _save_snapshot(self, data: bytes, ts: datetime) -> str | None:
-        snap_dir = os.path.join(
-            os.environ.get("STORAGE_LOCAL_PATH", "/data/recordings"), "snapshots"
-        )
+        snap_dir = os.path.join(self.storage_path, "snapshots")
         os.makedirs(snap_dir, exist_ok=True)
         path = os.path.join(snap_dir, f"{self.camera_id}_{ts.strftime('%Y%m%d_%H%M%S_%f')}.jpg")
         await asyncio.to_thread(_write_file, path, data)

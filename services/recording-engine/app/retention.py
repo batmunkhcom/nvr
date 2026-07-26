@@ -3,10 +3,12 @@
 Policy:
 1. Age-based: segments older than retention.default_days are deleted.
 2. Circular: when disk usage exceeds storage.max_usage_percent OR free space
-   drops below storage.min_free_gb, the OLDEST segments are deleted first
-   until the watermark is satisfied — the disk can never fill up.
+   drops below storage.min_free_gb across any storage root, the OLDEST
+   segments are deleted first until the watermark is satisfied — the disk
+   can never fill up.
 3. Files younger than PROTECT_SECONDS (still being written) are never deleted.
 4. Every file delete also removes the recordings DB row (kept in sync).
+5. Multi-root: each storage root is checked independently for watermarks.
 """
 
 from __future__ import annotations
@@ -94,27 +96,31 @@ class RetentionManager:
     ) -> tuple[int, int]:
         deleted = 0
         freed = 0
-        for _ in range(MAX_DELETES_PER_RUN):
-            usage = await asyncio.to_thread(shutil.disk_usage, config.STORAGE_LOCAL_PATH)
-            usage_pct = usage.used / usage.total * 100 if usage.total else 0
-            free_gb = usage.free / (1024**3)
-            if usage_pct < max_usage_pct and free_gb >= min_free_gb:
-                break
+        roots = config.get_storage_roots()
+        for root in roots:
+            if not os.path.isdir(root):
+                continue
+            for _ in range(MAX_DELETES_PER_RUN):
+                usage = await asyncio.to_thread(shutil.disk_usage, root)
+                usage_pct = usage.used / usage.total * 100 if usage.total else 0
+                free_gb = usage.free / (1024**3)
+                if usage_pct < max_usage_pct and free_gb >= min_free_gb:
+                    break
 
-            row = await self._oldest_recording()
-            if row is None:
-                logger.critical(
-                    "retention_nothing_to_delete",
-                    usage_pct=round(usage_pct, 1),
-                    free_gb=round(free_gb, 2),
-                )
-                break
-            d, f = await self._delete_rows([row])
-            deleted += d
-            freed += f
-            if d == 0:
-                # Oldest segment is protected or undeletable — cannot make progress
-                break
+                row = await self._oldest_recording()
+                if row is None:
+                    logger.critical(
+                        "retention_nothing_to_delete",
+                        root=root,
+                        usage_pct=round(usage_pct, 1),
+                        free_gb=round(free_gb, 2),
+                    )
+                    break
+                d, f = await self._delete_rows([row])
+                deleted += d
+                freed += f
+                if d == 0:
+                    break
 
         if deleted:
             logger.warning("retention_circular_cleanup", deleted=deleted, freed_bytes=freed)
@@ -182,16 +188,18 @@ class RetentionManager:
     @staticmethod
     def _prune_empty_dirs() -> None:
         """Remove empty Y/M/D directories left behind after deletes."""
-        base = config.STORAGE_LOCAL_PATH
-        for camera_dir in os.listdir(base):
-            cam_path = os.path.join(base, camera_dir)
-            if not os.path.isdir(cam_path):
+        for base in config.get_storage_roots():
+            if not os.path.isdir(base):
                 continue
-            for root, dirs, _files in os.walk(cam_path, topdown=False):
-                for d in dirs:
-                    full = os.path.join(root, d)
-                    try:
-                        if not os.listdir(full):
-                            os.rmdir(full)
-                    except OSError:
-                        pass
+            for camera_dir in os.listdir(base):
+                cam_path = os.path.join(base, camera_dir)
+                if not os.path.isdir(cam_path):
+                    continue
+                for root, dirs, _files in os.walk(cam_path, topdown=False):
+                    for d in dirs:
+                        full = os.path.join(root, d)
+                        try:
+                            if not os.listdir(full):
+                                os.rmdir(full)
+                        except OSError:
+                            pass

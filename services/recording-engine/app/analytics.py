@@ -32,8 +32,24 @@ class DiskAnalytics:
         self._session_factory = session_factory
 
     async def run(self) -> dict:
-        """Compute and persist the storage analysis. Returns the analysis dict."""
-        usage = await asyncio.to_thread(shutil.disk_usage, config.STORAGE_LOCAL_PATH)
+        """Compute and persist the storage analysis. Aggregates across all roots."""
+        roots = config.get_storage_roots()
+        total_used = 0
+        total_free = 0
+        total_size = 0
+        for root in roots:
+            if os.path.isdir(root):
+                usage = await asyncio.to_thread(shutil.disk_usage, root)
+                total_used += usage.used
+                total_free += usage.free
+                total_size += usage.total
+
+        if total_size == 0:
+            usage = await asyncio.to_thread(shutil.disk_usage, config.STORAGE_LOCAL_PATH)
+            total_used = usage.used
+            total_free = usage.free
+            total_size = usage.total
+
         since = datetime.now(UTC) - timedelta(hours=WINDOW_HOURS)
 
         async with self._session_factory() as session:
@@ -121,7 +137,7 @@ class DiskAnalytics:
             )
         per_camera.sort(key=lambda c: c["stored_gb"], reverse=True)
 
-        free_bytes = usage.free
+        free_bytes = total_free
         days_fit = round(free_bytes / (total_bytes_day * 1024**3), 1) if total_bytes_day else None
 
         analysis = {
@@ -131,11 +147,11 @@ class DiskAnalytics:
             "total_gb_per_day": round(total_bytes_day, 2),
             "total_stored_gb": round(total_stored_gb, 2),
             "disk": {
-                "path": config.STORAGE_LOCAL_PATH,
-                "total_gb": round(usage.total / (1024**3), 1),
-                "used_gb": round(usage.used / (1024**3), 1),
+                "path": ", ".join(sorted(roots)),
+                "total_gb": round(total_size / (1024**3), 1),
+                "used_gb": round(total_used / (1024**3), 1),
                 "free_gb": round(free_bytes / (1024**3), 1),
-                "used_percent": round(usage.used / usage.total * 100, 1) if usage.total else 0,
+                "used_percent": round(total_used / total_size * 100, 1) if total_size else 0,
             },
             "days_fit": days_fit,
         }

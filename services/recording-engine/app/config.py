@@ -20,6 +20,7 @@ DB_PASSWORD = os.environ.get("POSTGRES_PASSWORD") or os.environ.get("DB_PASSWORD
 DATABASE_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 STORAGE_LOCAL_PATH = os.environ.get("STORAGE_LOCAL_PATH", "/data/recordings")
+ACTIVE_STORAGE_ROOTS: set[str] = set()
 FFMPEG_PATH = os.environ.get("FFMPEG_PATH", "ffmpeg")
 FFPROBE_PATH = os.environ.get("FFPROBE_PATH", "ffprobe")
 
@@ -68,17 +69,12 @@ async def get_config_str(session: AsyncSession, key: str) -> str:
 
 
 async def resolve_storage_path(session: AsyncSession) -> str:
-    """Read active local storage backend mount_point from DB, fall back to env var.
-
-    This connects the admin panel storage configuration to the actual recording
-    engine — when a user creates a storage backend from the UI, the recording
-    engine will use its mount_point as the output directory.
-    """
+    """Read highest-priority active filesystem backend mount_point, fall back to env."""
     try:
         result = await session.execute(
             text(
                 "SELECT mount_point FROM storage_backends "
-                "WHERE is_active AND backend_type = 'local' "
+                "WHERE is_active AND backend_type IN ('local', 'nfs', 'smb') "
                 "ORDER BY priority LIMIT 1"
             )
         )
@@ -92,3 +88,38 @@ async def resolve_storage_path(session: AsyncSession) -> str:
     fallback = os.environ.get("STORAGE_LOCAL_PATH", "/data/recordings")
     logger.info("storage_path_from_env", path=fallback)
     return fallback
+
+
+def get_storage_roots() -> set[str]:
+    """All unique storage roots to scan for catalog/retention/analytics."""
+    return ACTIVE_STORAGE_ROOTS or {STORAGE_LOCAL_PATH}
+
+
+async def load_all_backend_mounts(session: AsyncSession) -> dict[str, str]:
+    """Returns {mount_point: backend_id} for all active filesystem backends."""
+    try:
+        result = await session.execute(
+            text(
+                "SELECT mount_point, id FROM storage_backends "
+                "WHERE is_active AND backend_type IN ('local', 'nfs', 'smb')"
+            )
+        )
+        return {row[0]: str(row[1]) for row in result.fetchall() if row[0]}
+    except Exception:
+        return {}
+
+
+async def build_camera_storage_map(session: AsyncSession) -> dict[str, str]:
+    """Returns {camera_id: output_base} for cameras with assigned backends."""
+    try:
+        result = await session.execute(
+            text(
+                "SELECT c.id, sb.mount_point FROM cameras c "
+                "JOIN storage_backends sb ON c.storage_backend_id = sb.id "
+                "WHERE sb.is_active AND sb.backend_type IN ('local', 'nfs', 'smb')"
+            )
+        )
+        return {str(row[0]): row[1] for row in result.fetchall()}
+    except Exception:
+        logger.warning("camera_storage_map_failed", exc_info=True)
+        return {}

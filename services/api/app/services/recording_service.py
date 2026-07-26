@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models.camera import Camera
 from ..models.recording import Recording
 from ..models.storage_backend import StorageBackend
+from ..models.storage_tier import StorageTier
 
 logger = structlog.get_logger()
 
@@ -229,6 +230,97 @@ async def delete_storage_backend(backend_id: uuid.UUID, db: AsyncSession) -> Non
     logger.info("storage_backend_deleted", backend_id=str(backend_id))
 
 
+async def list_storage_tiers(db: AsyncSession) -> dict:
+    result = await db.execute(
+        select(StorageTier).order_by(StorageTier.priority_level)
+    )
+    tiers = result.scalars().all()
+    return {"data": [_tier_to_dict(t) for t in tiers]}
+
+
+async def get_storage_tier(tier_id: uuid.UUID, db: AsyncSession) -> StorageTier:
+    result = await db.execute(select(StorageTier).where(StorageTier.id == tier_id))
+    tier = result.scalar_one_or_none()
+    if not tier:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Storage tier not found"
+        )
+    return tier
+
+
+async def create_storage_tier(
+    db: AsyncSession,
+    name: str,
+    backend_id: uuid.UUID,
+    priority_level: int,
+    retention_days: int,
+    applies_to_types: list[str] | None = None,
+    min_free_bytes: int = 10_737_418_240,
+    max_used_percent: int = 90,
+) -> StorageTier:
+    from ..models.storage_backend import StorageBackend
+
+    backend = await db.execute(
+        select(StorageBackend).where(StorageBackend.id == backend_id)
+    )
+    if not backend.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Storage backend not found"
+        )
+    tier = StorageTier(
+        name=name,
+        backend_id=backend_id,
+        priority_level=priority_level,
+        retention_days=retention_days,
+        applies_to_types=applies_to_types or ["continuous"],
+        min_free_bytes=min_free_bytes,
+        max_used_percent=max_used_percent,
+    )
+    db.add(tier)
+    await db.flush()
+    logger.info("storage_tier_created", tier_id=str(tier.id), name=name)
+    return tier
+
+
+async def update_storage_tier(
+    tier_id: uuid.UUID,
+    db: AsyncSession,
+    name: str | None = None,
+    priority_level: int | None = None,
+    retention_days: int | None = None,
+    applies_to_types: list[str] | None = None,
+    min_free_bytes: int | None = None,
+    max_used_percent: int | None = None,
+    is_active: bool | None = None,
+) -> StorageTier:
+    tier = await get_storage_tier(tier_id, db)
+    if name is not None:
+        tier.name = name
+    if priority_level is not None:
+        tier.priority_level = priority_level
+    if retention_days is not None:
+        tier.retention_days = retention_days
+    if applies_to_types is not None:
+        tier.applies_to_types = applies_to_types
+    if min_free_bytes is not None:
+        tier.min_free_bytes = min_free_bytes
+    if max_used_percent is not None:
+        tier.max_used_percent = max_used_percent
+    if is_active is not None:
+        tier.is_active = is_active
+    tier.updated_at = datetime.now(UTC)
+    await db.flush()
+    logger.info("storage_tier_updated", tier_id=str(tier_id))
+    return tier
+
+
+async def delete_storage_tier(tier_id: uuid.UUID, db: AsyncSession) -> None:
+    tier = await get_storage_tier(tier_id, db)
+    await db.delete(tier)
+    await db.flush()
+    logger.info("storage_tier_deleted", tier_id=str(tier_id))
+
+
 def _recording_to_dict(r: Recording, camera_name: str = "") -> dict:
     return {
         "id": str(r.id),
@@ -261,6 +353,21 @@ def _backend_to_dict(b: StorageBackend) -> dict:
         "is_active": b.is_active,
         "health_status": b.health_status,
         "last_health_check": b.last_health_check.isoformat() if b.last_health_check else None,
+    }
+
+
+def _tier_to_dict(t: StorageTier) -> dict:
+    return {
+        "id": str(t.id),
+        "name": t.name,
+        "backend_id": str(t.backend_id),
+        "priority_level": t.priority_level,
+        "retention_days": t.retention_days,
+        "applies_to_types": t.applies_to_types,
+        "min_free_bytes": t.min_free_bytes,
+        "max_used_percent": t.max_used_percent,
+        "is_active": t.is_active,
+        "created_at": t.created_at.isoformat() if t.created_at else None,
     }
 
 
