@@ -1,5 +1,5 @@
-import { useRef, useEffect, useState } from "react";
-import { Volume2, VolumeX, Download, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
+import { useRef, useEffect, useState, useCallback } from "react";
+import { Volume2, VolumeX, Download, ZoomIn, ZoomOut, RotateCcw, Maximize2, Minimize2 } from "lucide-react";
 import { useVideoZoom } from "../../hooks/useVideoZoom";
 
 interface Props {
@@ -17,12 +17,14 @@ const SPEEDS = [0.125, 0.25, 0.5, 0.75, 1, 1.5, 2, 4, 8];
 
 export default function RecordingPlayer({ src, poster, autoPlay = true, controls = true, className = "", startOffset, filename, onDownload }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const [speed, setSpeed] = useState(1);
   const [muted, setMuted] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [debugInfo, setDebugInfo] = useState("");
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const isPlayingRef = useRef(false);
   const hasErrorRef = useRef(false);
   const checkRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -30,6 +32,20 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
   const { scale, zoomIn, zoomOut, reset, transformStyle, marquee,
           onWheel, onMouseDown, onMouseMove, onMouseUp, onDoubleClick } =
     useVideoZoom({ marquee: true });
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else {
+      wrapperRef.current?.requestFullscreen().catch(() => {});
+    }
+  }, []);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -136,7 +152,8 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
         </div>
       )}
       <div
-        className="relative overflow-hidden rounded bg-black"
+        ref={wrapperRef}
+        className={`relative overflow-hidden rounded bg-black ${isFullscreen ? "h-full w-full" : ""}`}
         onWheel={onWheel}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
@@ -146,13 +163,13 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
       >
         <video
           ref={videoRef}
-          controls={controls}
+          controls={scale <= 1 ? controls : false}
           muted={muted}
           autoPlay={autoPlay}
           poster={poster}
           playsInline
           preload="auto"
-          className={`w-full max-w-3xl aspect-video bg-black rounded ${className}`}
+          className={`bg-black rounded ${isFullscreen ? "w-full h-full object-contain" : "w-full max-w-3xl aspect-video"} ${className}`}
           style={transformStyle}
         />
         {/* Marquee selection overlay */}
@@ -209,6 +226,13 @@ export default function RecordingPlayer({ src, poster, autoPlay = true, controls
             {s}x
           </button>
         ))}
+        <button
+          onClick={toggleFullscreen}
+          className="p-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white ml-1"
+          title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+        >
+          {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+        </button>
         <span className="text-gray-600 mx-1">|</span>
         <span className="text-xs text-gray-500">Zoom:</span>
         <button

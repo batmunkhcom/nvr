@@ -27,22 +27,26 @@ export function useVideoZoom(opts?: ZoomOptions) {
     const last = useRef({ x: 0, y: 0 });
     const containerRef = useRef<DOMRect | null>(null);
     const marqueeRef = useRef<Rect | null>(null);
+    const scaleRef = useRef(1);
 
-    const zoomIn = useCallback(() => setScale((s) => Math.min(s * STEP, MAX_SCALE)), []);
+    const zoomIn = useCallback(() => setScale((s) => { const n = Math.min(s * STEP, MAX_SCALE); scaleRef.current = n; return n; }), []);
     const zoomOut = useCallback(() => {
         setScale((s) => {
             const n = s / STEP;
             if (n < 1.05) {
+                scaleRef.current = 1;
                 setDx(0);
                 setDy(0);
                 return 1;
             }
+            scaleRef.current = n;
             setDx((x) => x / STEP);
             setDy((y) => y / STEP);
             return Math.max(n, MIN_SCALE);
         });
     }, []);
     const reset = useCallback(() => {
+        scaleRef.current = 1;
         setScale(1);
         setDx(0);
         setDy(0);
@@ -58,11 +62,13 @@ export function useVideoZoom(opts?: ZoomOptions) {
         setScale((s) => {
             const n = s * factor;
             if (n < 1.05) {
+                scaleRef.current = 1;
                 setDx(0);
                 setDy(0);
                 return 1;
             }
             const clamped = Math.min(n, MAX_SCALE);
+            scaleRef.current = clamped;
             setDx((x) => x + mx * (s - clamped) / s);
             setDy((y) => y + my * (s - clamped) / s);
             return clamped;
@@ -113,8 +119,9 @@ export function useVideoZoom(opts?: ZoomOptions) {
             return;
         }
         if (!dragging.current) return;
-        setDx((x) => x + e.clientX - last.current.x);
-        setDy((y) => y + e.clientY - last.current.y);
+        const s = scaleRef.current;
+        setDx((x) => x + (e.clientX - last.current.x) / s);
+        setDy((y) => y + (e.clientY - last.current.y) / s);
         last.current = { x: e.clientX, y: e.clientY };
     }, []);
 
@@ -128,10 +135,11 @@ export function useVideoZoom(opts?: ZoomOptions) {
                 cr.height / mr.height,
             );
             const clamped = Math.min(MAX_SCALE, Math.max(MIN_SCALE, targetScale));
+            scaleRef.current = clamped;
             const centerX = mr.left + mr.width / 2;
             const centerY = mr.top + mr.height / 2;
-            const newDx = (cr.width / 2 - centerX);
-            const newDy = (cr.height / 2 - centerY);
+            const newDx = (cr.width / 2) / clamped - centerX;
+            const newDy = (cr.height / 2) / clamped - centerY;
             setScale(clamped);
             setDx(newDx);
             setDy(newDy);
