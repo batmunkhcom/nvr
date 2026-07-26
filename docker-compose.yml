@@ -130,7 +130,7 @@ services:
       - ./packages:/app/packages
       - ./config:/app/config
       - ${STORAGE_HOST_PATH:-/data}:/data/recordings
-      - ${NFS_STORAGE_PATH:-/mnt/seaweedfs}:${NFS_STORAGE_PATH:-/mnt/seaweedfs}
+      - ${SEAWEEDFS_MOUNT_PATH:-/mnt/seaweedfs}:${SEAWEEDFS_MOUNT_PATH:-/mnt/seaweedfs}
     depends_on:
       nvr-db:
         condition: service_healthy
@@ -231,7 +231,7 @@ services:
     working_dir: /app/services/recording-engine
     volumes:
       - ${STORAGE_HOST_PATH:-/data}:/data/recordings
-      - ${NFS_STORAGE_PATH:-/mnt/seaweedfs}:${NFS_STORAGE_PATH:-/mnt/seaweedfs}
+      - ${SEAWEEDFS_MOUNT_PATH:-/mnt/seaweedfs}:${SEAWEEDFS_MOUNT_PATH:-/mnt/seaweedfs}
       - ./services/recording-engine:/app/services/recording-engine
       - ./packages:/app/packages
     depends_on:
@@ -274,7 +274,7 @@ services:
     volumes:
       - ai_models:/app/models
       - ${STORAGE_HOST_PATH:-/data}:/data/recordings
-      - ${NFS_STORAGE_PATH:-/mnt/seaweedfs}:${NFS_STORAGE_PATH:-/mnt/seaweedfs}
+      - ${SEAWEEDFS_MOUNT_PATH:-/mnt/seaweedfs}:${SEAWEEDFS_MOUNT_PATH:-/mnt/seaweedfs}
       - ./services/ai-engine:/app/services/ai-engine
       - ./packages:/app/packages
     depends_on:
