@@ -129,7 +129,7 @@ services:
       - ./services/api:/app/services/api
       - ./packages:/app/packages
       - ./config:/app/config
-      - recordings:/data/recordings
+      - ${STORAGE_HOST_PATH:-/data}:/data/recordings
     depends_on:
       nvr-db:
         condition: service_healthy
@@ -229,7 +229,7 @@ services:
     command: ["python", "-m", "app.main"]
     working_dir: /app/services/recording-engine
     volumes:
-      - recordings:/data/recordings
+      - ${STORAGE_HOST_PATH:-/data}:/data/recordings
       - ./services/recording-engine:/app/services/recording-engine
       - ./packages:/app/packages
     depends_on:
@@ -271,7 +271,7 @@ services:
     working_dir: /app/services/ai-engine
     volumes:
       - ai_models:/app/models
-      - recordings:/data/recordings
+      - ${STORAGE_HOST_PATH:-/data}:/data/recordings
       - ./services/ai-engine:/app/services/ai-engine
       - ./packages:/app/packages
     depends_on:
@@ -352,6 +352,5 @@ volumes:
   pg_data:
   redis_data:
   mosquitto_data:
-  recordings:
   ai_models:
   mediamtx_hls:

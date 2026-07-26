@@ -190,6 +190,9 @@ async def _interruptible_sleep(seconds: float) -> None:
 
 
 async def main() -> None:
+    async with SessionFactory() as session:
+        config.STORAGE_LOCAL_PATH = await config.resolve_storage_path(session)
+
     logger.info(
         "recording_engine_starting",
         version="1.0.0",

@@ -304,12 +304,14 @@ async def get_timeline_segments(
 
 async def get_storage_usage(db: AsyncSession) -> dict:
     """Aggregate storage usage — uses real filesystem stats, not stale DB rows."""
+    import os
     import shutil
 
     result = await db.execute(select(StorageBackend).where(StorageBackend.is_active.is_(True)))
     backends = result.scalars().all()
 
-    mount_point = backends[0].mount_point if backends else "/data/recordings"
+    default_path = os.environ.get("STORAGE_LOCAL_PATH", "/data/recordings")
+    mount_point = backends[0].mount_point if backends else default_path
     try:
         usage = shutil.disk_usage(mount_point)
         total = usage.total

@@ -66,10 +66,15 @@ class StorageBackend(ABC):
         """Copy file to another backend with checksum verification."""
         async for chunk in self.read_stream(source_path):
             await dest_backend._write_chunk(dest_path, chunk)
+        await dest_backend._finish_chunked_upload(dest_path)
 
     @abstractmethod
     async def _write_chunk(self, path: str, chunk: bytes) -> None:
         """Internal chunk write — implemented per backend."""
+
+    async def _finish_chunked_upload(self, path: str) -> None:
+        """Complete a multipart/chunked upload. Default no-op for backends
+        that flush every chunk (e.g. LocalStorage). Override for S3."""
 
     async def free_percent(self) -> float:
         """Percentage of free storage space."""
@@ -157,7 +162,14 @@ class LocalStorage(StorageBackend):
 
 
 class S3Storage(StorageBackend):
-    """S3-compatible (MinIO/AWS) storage backend using aiobotocore."""
+    """S3-compatible (MinIO/AWS) storage backend using aiobotocore.
+
+    Supports multipart upload for files > 5 MB, which is the minimum part
+    size required by S3. Smaller files use a single put_object call.
+    """
+
+    MULTIPART_MIN = 5_242_880  # 5 MB — S3 minimum part size
+    MAX_CONCURRENCY = 4
 
     def __init__(self, backend_id: str, name: str, config: dict):
         super().__init__(backend_id, name, config)
@@ -167,6 +179,7 @@ class S3Storage(StorageBackend):
         self.bucket = config.get("bucket", "nvr-recordings")
         self.secure = config.get("secure", False)
         self._client = None
+        self._upload_state: dict[str, dict] = {}
 
     async def _get_client(self):
         if self._client is None:
@@ -201,10 +214,41 @@ class S3Storage(StorageBackend):
             return {"status": "unhealthy", "error": str(e)}
 
     async def total_bytes(self) -> int:
-        return 1_000_000_000_000
+        total = self.config.get("total_bytes", 0)
+        if total > 0:
+            return total
+        try:
+            client = await self._get_client()
+            resp = await client.get_bucket_quota(Bucket=self.bucket)
+            return resp.get("Quota", {}).get("StorageLimit", 0) or 1_000_000_000_000
+        except Exception:
+            return 1_000_000_000_000
 
     async def available_bytes(self) -> int:
+        total = self.config.get("total_bytes", 0)
+        if total > 0:
+            used = await self._used_bytes()
+            return max(0, total - used)
         return 500_000_000_000
+
+    async def _used_bytes(self) -> int:
+        try:
+            client = await self._get_client()
+            total_size = 0
+            continuation_token = None
+            while True:
+                kwargs = {"Bucket": self.bucket}
+                if continuation_token:
+                    kwargs["ContinuationToken"] = continuation_token
+                resp = await client.list_objects_v2(**kwargs)
+                for obj in resp.get("Contents", []):
+                    total_size += obj.get("Size", 0)
+                if not resp.get("IsTruncated"):
+                    break
+                continuation_token = resp.get("NextContinuationToken")
+            return total_size
+        except Exception:
+            return 0
 
     async def read_stream(self, path: str, chunk_size: int = CHUNK_SIZE) -> AsyncIterator[bytes]:
         client = await self._get_client()
@@ -222,8 +266,61 @@ class S3Storage(StorageBackend):
         async for chunk in source:
             chunks.append(chunk)
             total += len(chunk)
+
+        if total < self.MULTIPART_MIN:
+            client = await self._get_client()
+            await client.put_object(Bucket=self.bucket, Key=path, Body=b"".join(chunks))
+            return total
+
+        return await self._multipart_upload(path, chunks, total)
+
+    async def _multipart_upload(
+        self, path: str, chunks: list[bytes], total: int
+    ) -> int:
         client = await self._get_client()
-        await client.put_object(Bucket=self.bucket, Key=path, Body=b"".join(chunks))
+        resp = await client.create_multipart_upload(Bucket=self.bucket, Key=path)
+        upload_id = resp["UploadId"]
+
+        parts: list[dict] = []
+        part_number = 1
+        try:
+            for i in range(0, len(chunks), 2):
+                combined = b"".join(chunks[i : i + 2])
+                if len(combined) < self.MULTIPART_MIN and total >= self.MULTIPART_MIN:
+                    remaining = b"".join(chunks[i:])
+                    part_resp = await client.upload_part(
+                        Bucket=self.bucket,
+                        Key=path,
+                        PartNumber=part_number,
+                        UploadId=upload_id,
+                        Body=remaining,
+                    )
+                    parts.append(
+                        {"PartNumber": part_number, "ETag": part_resp["ETag"]}
+                    )
+                    part_number += 1
+                    break
+                part_resp = await client.upload_part(
+                    Bucket=self.bucket,
+                    Key=path,
+                    PartNumber=part_number,
+                    UploadId=upload_id,
+                    Body=combined,
+                )
+                parts.append({"PartNumber": part_number, "ETag": part_resp["ETag"]})
+                part_number += 1
+
+            await client.complete_multipart_upload(
+                Bucket=self.bucket,
+                Key=path,
+                UploadId=upload_id,
+                MultipartUpload={"Parts": parts},
+            )
+        except Exception:
+            await client.abort_multipart_upload(
+                Bucket=self.bucket, Key=path, UploadId=upload_id
+            )
+            raise
         return total
 
     async def delete(self, path: str) -> None:
@@ -232,8 +329,83 @@ class S3Storage(StorageBackend):
 
     async def list_files(self, prefix: str, pattern: str | None = None) -> list[str]:
         client = await self._get_client()
-        resp = await client.list_objects_v2(Bucket=self.bucket, Prefix=prefix)
-        return [obj["Key"] for obj in resp.get("Contents", [])]
+        keys: list[str] = []
+        continuation_token = None
+        while True:
+            kwargs: dict = {"Bucket": self.bucket, "Prefix": prefix}
+            if continuation_token:
+                kwargs["ContinuationToken"] = continuation_token
+            resp = await client.list_objects_v2(**kwargs)
+            keys.extend(obj["Key"] for obj in resp.get("Contents", []))
+            if not resp.get("IsTruncated"):
+                break
+            continuation_token = resp.get("NextContinuationToken")
+        return keys
 
     async def _write_chunk(self, path: str, chunk: bytes) -> None:
-        pass  # not needed for S3 — whole file upload via write_stream
+        if path not in self._upload_state:
+            client = await self._get_client()
+            resp = await client.create_multipart_upload(
+                Bucket=self.bucket, Key=path
+            )
+            self._upload_state[path] = {
+                "upload_id": resp["UploadId"],
+                "parts": [],
+                "part_number": 1,
+                "buffer": bytearray(),
+            }
+
+        state = self._upload_state[path]
+        state["buffer"].extend(chunk)
+
+        if len(state["buffer"]) >= self.MULTIPART_MIN:
+            body = bytes(state["buffer"])
+            state["buffer"] = bytearray()
+            client = await self._get_client()
+            part_resp = await client.upload_part(
+                Bucket=self.bucket,
+                Key=path,
+                PartNumber=state["part_number"],
+                UploadId=state["upload_id"],
+                Body=body,
+            )
+            state["parts"].append(
+                {"PartNumber": state["part_number"], "ETag": part_resp["ETag"]}
+            )
+            state["part_number"] += 1
+
+    async def _finish_chunked_upload(self, path: str) -> None:
+        state = self._upload_state.pop(path, None)
+        if state is None:
+            return
+        client = await self._get_client()
+        try:
+            if state["buffer"]:
+                body = bytes(state["buffer"])
+                part_resp = await client.upload_part(
+                    Bucket=self.bucket,
+                    Key=path,
+                    PartNumber=state["part_number"],
+                    UploadId=state["upload_id"],
+                    Body=body,
+                )
+                state["parts"].append(
+                    {"PartNumber": state["part_number"], "ETag": part_resp["ETag"]}
+                )
+
+            if state["parts"]:
+                await client.complete_multipart_upload(
+                    Bucket=self.bucket,
+                    Key=path,
+                    UploadId=state["upload_id"],
+                    MultipartUpload={"Parts": state["parts"]},
+                )
+            else:
+                await client.abort_multipart_upload(
+                    Bucket=self.bucket, Key=path, UploadId=state["upload_id"]
+                )
+        except Exception:
+            await client.abort_multipart_upload(
+                Bucket=self.bucket, Key=path, UploadId=state["upload_id"]
+            )
+            raise

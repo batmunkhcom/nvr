@@ -114,19 +114,21 @@ All Python files use 4-space indentation. Use `textwrap.dedent()` when writing v
 
 ## Recording Lifecycle (recording-engine)
 
-1. Per-camera FFmpeg supervisor: sub-stream RTSP → `-c:v copy` → 300s MP4 segments at `/data/recordings/{cid}/YYYY/MM/DD/`
-2. `SegmentCatalog` (60s): registers closed segments in `recordings` table (ffprobe duration)
-3. **Circular retention** (5 min loop): when disk ≥ `storage.max_usage_percent` (85%) or free < `storage.min_free_gb` (2GB) → oldest segments deleted first — disk can never fill up. Age limit: `retention.default_days` (7). Files < 10 min old protected.
-4. `DiskAnalytics` (hourly): GB/day per camera + days-fit projection → `system_config` key `storage.analysis` → shown on Storage page
-5. Env: uses `POSTGRES_*` vars + `NVR_ENCRYPTION_KEY` (AES-256-GCM via `nvr_common.security`)
-6. `recording_mode`: continuous/motion record; `never`/`disabled` skip
+1. Per-camera FFmpeg supervisor: sub-stream RTSP → `-c:v copy` → 300s MP4 segments at `{storage_path}/{cid}/YYYY/MM/DD/`
+2. Storage path resolved at startup: reads active local `storage_backends.mount_point` from DB (admin panel config), falls back to `STORAGE_LOCAL_PATH` env var
+3. Docker bind mount: host `${STORAGE_HOST_PATH}` → container `${STORAGE_LOCAL_PATH}` (`/data` → `/data/recordings`)
+4. `SegmentCatalog` (60s): registers closed segments in `recordings` table (ffprobe duration)
+5. **Circular retention** (5 min loop): when disk ≥ `storage.max_usage_percent` (85%) or free < `storage.min_free_gb` (2GB) → oldest segments deleted first — disk can never fill up. Age limit: `retention.default_days` (7). Files < 10 min old protected.
+6. `DiskAnalytics` (hourly): GB/day per camera + days-fit projection → `system_config` key `storage.analysis` → shown on Storage page
+7. Env: uses `POSTGRES_*` vars + `NVR_ENCRYPTION_KEY` (AES-256-GCM via `nvr_common.security`)
+8. `recording_mode`: continuous/motion record; `never`/`disabled` skip
 
 ## AI Detection Lifecycle (ai-engine)
 
 1. `FrameSampler` per camera: RTSP sub-stream at 2fps → MOG2 motion gate → shared YOLOv8n ONNX session
 2. Detections filtered by `ai_objects`, `ai_min_confidence` (clamped 0.05–0.95), and `ai_zones` polygons (bottom-center of bbox must be inside a zone; empty zones = whole frame)
 3. **Position-aware dedup**: static object = 1 event per 5 min; moved object = immediate event
-4. Events → `events` table (plain SQL) + JPEG snapshot at `/data/recordings/snapshots/` + Redis pub
+4. Events → `events` table (plain SQL) + JPEG snapshot at `{STORAGE_LOCAL_PATH}/snapshots/` + Redis pub
 5. Model: `yolov8n.onnx` in `ai_models` volume at `/app/models` (exported on host via ultralytics, not in image)
 6. Media auth: `<img>/<video>` use `?token=` query param (get_current_user accepts it)
 7. **Motion publishing**: every sampler publishes motion state to Redis `nvr:motion` (on change + 30s heartbeat). Workers are also created for `recording_mode='motion'` cameras with AI disabled (motion-only mode, no YOLO)
@@ -152,6 +154,9 @@ All Python files use 4-space indentation. Use `textwrap.dedent()` when writing v
 | `services/recording-engine/app/catalog.py` | Segment→DB registration + sync |
 | `services/recording-engine/app/retention.py` | Circular + age-based cleanup |
 | `services/recording-engine/app/analytics.py` | GB/day + capacity projection |
+| `packages/common/nvr_common/storage.py` | Storage backend ABC + Local + S3 implementations |
+| `services/api/app/services/recording_service.py` | Storage backend CRUD + usage aggregation |
+| `services/api/app/api/v1/storage.py` | Storage API endpoints |
 | `services/ai-engine/app/main.py` | AI worker reconcile loop |
 | `services/ai-engine/app/detector.py` | YOLOv8 ONNX (1,84,8400) post-processing + NMS |
 | `services/ai-engine/app/frame_sampler.py` | Motion gate + dedup + event persist |

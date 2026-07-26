@@ -19,7 +19,10 @@ Per-camera FFmpeg supervisors with `-c:v copy` (zero video CPU), circular retent
 
 ### SegmentCatalog (60s interval)
 
-- Scans `/data/recordings/{camera_id}/YYYY/MM/DD/` for closed segments
+- Scans `{STORAGE_LOCAL_PATH}/{camera_id}/YYYY/MM/DD/` for closed segments
+- The storage path is resolved at startup from the admin panel's active local
+    storage backend (`storage_backends.mount_point`), falling back to the
+    `STORAGE_LOCAL_PATH` environment variable
 - Runs ffprobe to get duration, codec, resolution
 - Registers segments in `recordings` table
 - Segments marked `recording_type='motion'` or `'continuous'` based on camera mode
@@ -96,8 +99,11 @@ Global recording pause via Redis-backed flag that stops ALL recording (continuou
 
 ## File Structure
 
+The recording path is configurable via the admin panel's storage backend
+configuration. Default path shown below:
+
 ```
-/data/recordings/
+/data/recordings/                           # STORAGE_LOCAL_PATH (container)
 ├── {camera_id}/
 │    ├── YYYY/
 │    │    └── MM/
@@ -106,6 +112,9 @@ Global recording pause via Redis-backed flag that stops ALL recording (continuou
 │    ├── snapshots/                            # AI detection JPEGs
 │    └── {camera_id}_YYYYMMDD_HHMMSS.jpg       # Thumbnails (sidecar)
 ```
+
+**Docker bind mount:** host `STORAGE_HOST_PATH` → container `STORAGE_LOCAL_PATH`.
+Example: host `/data` → container `/data/recordings`.
 
 ---
 

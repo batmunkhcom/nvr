@@ -65,3 +65,30 @@ async def get_config_int(session: AsyncSession, key: str) -> int:
 async def get_config_str(session: AsyncSession, key: str) -> str:
     value = await get_config(session, key)
     return str(value).strip('"')
+
+
+async def resolve_storage_path(session: AsyncSession) -> str:
+    """Read active local storage backend mount_point from DB, fall back to env var.
+
+    This connects the admin panel storage configuration to the actual recording
+    engine — when a user creates a storage backend from the UI, the recording
+    engine will use its mount_point as the output directory.
+    """
+    try:
+        result = await session.execute(
+            text(
+                "SELECT mount_point FROM storage_backends "
+                "WHERE is_active AND backend_type = 'local' "
+                "ORDER BY priority LIMIT 1"
+            )
+        )
+        row = result.scalar_one_or_none()
+        if row and row[0]:
+            logger.info("storage_path_from_backend", mount_point=row[0])
+            return row[0]
+    except Exception:
+        logger.warning("storage_backend_read_failed", exc_info=True)
+
+    fallback = os.environ.get("STORAGE_LOCAL_PATH", "/data/recordings")
+    logger.info("storage_path_from_env", path=fallback)
+    return fallback
