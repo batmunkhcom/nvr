@@ -189,7 +189,7 @@ Not actively used (disabled in current deploy): `nvr-mosquitto` (MQTT), `nvr-chr
 ## Quick Start
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/batmunkhcom/nvr/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/batmunkhcom/nvr/main/install.sh | bash
 ```
 
 That's it. The script handles everything — system checks, Docker build, DB setup, admin user creation.
@@ -198,9 +198,9 @@ That's it. The script handles everything — system checks, Docker build, DB set
 
 | Mode | Command |
 |------|---------|
-| **Interactive** (asks for DB, admin, ports, path) | `curl -fsSL https://raw.githubusercontent.com/batmunkhcom/nvr/master/install.sh \| bash` |
-| **Non-interactive** (auto-generated, random admin password shown at end) | `curl -fsSL https://raw.githubusercontent.com/batmunkhcom/nvr/master/install.sh \| bash -s -- --no-prompt` |
-| **Custom directory** | `INSTALL_DIR=/opt/nvr curl -fsSL https://raw.githubusercontent.com/batmunkhcom/nvr/master/install.sh \| bash` |
+| **Interactive** (asks for DB, admin, ports, path) | `curl -fsSL https://raw.githubusercontent.com/batmunkhcom/nvr/main/install.sh \| bash` |
+| **Non-interactive** (auto-generated, random admin password shown at end) | `curl -fsSL https://raw.githubusercontent.com/batmunkhcom/nvr/main/install.sh \| bash -s -- --no-prompt` |
+| **Custom directory** | `INSTALL_DIR=/opt/nvr curl -fsSL https://raw.githubusercontent.com/batmunkhcom/nvr/main/install.sh \| bash` |
 | **Reconfigure only** (existing project, just regenerate .env + restart) | `cd /path/to/nvr && ./install.sh` then choose mode 3 |
 
 After install, default credentials are printed. Change the admin password immediately.

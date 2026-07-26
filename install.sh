@@ -10,7 +10,7 @@ set -euo pipefail
 
 PROJECT_DIR="${INSTALL_DIR:-$(pwd)/nvr-system}"
 REPO_URL="${REPO_URL:-https://github.com/batmunkhcom/nvr.git}"
-BRANCH="${BRANCH:-master}"
+BRANCH="${BRANCH:-main}"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 
 # ── colors ──
