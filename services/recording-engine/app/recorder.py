@@ -68,14 +68,7 @@ def build_ffmpeg_args(stream_url: str, camera_dir: str, segment_seconds: int, *,
     Other → passthrough, no filter."""
     output_pattern = os.path.join(camera_dir, "%Y/%m/%d/%Y%m%d_%H%M%S.mp4")
 
-    input_flags = [
-        "-rtsp_transport", "tcp",
-        "-timeout", "15000000",
-        "-reconnect", "1",
-        "-reconnect_at_eof", "1",
-        "-reconnect_streamed", "1",
-        "-reconnect_delay_max", "5",
-    ]
+    input_flags = ["-rtsp_transport", "tcp", "-timeout", "15000000"]
     if video_codec == "hevc":
         input_flags += ["-fflags", "+genpts"]
 
