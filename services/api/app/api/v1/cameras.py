@@ -86,6 +86,26 @@ async def get_camera_by_id(
     return await get_camera_response(camera_id, db)
 
 
+@router.patch("/reorder")
+async def reorder_cameras(
+    body: CameraReorderRequest,
+    current_user: Annotated[dict, Depends(require_operator)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    from sqlalchemy import update
+
+    from ...models.camera import Camera
+
+    logger.info("reorder_cameras_request", camera_count=len(body.cameras), user=str(current_user.get("sub", "unknown")))
+
+    for item in body.cameras:
+        await db.execute(
+            update(Camera).where(Camera.id == item.id).values(display_order=item.display_order)
+        )
+    await db.commit()
+    return {"data": {"status": "ok", "count": len(body.cameras)}}
+
+
 @router.patch("/{camera_id}")
 async def update_camera_by_id(
     camera_id: uuid.UUID,
@@ -105,24 +125,6 @@ async def delete_camera_by_id(
     keep_recordings: bool = Query(False),
 ):
     await delete_camera(camera_id, keep_recordings, db)
-
-
-@router.patch("/reorder")
-async def reorder_cameras(
-    body: CameraReorderRequest,
-    current_user: Annotated[dict, Depends(require_operator)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    from sqlalchemy import update
-
-    from ...models.camera import Camera
-
-    for item in body.cameras:
-        await db.execute(
-            update(Camera).where(Camera.id == item.id).values(display_order=item.display_order)
-        )
-    await db.commit()
-    return {"data": {"status": "ok", "count": len(body.cameras)}}
 
 
 @router.post("/probe")

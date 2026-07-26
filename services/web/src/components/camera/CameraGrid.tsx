@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useRef, useEffect, type DragEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { useCameras, useCameraMutations } from "../../hooks/useCameras";
 import { useUiPreference } from "../../hooks/useUiPreference";
 import { useEvents } from "../../hooks/useEvents";
@@ -63,6 +64,7 @@ function CameraTile({
   onDragOver,
   onDrop,
   isDragging,
+  insertSide,
   onExpand,
 }: {
   camera: Camera;
@@ -72,6 +74,7 @@ function CameraTile({
   onDragOver: (e: DragEvent, idx: number) => void;
   onDrop: (e: DragEvent, idx: number) => void;
   isDragging: boolean;
+  insertSide: "left" | "right" | null;
   onExpand: (camera: Camera) => void;
 }) {
   const navigate = useNavigate();
@@ -118,13 +121,13 @@ function CameraTile({
     <div
       title={camera.connection_error || undefined}
       onClick={handleClick}
-      className={`aspect-video bg-gray-800 rounded border-2 ${border} ${hasMotion ? "animate-motion-flash" : ""} relative group overflow-hidden transition-all duration-200 ${isDragging ? "opacity-30 scale-95" : ""}`}
+      className={`aspect-video bg-gray-800 rounded border-2 ${border} ${hasMotion ? "animate-motion-flash" : ""} relative group overflow-hidden transition-all duration-200 ${isDragging ? "opacity-30 scale-95" : ""} ${insertSide === "left" ? "border-l-[3px] border-l-blue-400/70 shadow-[inset_6px_0_12px_-4px_rgba(96,165,250,0.25)]" : ""} ${insertSide === "right" ? "border-r-[3px] border-r-blue-400/70 shadow-[inset_-6px_0_12px_-4px_rgba(96,165,250,0.25)]" : ""}`}
+      onDragOver={(e) => onDragOver(e, index)}
+      onDrop={(e) => onDrop(e, index)}
     >
       <div
         draggable
         onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; onDragStart(index); }}
-        onDragOver={(e) => onDragOver(e, index)}
-        onDrop={(e) => onDrop(e, index)}
         className="absolute left-0 top-0 bottom-0 w-8 z-30 cursor-grab active:cursor-grabbing"
       />
       {hasStream && <MiniLivePreview cameraId={camera.id} />}
@@ -212,12 +215,14 @@ export default function CameraGrid() {
   const { data: cameras, isLoading } = useCameras();
   const { reorderCameras } = useCameraMutations();
   const { data: events = [] } = useEvents();
+  const qc = useQueryClient();
   const [columns, setColumns] = useUiPreference<number>("dashboard_columns", 2);
   const cols = gridColsClass[columns] ? columns : 2;
+  type InsertAt = { index: number; side: "left" | "right" };
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [insertAt, setInsertAt] = useState<InsertAt | null>(null);
   const dragIndexRef = useRef<number | null>(null);
-  const camerasRef = useRef(cameras);
-  camerasRef.current = cameras;
+  const insertAtRef = useRef<InsertAt | null>(null);
   const [expandedCamera, setExpandedCamera] = useState<Camera | null>(null);
 
   const motionCameraIds = useMemo(() => {
@@ -239,26 +244,70 @@ export default function CameraGrid() {
 
   const handleDragOver = useCallback((e: DragEvent, idx: number) => {
     e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const side: "left" | "right" = e.clientX < rect.left + rect.width / 2 ? "left" : "right";
+    const pos = { index: idx, side };
+    setInsertAt(pos);
+    insertAtRef.current = pos;
   }, []);
 
-  const handleDrop = useCallback((_e: DragEvent, targetIdx: number) => {
+  const handleDrop = useCallback((e: DragEvent, _targetIdx: number) => {
+    e.preventDefault();
     const src = dragIndexRef.current;
-    if (src === null || src === targetIdx) { setDragIndex(null); dragIndexRef.current = null; return; }
-    const items = camerasRef.current;
-    if (!items) { setDragIndex(null); dragIndexRef.current = null; return; }
+    if (src === null) {
+      setDragIndex(null);
+      setInsertAt(null);
+      dragIndexRef.current = null;
+      insertAtRef.current = null;
+      return;
+    }
+
+    const ins = insertAtRef.current;
+    let target = ins ? ins.index : _targetIdx;
+    if (ins && ins.side === "right") target = ins.index + 1;
+    if (src < target) target--;
+
+    if (src === target) {
+      setDragIndex(null);
+      setInsertAt(null);
+      dragIndexRef.current = null;
+      insertAtRef.current = null;
+      return;
+    }
+
+    const items = qc.getQueryData<Camera[]>(["cameras"]);
+    if (!items) {
+      setDragIndex(null);
+      setInsertAt(null);
+      dragIndexRef.current = null;
+      insertAtRef.current = null;
+      return;
+    }
 
     const reordered = [...items];
     const [moved] = reordered.splice(src, 1);
-    reordered.splice(targetIdx, 0, moved);
-
+    reordered.splice(target, 0, moved);
     const payload = reordered.map((c, i) => ({ id: c.id, display_order: i }));
-    reorderCameras.mutate(payload);
+
+    qc.setQueryData(["cameras"], reordered);
+
+    reorderCameras.mutate(payload, {
+      onError: () => {
+        qc.setQueryData(["cameras"], items);
+      },
+    });
+
     setDragIndex(null);
+    setInsertAt(null);
     dragIndexRef.current = null;
-  }, [reorderCameras]);
+    insertAtRef.current = null;
+  }, [reorderCameras, qc]);
 
   const handleDragEnd = useCallback(() => {
     setDragIndex(null);
+    setInsertAt(null);
+    insertAtRef.current = null;
   }, []);
 
   if (isLoading) {
@@ -305,17 +354,20 @@ export default function CameraGrid() {
       </div>
       <div className={`grid ${gridColsClass[cols]} gap-4`}>
         {cameras.map((camera, i) => (
-          <CameraTile
-            key={camera.id}
-            camera={camera}
-            index={i}
-            hasMotion={motionCameraIds.has(camera.id)}
-            onDragStart={handleDragStart}
-            onDragOver={handleDragOver}
-            onDrop={handleDrop}
-            isDragging={dragIndex === i}
-            onExpand={setExpandedCamera}
-          />
+          <div key={camera.id} className="transition-transform duration-200 ease-out">
+            <CameraTile
+              key={camera.id}
+              camera={camera}
+              index={i}
+              hasMotion={motionCameraIds.has(camera.id)}
+              onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              isDragging={dragIndex === i}
+              insertSide={insertAt?.index === i ? insertAt.side : null}
+              onExpand={setExpandedCamera}
+            />
+          </div>
         ))}
       </div>
 
