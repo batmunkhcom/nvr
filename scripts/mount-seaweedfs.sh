@@ -1,8 +1,8 @@
 #!/bin/bash
 # SeaweedFS FUSE Mount — systemd service installer
 #
-# SeaweedFS FUSE client connects to all 4 filers in a single mount:
-#   weed mount -filer=10.10.95.102:8888,10.10.95.104:8888,...
+# SeaweedFS FUSE client connects to all filers in a single mount:
+#   weed mount -filer=<peer1>:8888,<peer2>:8888,...
 #
 # The FUSE client handles HA internally — if one filer fails, it
 # automatically switches to the next. No external watchdog needed.
@@ -24,7 +24,7 @@ FILER_PEERS="${SEAWEEDFS_FILER_PEERS:-}"
 
 if [ -z "$FILER_PEERS" ]; then
     echo "ERROR: SEAWEEDFS_FILER_PEERS not set in .env"
-    echo "Example: SEAWEEDFS_FILER_PEERS=10.10.95.102:8888,10.10.95.104:8888,..."
+    echo "Example: SEAWEEDFS_FILER_PEERS=192.168.1.100:8888,192.168.1.101:8888,..."
     exit 1
 fi
 
