@@ -6,6 +6,31 @@ Centralized Network Video Recorder for managing IP cameras (ONVIF, RTSP, Hikvisi
 
 ---
 
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/batmunkhcom/nvr/main/install.sh | bash
+```
+
+One command. Everything handled — Docker build, DB setup, admin user, all services started.
+
+| Mode | Command |
+|------|---------|
+| **Interactive** (asks DB, admin, ports, path) | `curl -fsSL https://raw.githubusercontent.com/batmunkhcom/nvr/main/install.sh \| bash` |
+| **Auto** (random passwords, printed at end) | `curl -fsSL https://raw.githubusercontent.com/batmunkhcom/nvr/main/install.sh \| bash -s -- --no-prompt` |
+| **Custom path** | `INSTALL_DIR=/opt/nvr curl -fsSL https://raw.githubusercontent.com/batmunkhcom/nvr/main/install.sh \| bash` |
+
+**Prerequisites:** Docker 20.10+, Docker Compose v2.22+, Git, curl. Linux x86_64. 4 CPU / 8 GB RAM / 20 GB disk minimum.
+
+After install:
+
+```
+Web UI:      http://localhost:3000          Username:  admin
+API Docs:    http://localhost:8000/docs      Password:  admin  (change immediately)
+```
+
+---
+
 ## Features
 
 ### Live Monitoring
@@ -186,62 +211,7 @@ Not actively used (disabled in current deploy): `nvr-mosquitto` (MQTT), `nvr-chr
 
 ---
 
-## Quick Start
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/batmunkhcom/nvr/main/install.sh | bash
-```
-
-That's it. The script handles everything — system checks, Docker build, DB setup, admin user creation.
-
-### Install Options
-
-| Mode | Command |
-|------|---------|
-| **Interactive** (asks for DB, admin, ports, path) | `curl -fsSL https://raw.githubusercontent.com/batmunkhcom/nvr/main/install.sh \| bash` |
-| **Non-interactive** (auto-generated, random admin password shown at end) | `curl -fsSL https://raw.githubusercontent.com/batmunkhcom/nvr/main/install.sh \| bash -s -- --no-prompt` |
-| **Custom directory** | `INSTALL_DIR=/opt/nvr curl -fsSL https://raw.githubusercontent.com/batmunkhcom/nvr/main/install.sh \| bash` |
-| **Reconfigure only** (existing project, just regenerate .env + restart) | `cd /path/to/nvr && ./install.sh` then choose mode 3 |
-
-After install, default credentials are printed. Change the admin password immediately.
-
-```
-Web UI:      http://localhost:3000
-API Docs:    http://localhost:8000/docs
-Username:    admin
-Password:    admin   (or random password if --no-prompt)
-```
-
-### Manual Setup (for developers)
-
-```bash
-# 1. Copy and edit environment
-cp .env.example .env
-# Edit .env: POSTGRES_PASSWORD, JWT_SECRET_KEY, NVR_ENCRYPTION_KEY, camera credentials
-
-# 2. Start core infrastructure (DB + Redis)
-docker compose up -d nvr-db nvr-redis
-
-# 3. Seed database (creates admin user, default config)
-make seed
-# Or: python3 scripts/seed_db.py
-
-# 4. Start all services
-docker compose up -d
-
-# 5. Access the web UI
-open http://localhost:3000
-# Default login: admin / admin
-```
-
-### Prerequisites
-
-- **Docker** 20.10+ & **Docker Compose** v2.22+
-- **Git** & **curl**
-- Linux x86_64 (Ubuntu 22.04+, Debian 12+, RHEL 9+)
-- 4 CPU cores, 8 GB RAM, 20 GB free disk (minimum)
-
-### Development
+## Development
 
 ```bash
 # Start infrastructure only
