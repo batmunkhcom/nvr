@@ -78,6 +78,12 @@ function detectedObjects(event: NvrEvent): string[] {
   return Object.keys(objects);
 }
 
+function eventTitle(event: NvrEvent): string {
+  const objects = detectedObjects(event);
+  if (objects.length === 0) return event.event_type.replace(/_/g, " ");
+  return `${objects.join(", ")} detected`;
+}
+
 export default function Events() {
   const [cameraFilter, setCameraFilter] = useState("");
   const [page, setPage] = useState(1);
@@ -206,7 +212,7 @@ export default function Events() {
                   />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className="text-sm font-medium">{event.event_type.replace(/_/g, " ")}</p>
+                      <p className="text-sm font-medium">{eventTitle(event)}</p>
                        {objects.map((obj) => {
                          const ObjIcon = objectIcons[obj] || Package;
                          return (
@@ -327,7 +333,7 @@ export default function Events() {
             onError={(e) => { setZoomedEvent(null); }}
           />
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-gray-500 bg-black/60 px-3 py-1 rounded">
-            {zoomedEvent.event_type.replace(/_/g, " ")} &middot;{" "}
+            {eventTitle(zoomedEvent)} &middot;{" "}
             {cameraNames[zoomedEvent.camera_id] || "Camera"} &middot;{" "}
             {new Date(zoomedEvent.start_time || zoomedEvent.created_at).toLocaleString()}
           </div>
