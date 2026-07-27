@@ -50,12 +50,12 @@ class StreamManager:
         return cls._breakers[camera_id]
 
     @classmethod
-    async def connect(cls, camera_id: UUID | str, stream_uri: str, transport: str = "tcp", force: bool = False, bitrate: int | None = None, threads: int | None = None) -> None:
-        """Start FFmpeg process for a camera stream."""
+    async def connect(cls, camera_id: UUID | str, stream_uri: str, transport: str = "tcp", force: bool = False, bitrate: int | None = None, threads: int | None = None) -> bool:
+        """Start FFmpeg process for a camera stream. Returns True if connected/already-running."""
         cid = str(camera_id)
         if cid in cls._processes and cls._processes[cid].returncode is None:
             logger.info("stream_already_active", camera_id=cid)
-            return
+            return True
 
         breaker = cls._get_breaker(cid)
         if await breaker.is_open():
@@ -65,7 +65,7 @@ class StreamManager:
             else:
                 remaining = breaker.cooldown_remaining()
                 logger.warning("circuit_open_skip", camera_id=cid, cooldown_remaining=remaining)
-                return
+                return False
 
         is_sub = cid.endswith("_sub")
         default_bitrate = 500 if is_sub else 2500
@@ -84,7 +84,7 @@ class StreamManager:
             "-rtsp_transport",
             transport,
             "-timeout",
-            "10000000",
+            "5000000",
             "-i",
             stream_uri,
             "-c:v",
@@ -133,9 +133,11 @@ class StreamManager:
 
             logger.info("stream_connected", camera_id=cid, pid=process.pid, transport=transport)
             logger.debug("ffmpeg_args", camera_id=cid, args=[*args[:2], "...", *args[-3:]])
+            return True
         except Exception:
             logger.error("stream_connect_failed", camera_id=cid, exc_info=True)
             breaker.trip()
+            return False
 
     @classmethod
     async def disconnect(cls, camera_id: UUID | str) -> None:
@@ -184,23 +186,25 @@ class StreamManager:
             jitter = asyncio.get_event_loop().time() % 1.0
             await asyncio.sleep(1.0 + jitter)
 
-            max_attempts = 5 if rc == 0 else 3
+            max_attempts = 3 if rc == 0 else 2
             transport_idx = TRANSPORT_ORDER.index("tcp")
             reconnected = False
             for attempt in range(max_attempts):
                 transport = TRANSPORT_ORDER[(transport_idx + attempt) % len(TRANSPORT_ORDER)]
                 params = cls._stream_params.get(camera_id, {})
                 try:
-                    await cls.connect(
+                    ok = await cls.connect(
                         camera_id, stream_uri, transport,
                         bitrate=params.get("bitrate"),
                         threads=params.get("threads"),
                     )
-                    logger.info("stream_reconnected", camera_id=camera_id, transport=transport)
-                    reconnected = True
-                    break
+                    if ok:
+                        logger.info("stream_reconnected", camera_id=camera_id, transport=transport)
+                        reconnected = True
+                        break
                 except Exception as exc:
                     logger.warning("monitor_reconnect_failed", camera_id=camera_id, attempt=attempt+1, error=str(exc))
+                if not ok:
                     await asyncio.sleep(2)
             if not reconnected:
                 breaker.trip()
