@@ -103,6 +103,16 @@ def _build_worker(cam: dict):
         logger.warning("ai_no_stream_uri", camera=cam["name"])
         return None
 
+    # Prefer MediaMTX relay over direct camera RTSP to avoid session conflicts.
+    # The stream-manager already maintains one RTSP session per camera; sharing
+    # eliminates the second session that cameras often reject.
+    mediamtx_rtsp = os.environ.get("MEDIAMTX_RTSP_HOST", "nvr-mediamtx")
+    relay_uri = f"rtsp://{mediamtx_rtsp}:8554/{cam['id']}_sub"
+    # Use relay if camera auth is set (implies stream-manager handles it),
+    # otherwise fall back to direct RTSP.
+    use_relay = bool(cam.get("username"))
+    final_uri = relay_uri if use_relay else stream_uri
+
     # motion-only worker: publishes motion state for motion-mode recording
     # (no YOLO) when AI detection is disabled for this camera
     motion_only = not cam["ai_enabled"] and cam.get("recording_mode") == "motion"
@@ -112,9 +122,9 @@ def _build_worker(cam: dict):
     return FrameSampler(
         camera_id=cam["id"],
         camera_name=cam["name"],
-        stream_uri=stream_uri,
-        username=cam["username"],
-        password=password,
+        stream_uri=final_uri,
+        username=None if use_relay else cam["username"],
+        password=None if use_relay else password,
         ai_objects=cam["ai_objects"],
         ai_sensitivity=cam["ai_sensitivity"],
         ai_min_confidence=cam["ai_min_confidence"],
