@@ -46,11 +46,26 @@ TRACKLET_TIMEOUT_S = 300.0          # unseen this long → remove tracklet (5 mi
 MOVING_COOLDOWN_S = 15.0            # moving object: at most 1 event per N seconds
 PERSON_STATIC_COOLDOWN_S = 300.0    # stationary person/animal: 5 min
 VEHICLE_STATIC_COOLDOWN_S = 1200.0  # stationary vehicle: 20 min
-MIN_EVENT_GAP_S = 2.0               # absolute minimum gap between any two events
-POSITION_TOLERANCE = 0.10           # normalized centre movement threshold
-STATIONARY_HYSTERESIS = 5           # consecutive stationary frames → parked
-PARKED_MOVED_EXPIRY_S = 10.0        # parked object moved → tracklet expires after this
-MAX_CENTRE_DISTANCE = 0.15          # IoU + centre distance diff → treat as same object
+MIN_EVENT_GAP_S = 2.0                # absolute minimum gap between any two events
+POSITION_TOLERANCE = 0.10            # normalized centre movement threshold
+STATIONARY_HYSTERESIS = 5            # consecutive stationary frames → parked
+PARKED_MOVED_EXPIRY_S = 10.0         # parked object moved → tracklet expires after this
+MAX_CENTRE_DISTANCE = 0.15           # IoU + centre distance diff → treat as same object
+
+# ── Object category mapping (used by both counter and event metadata) ──
+CATEGORY_MAP: dict[str, list[str]] = {
+     "person": ["person"],
+     "vehicle": ["car", "truck", "bus", "motorcycle", "bicycle"],
+     "animal": ["cat", "dog", "bird"],
+     "livestock": ["horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe"],
+}
+
+
+def _classify_object(cls: str) -> str | None:
+    for category, classes in CATEGORY_MAP.items():
+        if cls in classes:
+            return category
+    return None
 
 VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle", "bicycle"}
 
@@ -451,14 +466,14 @@ class FrameSampler:
     async def _persist(self, detections: list[dict], frame: np.ndarray, cv2) -> None:
         now = datetime.now(UTC)
         objects = [
-            {
-                "class": d["class"],
-                "confidence": d["confidence"],
-                "track_id": d.get("track_id", ""),
-                "box": d.get("box", []),
-            }
+             {
+                 "class": d["class"],
+                 "confidence": d["confidence"],
+                 "track_id": d.get("track_id", ""),
+                 "box": d.get("box", []),
+                }
             for d in detections
-        ]
+         ]
 
         snapshot_path = None
         try:
@@ -478,7 +493,25 @@ class FrameSampler:
                     model_name=self._detector.model_name,
                     snapshot_path=snapshot_path,
                     start_time=now,
-                )
+                  )
+                 # Upsert object counters (consolidated with events)
+                ts = now.timestamp()
+                for det in detections:
+                    category = _classify_object(det["class"])
+                    if category is None:
+                        continue
+                    last_ts = self._last_counter_ts.get(category, 0)
+                    if ts - last_ts < MIN_COUNTER_GAP_S:
+                        continue
+                    self._last_counter_ts[category] = ts
+                    await db.upsert_object_counter(
+                        session,
+                        camera_id=self.camera_id,
+                        object_category=category,
+                        counter_date=now.date(),
+                        hour=now.hour,
+                        count=1,
+                      )
         except Exception:
             logger.warning("ai_persist_failed", camera=self.camera_name, exc_info=True)
             return

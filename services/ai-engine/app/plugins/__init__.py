@@ -26,12 +26,8 @@ def _initialize_plugins() -> None:
     if _plugins:
         return
 
-    from .counter import CounterPlugin
     from .lpr import LPRPlugin
     from .smart_alerts import SmartAlertsPlugin
-
-    _plugins[CounterPlugin.name] = CounterPlugin()
-    logger.info("plugin_loaded", name=CounterPlugin.name)
 
     _plugins[LPRPlugin.name] = LPRPlugin()
     logger.info("plugin_loaded", name=LPRPlugin.name)
