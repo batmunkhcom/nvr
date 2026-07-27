@@ -1,4 +1,4 @@
-"""Rate limiting middleware — per-endpoint and per-user request limits."""
+"""Rate limiting middleware - per-endpoint and per-user request limits."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from collections import defaultdict
 
 import structlog
 from fastapi import HTTPException, Request, status
+from fastapi.responses import JSONResponse
 
 logger = structlog.get_logger()
 
@@ -47,5 +48,8 @@ async def rate_limit_middleware(request: Request, call_next):
     try:
         await RateLimiter.check(request)
     except HTTPException as e:
-        return e
+        return JSONResponse(
+            status_code=e.status_code,
+            content={"detail": e.detail},
+        )
     return await call_next(request)

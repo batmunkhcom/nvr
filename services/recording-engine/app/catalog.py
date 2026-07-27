@@ -159,9 +159,11 @@ class SegmentCatalog:
                         if (
                             thumb_budget > 0
                             and self._needs_thumbnail(path)
-                            and await _make_thumbnail(path)
-                        ):
-                            thumb_budget -= 1
+                         ):
+                            if await _make_thumbnail(path):
+                                thumb_budget -= 1
+                            else:
+                                logger.warning("thumbnail_generation_failed", path=path)
                         continue
                     try:
                         if await self._register(session, path, base, camera_modes, backend_map):

@@ -38,16 +38,19 @@ MOTION_CHANNEL = "nvr:motion"
 MOTION_OFF_S = 30.0
 MOTION_HEARTBEAT_S = 30.0
 MOTION_COOLDOWN_S = 60.0
+FORCED_INFERENCE_INTERVAL_S = 30.0
 
 # ── IoU tracking constants ──
 IOU_MATCH_THRESHOLD = 0.30          # IoU > this → same tracked object
-TRACKLET_TIMEOUT_S = 120.0          # unseen this long → remove tracklet (2 min)
+TRACKLET_TIMEOUT_S = 300.0          # unseen this long → remove tracklet (5 min)
 MOVING_COOLDOWN_S = 15.0            # moving object: at most 1 event per N seconds
 PERSON_STATIC_COOLDOWN_S = 300.0    # stationary person/animal: 5 min
-VEHICLE_STATIC_COOLDOWN_S = 1800.0  # stationary vehicle: 30 min
+VEHICLE_STATIC_COOLDOWN_S = 1200.0  # stationary vehicle: 20 min
 MIN_EVENT_GAP_S = 2.0               # absolute minimum gap between any two events
 POSITION_TOLERANCE = 0.10           # normalized centre movement threshold
 STATIONARY_HYSTERESIS = 5           # consecutive stationary frames → parked
+PARKED_MOVED_EXPIRY_S = 10.0        # parked object moved → tracklet expires after this
+MAX_CENTRE_DISTANCE = 0.15          # IoU + centre distance diff → treat as same object
 
 VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle", "bicycle"}
 
@@ -69,6 +72,7 @@ class Tracklet:
     last_cy: float = 0.0
     stationary_count: int = 0
     is_parked: bool = False
+    moved_from_parked_at: float = 0.0
 
 
 def compute_iou(box_a: tuple[int, int, int, int], box_b: tuple[int, int, int, int]) -> float:
@@ -154,6 +158,7 @@ class FrameSampler:
         self._last_motion_pub_ts = 0.0
         self._motion_consecutive = 0
         self._motion_last_stop_ts = 0.0
+        self._last_forced_inference_ts = 0.0
 
     async def start(self) -> None:
         self._running = True
@@ -226,9 +231,15 @@ class FrameSampler:
             gray = cv2.GaussianBlur(gray, (3, 3), 0)
             has_motion = self._motion.detect(gray)
             await self._track_motion(has_motion)
+
+            force_inference = False
             if not has_motion:
-                await asyncio.sleep(frame_interval)
-                continue
+                now_ts = datetime.now(UTC).timestamp()
+                if now_ts - self._last_forced_inference_ts >= FORCED_INFERENCE_INTERVAL_S:
+                    force_inference = True
+                else:
+                    await asyncio.sleep(frame_interval)
+                    continue
 
             if self.motion_only:
                 await asyncio.sleep(frame_interval)
@@ -261,28 +272,36 @@ class FrameSampler:
             if detections and not await _check_paused():
                 await self._persist(detections, frame, cv2)
 
+            if force_inference:
+                self._last_forced_inference_ts = datetime.now(UTC).timestamp()
+
             elapsed = asyncio.get_running_loop().time() - started
             await asyncio.sleep(max(0.05, frame_interval - elapsed))
 
     def _apply_tracking(self, detections: list[dict], frame_w: int, frame_h: int) -> list[dict]:
         """IoU-based multi-object tracking with moving/stationary cooldowns.
 
-        Each detection is matched to an existing Tracklet by IoU.  New
-        objects create a tracklet and always fire an event on first sight.
+        Each detection is matched to an existing Tracklet by IoU + centre distance.
+        New objects create a tracklet and always fire an event on first sight.
         Existing objects check movement and cooldown before re-firing.
 
         Moving objects fire at most once per MOVING_COOLDOWN_S (15s).
-        Stationary objects: persons 5 min, vehicles 30 min.
+        Stationary objects: persons 5 min, vehicles 20 min.
         After STATIONARY_HYSTERESIS (5) consecutive stationary frames, the
-        tracklet is marked 'parked' and survives TRACKLET_TIMEOUT_S expiry
-        indefinitely — parked cars/bikes won't be re-detected as new.
+        tracklet is marked 'parked' and survives TRACKLET_TIMEOUT_S expiry.
+        When a parked object moves away, its tracklet is expired quickly
+        (PARKED_MOVED_EXPIRY_S) so a new object in the same spot fires fresh.
         """
         now_ts = datetime.now(UTC).timestamp()
 
-        # Purge expired tracklets (keep parked ones — they survive timeouts)
+        # Purge expired tracklets (keep parked ones unless recently moved away)
         alive: list[Tracklet] = []
         for t in self._tracklets:
             age = now_ts - t.last_seen_ts
+            if t.moved_from_parked_at > 0:
+                moved_age = now_ts - t.moved_from_parked_at
+                if moved_age > PARKED_MOVED_EXPIRY_S:
+                    continue  # drop: parked object moved away, tracklet expired
             if t.is_parked or age < TRACKLET_TIMEOUT_S:
                 alive.append(t)
         self._tracklets = alive
@@ -293,7 +312,7 @@ class FrameSampler:
         # Try to match each existing tracklet to a detection
         for t in self._tracklets:
             best_idx = -1
-            best_iou = IOU_MATCH_THRESHOLD
+            best_score = -1.0
 
             for i in unmatched:
                 det = detections[i]
@@ -303,8 +322,16 @@ class FrameSampler:
                 if not box or len(box) != 4:
                     continue
                 iou = compute_iou(t.bbox, (int(box[0]), int(box[1]), int(box[2]), int(box[3])))
-                if iou > best_iou:
-                    best_iou = iou
+                if iou < IOU_MATCH_THRESHOLD:
+                    continue
+                det_cx = (box[0] + box[2]) / 2 / max(frame_w, 1)
+                det_cy = (box[1] + box[3]) / 2 / max(frame_h, 1)
+                dist = abs(det_cx - t.last_cx) + abs(det_cy - t.last_cy)
+                if dist > MAX_CENTRE_DISTANCE:
+                    continue
+                score = iou - dist * 0.5
+                if score > best_score:
+                    best_score = score
                     best_idx = i
 
             if best_idx >= 0:
@@ -321,9 +348,12 @@ class FrameSampler:
                     t.stationary_count += 1
                     if t.stationary_count >= STATIONARY_HYSTERESIS:
                         t.is_parked = True
+                    t.moved_from_parked_at = 0.0
                 else:
+                    if t.is_parked:
+                        t.is_parked = False
+                        t.moved_from_parked_at = now_ts
                     t.stationary_count = 0
-                    t.is_parked = False
 
                 t.last_cx = cx
                 t.last_cy = cy
