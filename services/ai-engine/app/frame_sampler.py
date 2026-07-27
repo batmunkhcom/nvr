@@ -53,6 +53,7 @@ PARKED_MOVED_EXPIRY_S = 10.0         # parked object moved → tracklet expires 
 MAX_CENTRE_DISTANCE = 0.15           # IoU + centre distance diff → treat as same object
 
 # ── Object category mapping (used by both counter and event metadata) ──
+MIN_COUNTER_GAP_S = 2.0              # max 1 counter upsert per category every N seconds
 CATEGORY_MAP: dict[str, list[str]] = {
      "person": ["person"],
      "vehicle": ["car", "truck", "bus", "motorcycle", "bicycle"],
