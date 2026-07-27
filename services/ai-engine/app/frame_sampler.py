@@ -29,7 +29,7 @@ from .detector import AIDetector, MotionDetector
 
 logger = structlog.get_logger()
 
-TARGET_FPS = 0.5
+TARGET_FPS = 1.0
 RECONNECT_BASE_S = 5
 RECONNECT_MAX_S = 120
 FRAME_WIDTH = 640
