@@ -208,3 +208,34 @@ Chrome is strict about:
 ### 5. Stream endpoint must NOT use `Content-Disposition: inline`
 
 `Content-Disposition: inline` on video responses interferes with browser playback. Only use `attachment` for `?download=true`.
+
+### 6. `scalar_one_or_none()` returns a scalar — do NOT index it
+
+**Symptom:** `resolve_storage_path()` returned `/` instead of `/data/recordings`. Recording engine logs show `storage_path_from_backend mount_point=/`.
+
+**Root cause:** SQLAlchemy's `result.scalar_one_or_none()` returns the raw scalar value (e.g. the string `/data/recordings`). Code that does `row[0]` on that string gets the **first character** (`/`), not the whole value. This differs from `result.fetchall()` / `result.fetchone()` which return `Row` objects where `row[0]` is correct column access.
+
+**Fix:** After `scalar_one_or_none()`, use the return value directly — no `[0]` indexing:
+```python
+row = result.scalar_one_or_none()
+if row:
+    return row  # NOT row[0]
+```
+
+**Files affected:** `services/recording-engine/app/config.py:82-84`
+
+### 7. `_walk_segments` must handle non-camera directories
+
+**Symptom:** Catalog loop crashes with `OSError` when `base` is `/` (root filesystem) or contains non-camera directories like `/proc`, `/sys`.
+
+**Fix:** Wrap `os.makedirs` calls in try/except OSError. The catalog should gracefully skip directories where it cannot create date subdirectories.
+
+**Files affected:** `services/recording-engine/app/catalog.py:215`
+
+### 8. Missing `import os` in analytics.py
+
+**Symptom:** `NameError: name 'os' is not defined` in analytics loop.
+
+**Fix:** Add `import os` to imports.
+
+**Files affected:** `services/recording-engine/app/analytics.py:16`

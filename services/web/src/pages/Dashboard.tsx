@@ -127,7 +127,7 @@ export default function Dashboard() {
 
       {counterSummary && (
         <div className="mb-4">
-          <div className="text-xs text-gray-500 mb-2">Object Counters</div>
+          <div className="text-xs text-gray-500 mb-2">Object Counters Today</div>
           <CounterCards data={counterSummary} />
         </div>
       )}

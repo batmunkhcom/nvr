@@ -212,7 +212,10 @@ class SegmentCatalog:
             # keep date dirs available for long-running ffmpeg processes
             for offset in (0, 1):
                 day = datetime.now(UTC) + timedelta(days=offset)
-                os.makedirs(os.path.join(cam_path, day.strftime("%Y/%m/%d")), exist_ok=True)
+                try:
+                    os.makedirs(os.path.join(cam_path, day.strftime("%Y/%m/%d")), exist_ok=True)
+                except OSError:
+                    pass
             for root, _dirs, files in os.walk(cam_path):
                 for name in files:
                     if name.endswith(".mp4"):

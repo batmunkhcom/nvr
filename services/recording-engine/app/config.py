@@ -79,9 +79,9 @@ async def resolve_storage_path(session: AsyncSession) -> str:
             )
         )
         row = result.scalar_one_or_none()
-        if row and row[0]:
-            logger.info("storage_path_from_backend", mount_point=row[0])
-            return row[0]
+        if row:
+            logger.info("storage_path_from_backend", mount_point=row)
+            return row
     except Exception:
         logger.warning("storage_backend_read_failed", exc_info=True)
 
