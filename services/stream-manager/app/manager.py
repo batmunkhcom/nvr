@@ -39,6 +39,7 @@ class StreamManager:
     _monitors: dict[str, asyncio.Task] = {}  # noqa: RUF012
     _breakers: dict[str, CircuitBreaker] = {}  # noqa: RUF012
     _last_reader_seen: dict[str, float] = {}  # noqa: RUF012
+    _stream_params: dict[str, dict] = {}  # noqa: RUF012  # bitrate, threads per stream
 
     @classmethod
     def _get_breaker(cls, camera_id: str) -> CircuitBreaker:
@@ -49,7 +50,7 @@ class StreamManager:
         return cls._breakers[camera_id]
 
     @classmethod
-    async def connect(cls, camera_id: UUID | str, stream_uri: str, transport: str = "tcp", force: bool = False) -> None:
+    async def connect(cls, camera_id: UUID | str, stream_uri: str, transport: str = "tcp", force: bool = False, bitrate: int | None = None, threads: int | None = None) -> None:
         """Start FFmpeg process for a camera stream."""
         cid = str(camera_id)
         if cid in cls._processes and cls._processes[cid].returncode is None:
@@ -67,9 +68,11 @@ class StreamManager:
                 return
 
         is_sub = cid.endswith("_sub")
-        bitrate = "500k" if is_sub else "2500k"
-        maxrate = "500k" if is_sub else "2500k"
-        bufsize = "1000k" if is_sub else "5000k"
+        default_bitrate = 500 if is_sub else 2500
+        bv = bitrate if bitrate is not None else default_bitrate
+        threads_val = threads if threads is not None else 1
+        bv_str = f"{bv}k"
+        bufsize = f"{bv * 2}k"
 
         args = [
             FFMPEG_PATH,
@@ -77,7 +80,7 @@ class StreamManager:
             "-loglevel",
             "error",
             "-threads",
-            "1",
+            str(threads_val),
             "-rtsp_transport",
             transport,
             "-timeout",
@@ -93,9 +96,9 @@ class StreamManager:
             "-g",
             "15",
             "-b:v",
-            bitrate,
+            bv_str,
             "-maxrate",
-            maxrate,
+            bv_str,
             "-bufsize",
             bufsize,
             "-c:a",
@@ -112,6 +115,8 @@ class StreamManager:
             "tcp",
             f"rtsp://{MEDIAMTX_RTSP_HOST}:8554/{cid}",
         ]
+
+        cls._stream_params[cid] = {"bitrate": bv, "threads": threads_val}
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -184,8 +189,13 @@ class StreamManager:
             reconnected = False
             for attempt in range(max_attempts):
                 transport = TRANSPORT_ORDER[(transport_idx + attempt) % len(TRANSPORT_ORDER)]
+                params = cls._stream_params.get(camera_id, {})
                 try:
-                    await cls.connect(camera_id, stream_uri, transport)
+                    await cls.connect(
+                        camera_id, stream_uri, transport,
+                        bitrate=params.get("bitrate"),
+                        threads=params.get("threads"),
+                    )
                     logger.info("stream_reconnected", camera_id=camera_id, transport=transport)
                     reconnected = True
                     break

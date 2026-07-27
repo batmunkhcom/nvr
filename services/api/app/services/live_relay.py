@@ -35,6 +35,8 @@ async def start_relay(
     rtsp_transport: str = "tcp",
     relay_target: str | None = None,
     force: bool = False,
+    bitrate: int | None = None,
+    threads: int | None = None,
 ) -> dict[str, Any]:
     cid = str(relay_key)
     target = relay_target or MEDIAMTX_RTSP
@@ -50,17 +52,19 @@ async def start_relay(
 
     logger.info("relay_delegating", camera_id=cid, rtsp_uri=rtsp_uri)
 
+    payload: dict[str, Any] = {
+        "relay_key": cid,
+        "rtsp_uri": rtsp_uri,
+        "transport": rtsp_transport,
+        "target": target,
+    }
+    if bitrate is not None:
+        payload["bitrate"] = bitrate
+    if threads is not None:
+        payload["threads"] = threads
+
     try:
-        result = await _call_stream_manager(
-            "POST",
-            "/relay/start",
-            {
-                "relay_key": cid,
-                "rtsp_uri": rtsp_uri,
-                "transport": rtsp_transport,
-                "target": target,
-            },
-        )
+        result = await _call_stream_manager("POST", "/relay/start", payload)
         status = result.get("status", "")
         if status == "cooldown":
             STREAM_DICT.pop(cid, None)

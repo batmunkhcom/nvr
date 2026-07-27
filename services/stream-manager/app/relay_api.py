@@ -16,9 +16,16 @@ async def relay_start(request: web.Request) -> web.Response:
     rtsp_uri = body["rtsp_uri"]
     transport = body.get("transport", "tcp")
     target = body.get("target")
+    bitrate = body.get("bitrate")  # optional: kbps value
+    threads = body.get("threads")  # optional: -threads N
 
     try:
-        await StreamManager.connect(relay_key, rtsp_uri, transport, force=body.get("force", False))
+        await StreamManager.connect(
+            relay_key, rtsp_uri, transport,
+            force=body.get("force", False),
+            bitrate=bitrate,
+            threads=threads,
+        )
     except Exception as exc:
         return web.json_response(
             {"hls_url": None, "status": "error", "error": str(exc)},

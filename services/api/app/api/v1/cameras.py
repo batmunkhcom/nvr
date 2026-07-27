@@ -259,7 +259,13 @@ async def live_start(
     rtsp_uri = _authed_rtsp_uri(camera, source_uri)
     # Rule 1: relay target from system_config DB, env var as fallback
     relay_target = await get_config_value(db, "mediamtx.rtsp_url", None)
-    result = await start_relay(relay_key, rtsp_uri, camera.stream_transport, relay_target)
+
+    stream_bitrate = await get_config_value(db, "stream.sub_bitrate_kbps" if use_sub else "stream.main_bitrate_kbps", None)
+    stream_threads = await get_config_value(db, "stream.threads", None)
+
+    result = await start_relay(relay_key, rtsp_uri, camera.stream_transport, relay_target,
+                                bitrate=int(stream_bitrate) if stream_bitrate else None,
+                                threads=int(stream_threads) if stream_threads else None)
     return {"data": result}
 
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Save, RotateCw, Bell, Monitor, Camera, Radio, Disc, HardDrive, MessageSquare, Brain } from "lucide-react";
+import { Save, RotateCw, Bell, Monitor, Camera, Radio, Disc, HardDrive, MessageSquare, Brain, Video } from "lucide-react";
 import apiClient from "../../api/client";
 import { useToast } from "../ui/Toast";
 
@@ -16,6 +16,7 @@ interface ConfigEntry {
 const CATEGORIES: { key: string; label: string; icon: typeof Monitor }[] = [
   { key: "ui.", label: "UI", icon: Monitor },
   { key: "camera.", label: "Camera", icon: Camera },
+  { key: "stream.", label: "Streaming", icon: Video },
   { key: "mediamtx.", label: "MediaMTX", icon: Radio },
   { key: "recording.", label: "Recording", icon: Disc },
   { key: "storage.", label: "Storage", icon: HardDrive },
@@ -48,6 +49,9 @@ const LABELS: Record<string, [string, string | undefined, "text" | "number" | "t
   "ai.model": ["AI Model", "Model name, e.g. gpt-4o-mini / llama3.2-vision.", "text"],
   "ai.motion_detection_enabled": ["Motion Detection", "Run the OpenCV motion gate before AI inference — saves ~80% CPU. Keep enabled.", "toggle"],
   "ai.confidence_threshold": ["Confidence Threshold", "Minimum AI detection confidence, 0–1. Higher = fewer false alarms, lower = catches more. Recommended: 0.5.", "number"],
+  "stream.sub_bitrate_kbps": ["Sub-stream Bitrate (kbps)", "Video bitrate for sub-stream (dashboard tiles). Lower = less CPU & bandwidth. 300–1000 recommended.", "number"],
+  "stream.main_bitrate_kbps": ["Main-stream Bitrate (kbps)", "Video bitrate for main stream (live view). 1500–4000 recommended.", "number"],
+  "stream.threads": ["FFmpeg Threads", "CPU threads per FFmpeg transcode. 1 = lowest CPU per stream (good for many cameras). 0 = auto-detect. Restart streams to apply.", "number"],
 };
 
 export default function ConfigSection() {
