@@ -81,7 +81,7 @@ export default function StatisticsPage() {
 
   const { data: cameras } = useCameras();
   const { data: summary } = useCounterSummary(cameraFilter || undefined, days);
-  const { data: hourly } = useCounterHourly(cameraFilter || "none", todayISO);
+  const { data: hourly } = useCounterHourly(cameraFilter || "", todayISO);
   const { data: perCamera } = useCounterPerCamera(days);
 
   const hasHourly = cameraFilter && hourly && hourly.length > 0;
