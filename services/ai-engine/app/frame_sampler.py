@@ -174,6 +174,7 @@ class FrameSampler:
         self._motion_consecutive = 0
         self._motion_last_stop_ts = 0.0
         self._last_forced_inference_ts = 0.0
+        self._last_counter_ts: dict[str, float] = {}
 
     async def start(self) -> None:
         self._running = True
