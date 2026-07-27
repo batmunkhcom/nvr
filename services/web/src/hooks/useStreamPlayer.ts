@@ -104,12 +104,12 @@ export function useStreamPlayer({
     stopStallMonitor();
     const hls = new Hls({
       enableWorker: false,
-      maxBufferLength: 10,
-      maxMaxBufferLength: 15,
-      maxBufferHole: 1.0,
-      lowLatencyMode: true,
+      maxBufferLength: 30,
+      maxMaxBufferLength: 60,
+      maxBufferHole: 2.0,
+      lowLatencyMode: false,
       liveDurationInfinity: false,
-      liveSyncDurationCount: 3,
+      liveSyncDurationCount: 5,
     });
     hlsRef.current = hls;
 
