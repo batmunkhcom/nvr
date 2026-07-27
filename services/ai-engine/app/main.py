@@ -23,6 +23,10 @@ from .plugins import get_plugins_for_camera, start_all, stop_all
 
 logger = structlog.get_logger()
 
+_STREAM_MANAGER_URL = os.environ.get(
+    "STREAM_MANAGER_URL", "http://nvr-stream-manager:8001"
+)
+
 POLL_INTERVAL = 15
 SHUTDOWN = asyncio.Event()
 
@@ -107,11 +111,25 @@ def _build_worker(cam: dict):
     # The stream-manager already maintains one RTSP session per camera; sharing
     # eliminates the second session that cameras often reject.
     mediamtx_rtsp = os.environ.get("MEDIAMTX_RTSP_HOST", "nvr-mediamtx")
-    relay_uri = f"rtsp://{mediamtx_rtsp}:8554/{cam['id']}_sub"
+    relay_key = f"{cam['id']}_sub"
+    relay_uri = f"rtsp://{mediamtx_rtsp}:8554/{relay_key}"
     # Use relay if camera auth is set (implies stream-manager handles it),
     # otherwise fall back to direct RTSP.
     use_relay = bool(cam.get("username"))
     final_uri = relay_uri if use_relay else stream_uri
+
+    if use_relay:
+        # Ensure the stream-manager relay is running so MediaMTX has the path
+        try:
+            import httpx
+            httpx.post(
+                f"{_STREAM_MANAGER_URL}/relay/start",
+                json={"relay_key": relay_key, "rtsp_uri": stream_uri, "transport": "tcp"},
+                timeout=5,
+            )
+            logger.debug("ai_relay_started", camera=cam["name"], relay_key=relay_key)
+        except Exception:
+            logger.warning("ai_relay_start_failed", camera=cam["name"])
 
     # motion-only worker: publishes motion state for motion-mode recording
     # (no YOLO) when AI detection is disabled for this camera
