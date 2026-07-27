@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useEvents, useAcknowledgeEvent } from "../hooks/useEvents";
 import { useCameras } from "../hooks/useCameras";
 import { NvrEvent } from "../types/event";
@@ -29,9 +29,44 @@ const objectIcons: Record<string, typeof Car> = {
   cat: Dog,
 };
 
-function eventSnapshotUrl(eventId: string): string {
+function eventSnapshotUrl(eventId: string, retry = 0): string {
   const token = localStorage.getItem("access_token") || "";
-  return `/api/v1/events/${eventId}/snapshot?token=${encodeURIComponent(token)}`;
+  return `/api/v1/events/${eventId}/snapshot?token=${encodeURIComponent(token)}&_retry=${retry}`;
+}
+
+function SnapshotThumb({ event, onZoom, Icon, color }: { event: NvrEvent; onZoom: () => void; Icon: typeof AlertTriangle; color: string }) {
+  const [failed, setFailed] = useState(false);
+  const [retry, setRetry] = useState(0);
+
+  const handleError = useCallback(() => {
+    setFailed(true);
+    const delay = Math.min(2000 * Math.pow(2, retry), 15000);
+    setTimeout(() => setRetry((r) => r + 1), delay);
+  }, [retry]);
+
+  return (
+    <div className="relative group cursor-pointer flex-shrink-0 w-40 h-24" onClick={event.snapshot_path ? onZoom : undefined}>
+      {event.snapshot_path && (
+        <img
+          key={`${event.id}-${retry}`}
+          src={eventSnapshotUrl(event.id, retry)}
+          alt="detection"
+          loading="lazy"
+          className="w-40 h-24 object-cover rounded bg-gray-900"
+          onError={handleError}
+          onLoad={() => setFailed(false)}
+        />
+      )}
+      <div className={`w-40 h-24 rounded bg-gray-900 items-center justify-center flex-shrink-0 absolute inset-0 ${!failed && event.snapshot_path ? "hidden" : "flex"} pointer-events-none`}>
+        <Icon className={color} size={24} />
+      </div>
+      {event.snapshot_path && !failed && (
+        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 rounded transition-colors flex items-center justify-center pointer-events-none">
+          <Maximize2 size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+        </div>
+      )}
+    </div>
+  );
 }
 
 function detectedObjects(event: NvrEvent): string[] {
@@ -163,30 +198,12 @@ export default function Events() {
                     event.is_acknowledged ? "bg-gray-900 border-gray-800" : "bg-gray-800 border-gray-700"
                   }`}
                 >
-                  <div className="relative group cursor-pointer flex-shrink-0 w-40 h-24" onClick={() => event.snapshot_path && setZoomedEvent(event)}>
-                    {event.snapshot_path && (
-                      <img
-                        src={eventSnapshotUrl(event.id)}
-                        alt="detection"
-                        loading="lazy"
-                        className="w-40 h-24 object-cover rounded bg-gray-900"
-                        onError={(e) => {
-                          const img = e.target as HTMLImageElement;
-                          img.style.display = "none";
-                          const fb = img.nextElementSibling as HTMLElement | null;
-                          if (fb) fb.style.display = "flex";
-                        }}
-                      />
-                    )}
-                    <div className={`w-40 h-24 rounded bg-gray-900 items-center justify-center flex-shrink-0 ${event.snapshot_path ? "hidden" : "flex"}`}>
-                      <Icon className={color} size={24} />
-                    </div>
-                    {event.snapshot_path && (
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 rounded transition-colors flex items-center justify-center pointer-events-none">
-                        <Maximize2 size={16} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-                      </div>
-                    )}
-                  </div>
+                  <SnapshotThumb
+                    event={event}
+                    onZoom={() => setZoomedEvent(event)}
+                    Icon={Icon}
+                    color={color}
+                  />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-medium">{event.event_type.replace(/_/g, " ")}</p>
