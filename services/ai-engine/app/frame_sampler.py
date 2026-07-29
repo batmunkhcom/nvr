@@ -53,7 +53,7 @@ STALE_FRAME_S = 15.0       # no fresh frame this long => capture is half-dead =>
 
 # ── IoU tracking constants ──
 IOU_MATCH_THRESHOLD = 0.30          # IoU > this → same tracked object
-FALLBACK_CENTRE_DISTANCE = 0.30     # relaxed centre-distance match when IoU fails (moving objects at 1 FPS)
+FALLBACK_CENTRE_DISTANCE = 0.40     # relaxed centre-distance match when IoU fails (moving objects at 1 FPS)
 TRACKLET_TIMEOUT_S = 300.0          # unseen this long → remove tracklet (5 min)
 MOVING_COOLDOWN_S = 15.0            # moving object: at most 1 event per N seconds
 PERSON_STATIC_COOLDOWN_S = 300.0    # stationary person/animal: 5 min
@@ -511,29 +511,50 @@ class FrameSampler:
                 last_cy=cy,
             )
             self._tracklets.append(t)
-
-            # Spatial anti-spam: when matching fails repeatedly, a flickering
-            # detection of the *same* object would otherwise flood events.
-            # Instead of a global per-class throttle that also blocks genuinely
-            # distinct objects, we only suppress the new event when the
-            # candidate box overlaps (IoU > IOU_SPATIAL_THRESHOLD) with a
-            # recently-fired tracklet of the same class.
-            cls = det["class"]
-            recent = self._recent_class_events.get(cls, [])
-            recent = [(ts_, bb_) for ts_, bb_ in recent if now_ts - ts_ < CLASS_EVENT_GAP_S]
-            self._recent_class_events[cls] = recent
-
-            nearby = False
             candidate_bbox = (int(box[0]), int(box[1]), int(box[2]), int(box[3]))
-            for _ts, _bb in recent:
-                if compute_iou(candidate_bbox, _bb) > IOU_SPATIAL_THRESHOLD:
-                    nearby = True
+
+            # Cross-class parked inheritance: when YOLO class-flips a
+            # stationary object ("bus" → "car"), the hard class-match rule
+            # creates a new tracklet that would fire a spurious event.  If
+            # a *parked* tracklet of any class already sits at this position,
+            # inherit its parked state and suppress the event.
+            parked_parent = None
+            for pt in self._tracklets:
+                if pt is t:
+                    continue
+                if not pt.is_parked:
+                    continue
+                if compute_iou(candidate_bbox, pt.bbox) > IOU_SPATIAL_THRESHOLD:
+                    parked_parent = pt
                     break
 
-            if not nearby:
-                self._recent_class_events[cls].append((now_ts, candidate_bbox))
-                det["track_id"] = tid
-                fresh.append(det)
+            if parked_parent:
+                t.is_parked = True
+                t.stationary_count = STATIONARY_HYSTERESIS
+                t.last_event_ts = now_ts  # mark as already-fired
+                t.id = parked_parent.id   # keep identity across class flips
+                self._tracklets.remove(parked_parent)
+            else:
+                # Spatial anti-spam (per-class): when matching fails repeatedly,
+                # a flickering detection of the *same* object would otherwise
+                # flood events.  Suppress only when the candidate box overlaps
+                # (IoU > IOU_SPATIAL_THRESHOLD) a recently-fired event of the
+                # same class — genuinely distinct objects pass through.
+                cls = det["class"]
+                recent = self._recent_class_events.get(cls, [])
+                recent = [(ts_, bb_) for ts_, bb_ in recent if now_ts - ts_ < CLASS_EVENT_GAP_S]
+                self._recent_class_events[cls] = recent
+
+                nearby = False
+                for _ts, _bb in recent:
+                    if compute_iou(candidate_bbox, _bb) > IOU_SPATIAL_THRESHOLD:
+                        nearby = True
+                        break
+
+                if not nearby:
+                    self._recent_class_events[cls].append((now_ts, candidate_bbox))
+                    det["track_id"] = tid
+                    fresh.append(det)
 
         return fresh
 

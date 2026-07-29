@@ -69,19 +69,40 @@ function SnapshotThumb({ event, onZoom, Icon, color }: { event: NvrEvent; onZoom
   );
 }
 
-function detectedObjects(event: NvrEvent): string[] {
+interface DetectedObject {
+  class: string;
+  track_id: string;
+}
+
+function detectedObjects(event: NvrEvent): DetectedObject[] {
   const objects = event.metadata?.objects;
   if (!objects || typeof objects !== "object") return [];
   if (Array.isArray(objects)) {
-    return objects.map((o: any) => o.class || o.class_name || "").filter(Boolean);
+    return (objects as any[])
+      .map((o: any) => ({
+        class: String(o.class || o.class_name || ""),
+        track_id: String(o.track_id || ""),
+      }))
+      .filter((o) => o.class);
   }
-  return Object.keys(objects);
+  return Object.keys(objects).map((k) => ({ class: k, track_id: "" }));
 }
+
+const pluralLabels: Record<string, string> = {
+  person: "people",
+};
 
 function eventTitle(event: NvrEvent): string {
   const objects = detectedObjects(event);
   if (objects.length === 0) return event.event_type.replace(/_/g, " ");
-  return `${objects.join(", ")} detected`;
+  const counts: Record<string, number> = {};
+  for (const o of objects) {
+    counts[o.class] = (counts[o.class] || 0) + 1;
+  }
+  const parts = Object.entries(counts).map(([cls, count]) =>
+    count === 1 ? cls : `${count} ${pluralLabels[cls] || cls}`,
+  );
+  return `${parts.join(", ")} detected`;
 }
 
 export default function Events() {
@@ -214,16 +235,21 @@ export default function Events() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-medium">{eventTitle(event)}</p>
                        {objects.map((obj) => {
-                         const ObjIcon = objectIcons[obj] || Package;
-                         return (
-                          <span
-                            key={obj}
-                            className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-blue-900/50 text-blue-300 rounded text-[11px]"
-                          >
-                            <ObjIcon size={11} /> {obj}
-                          </span>
-                        );
-                      })}
+                          const ObjIcon = objectIcons[obj.class] || Package;
+                          return (
+                           <span
+                             key={obj.track_id || obj.class}
+                             className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-blue-900/50 text-blue-300 rounded text-[11px]"
+                           >
+                             <ObjIcon size={11} /> {obj.class}
+                             {obj.track_id && (
+                               <span className="font-mono text-[9px] text-blue-400/60 select-all">
+                                 #{obj.track_id}
+                               </span>
+                             )}
+                           </span>
+                         );
+                       })}
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5">
                       {cameraNames[event.camera_id] || "Camera"} &middot;{" "}
