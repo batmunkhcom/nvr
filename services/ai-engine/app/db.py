@@ -50,6 +50,45 @@ async def load_ai_cameras(session: AsyncSession) -> list[dict]:
     return cameras
 
 
+async def read_config(session: AsyncSession, key: str) -> str | None:
+    """Read a single value from system_config."""
+    result = await session.execute(
+        text("SELECT value FROM system_config WHERE key = :key"),
+        {"key": key},
+    )
+    row = result.fetchone()
+    return row[0] if row else None
+
+
+async def read_config_float(key: str, default: float) -> float:
+    """Read a numeric system_config value with a fallback default."""
+    try:
+        async with SessionFactory() as session:
+            val = await read_config(session, key)
+            if val is not None:
+                return float(val)
+    except Exception:
+        logger.warning("config_read_failed", key=key)
+    return default
+
+
+async def read_config_str(key: str, default: str) -> str:
+    """Read a string system_config value with a fallback default."""
+    try:
+        async with SessionFactory() as session:
+            val = await read_config(session, key)
+            if val is not None:
+                return str(val)
+    except Exception:
+        logger.warning("config_read_failed", key=key)
+    return default
+
+
+async def read_timezone(default: str = "Asia/Ulaanbaatar") -> str:
+    """Read the configured timezone string from system_config."""
+    return await read_config_str("ui.timezone", default)
+
+
 async def insert_detection_event(
     session: AsyncSession,
     camera_id: str,
@@ -162,6 +201,25 @@ async def insert_license_plate(
     await session.commit()
 
 
+_redis_client = None
+
+
+async def get_redis():
+    """Shared lazy Redis client (avoids per-call connection churn)."""
+    global _redis_client
+    import redis.asyncio as aioredis
+
+    if _redis_client is None:
+        host = os.environ.get("REDIS_HOST", "localhost")
+        port = int(os.environ.get("REDIS_PORT", "6379"))
+        _redis_client = aioredis.from_url(
+            f"redis://{host}:{port}/0",
+            decode_responses=True,
+            socket_connect_timeout=3,
+        )
+    return _redis_client
+
+
 class RedisPublisher:
     """Lazy, shared Redis publisher for motion + detection channels."""
 
@@ -177,11 +235,12 @@ class RedisPublisher:
         return cls._instance
 
     async def publish(self, channel: str, payload: dict) -> None:
+        import contextlib
+        import json
+
+        import redis.asyncio as aioredis
+
         try:
-            import json
-
-            import redis.asyncio as aioredis
-
             if self._redis is None:
                 host = os.environ.get("REDIS_HOST", "localhost")
                 port = int(os.environ.get("REDIS_PORT", "6379"))
@@ -192,6 +251,24 @@ class RedisPublisher:
                 )
             await self._redis.publish(channel, json.dumps(payload))
         except Exception:
-            # drop the connection so next publish reconnects
-            self._redis = None
+            # Drop the connection (closing it!) so next publish reconnects,
+            # and retry once — pub/sub loss must not silently drop state.
+            old, self._redis = self._redis, None
+            if old is not None:
+                with contextlib.suppress(Exception):
+                    await old.aclose()
             logger.warning("redis_publish_failed", channel=channel)
+            try:
+                host = os.environ.get("REDIS_HOST", "localhost")
+                port = int(os.environ.get("REDIS_PORT", "6379"))
+                self._redis = aioredis.from_url(
+                    f"redis://{host}:{port}/0",
+                    socket_connect_timeout=3,
+                    retry_on_timeout=True,
+                )
+                await self._redis.publish(channel, json.dumps(payload))
+            except Exception:
+                with contextlib.suppress(Exception):
+                    await self._redis.aclose()
+                self._redis = None
+                logger.warning("redis_publish_retry_failed", channel=channel)

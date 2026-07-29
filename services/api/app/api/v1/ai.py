@@ -8,8 +8,10 @@ from typing import Annotated
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...middleware.auth import get_current_user, require_admin
+from ...services.ai_diagnostic_service import get_camera_ai_diagnostics
 from ...services.ai_service import (
     analyze_image,
     is_ai_enabled,
@@ -23,6 +25,7 @@ from ...services.motion_detector import (
     stop_motion_detection,
 )
 from ...services.snapshot_service import capture_snapshot_b64
+from ...core.database import get_db
 
 logger = structlog.get_logger()
 
@@ -92,6 +95,24 @@ async def analyze_camera_snapshot(
         )
 
     return {"data": {"response": result["response"], "model": result.get("model")}}
+
+
+@router.get("/cameras/{camera_id}/diagnostics")
+async def camera_ai_diagnostics(
+    camera_id: str,
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Return AI/object-detection diagnostics for a specific camera."""
+    try:
+        cid = uuid.UUID(camera_id)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail="Invalid camera_id") from err
+
+    report = await get_camera_ai_diagnostics(cid, db)
+    if "error" in report:
+        raise HTTPException(status_code=404, detail=report["error"])
+    return {"data": report}
 
 
 @router.get("/status")

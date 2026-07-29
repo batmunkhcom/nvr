@@ -110,13 +110,19 @@ class TestRelayStatus:
         ):
             await live_relay.start_relay(cid, "rtsp://cam/1")
 
-        result = await live_relay.relay_status(cid)
+        # relay_status verifies against stream-manager (STREAM_DICT is a cache only)
+        with patch.object(
+            live_relay, "_call_stream_manager", AsyncMock(return_value={"running": True})
+        ):
+            result = await live_relay.relay_status(cid)
         assert result["running"] is True
 
     @pytest.mark.anyio
     async def test_status_not_running(self):
         cid = uuid.uuid4()
-        with patch.object(live_relay, "_check_mediamtx_path", AsyncMock(return_value=False)):
+        with patch.object(
+            live_relay, "_call_stream_manager", AsyncMock(return_value={"running": False})
+        ), patch.object(live_relay, "_check_mediamtx_path", AsyncMock(return_value=False)):
             result = await live_relay.relay_status(cid)
 
         assert result["running"] is False

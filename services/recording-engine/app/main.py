@@ -15,10 +15,8 @@ When active, stops ALL continuous + motion recorders and refuses to start new on
 from __future__ import annotations
 
 import asyncio
-import os
 import signal
 
-import redis.asyncio as aioredis
 import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -29,7 +27,6 @@ from .catalog import SegmentCatalog
 from .motion import MotionRecorderController, motion_listener_loop
 from .recorder import CameraRecorder
 from .retention import RetentionManager
-from .s3_sync import S3SyncWorker
 from .tier_migration import TierMigrationWorker, MIGRATE_INTERVAL
 
 logger = structlog.get_logger()
@@ -40,19 +37,17 @@ engine = create_async_engine(config.DATABASE_URL, pool_size=5, max_overflow=5)
 SessionFactory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 _recorders: dict[str, CameraRecorder] = {}  # continuous-mode recorders (reconcile-managed)
+_recorder_sigs: dict[str, tuple] = {}       # config signature per recorder
 _motion_controller = MotionRecorderController(SessionFactory)
 
-REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 RECORDING_PAUSE_KEY = "nvr:recording:paused"
 
 
 async def _check_paused() -> bool:
     """Check the global pause flag in Redis. Returns True if paused."""
     try:
-        redis = aioredis.from_url(f"redis://{REDIS_HOST}:{REDIS_PORT}/0", decode_responses=True)
+        redis = await config.get_redis()
         val = await redis.get(RECORDING_PAUSE_KEY)
-        await redis.aclose()
         return val == "true"
     except Exception:
         return False
@@ -128,6 +123,7 @@ async def _reconcile() -> None:
 
     for cam_id in set(_recorders) - desired:
         await _recorders.pop(cam_id).stop()
+        _recorder_sigs.pop(cam_id, None)
 
     async with SessionFactory() as session:
         segment_seconds = await config.get_config_int(session, "recording.segment_seconds")
@@ -135,10 +131,26 @@ async def _reconcile() -> None:
 
     active_roots = {config.STORAGE_LOCAL_PATH}
     for cam in cameras:
-        if cam["id"] in _recorders or not cam["stream_uri"]:
+        if not cam["stream_uri"]:
             continue
         output_base = camera_storage_map.get(cam["id"], config.STORAGE_LOCAL_PATH)
         active_roots.add(output_base)
+        sig = (
+            cam["stream_uri"],
+            cam.get("username"),
+            cam.get("encrypted_password"),
+            output_base,
+            segment_seconds,
+        )
+        if cam["id"] in _recorders:
+            # Config drift (stream URI, credentials, storage, segment length)
+            # requires a recorder rebuild — a stale recorder keeps the old
+            # RTSP URL forever, including in its breaker loop.
+            if _recorder_sigs.get(cam["id"]) != sig:
+                logger.info("recorder_config_changed", camera=cam["name"], camera_id=cam["id"])
+                await _recorders.pop(cam["id"]).stop()
+            else:
+                continue
         recorder = CameraRecorder(
             camera_id=cam["id"],
             camera_name=cam["name"],
@@ -149,6 +161,7 @@ async def _reconcile() -> None:
             segment_seconds=segment_seconds,
         )
         _recorders[cam["id"]] = recorder
+        _recorder_sigs[cam["id"]] = sig
         recorder.start()
         logger.info(
             "recorder_added",
@@ -247,12 +260,17 @@ async def main() -> None:
         asyncio.create_task(_tier_migration_loop()),
         asyncio.create_task(motion_listener_loop(_motion_controller, SHUTDOWN)),
     ]
+    _motion_controller.start_sweep()
 
     await SHUTDOWN.wait()
 
     await _motion_controller.shutdown()
-    for recorder in list(_recorders.values()) + list(_motion_controller.recorders.values()):
-        await recorder.stop()
+    # Stop all recorders concurrently — sequential 5s graces add up to
+    # minutes on many cameras and stragglers get SIGKILLed mid-segment.
+    await asyncio.gather(
+        *[r.stop() for r in list(_recorders.values()) + list(_motion_controller.recorders.values())],
+        return_exceptions=True,
+    )
     for task in tasks:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)

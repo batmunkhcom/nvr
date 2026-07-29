@@ -4,30 +4,47 @@ import apiClient from "../api/client";
 
 export type StreamState = "connecting" | "loading" | "playing" | "retrying" | "error";
 export type StreamType = "main" | "sub";
+export type StreamProtocol = "webrtc" | "hls";
 
 interface UseStreamPlayerOptions {
   cameraId: string;
   streamType: StreamType;
+  /** Preferred protocol. "webrtc" (default) falls back to HLS on failure. */
+  protocol?: StreamProtocol;
   pollAttempts?: number;
   retryIntervalMs?: number;
 }
 
 const STALL_CHECK_S = 2;
 const STALL_TRIGGER_S = 6;
+const MAX_SOFT_RECOVERIES = 2;
+const RTC_ICE_TIMEOUT_MS = 8000;
+const RTC_GATHER_TIMEOUT_MS = 3000;
+const HLS_POLL_INTERVAL_MS = 750;
 
 export function useStreamPlayer({
   cameraId,
   streamType,
-  pollAttempts = 30,
+  protocol = "webrtc",
+  pollAttempts = 60,
   retryIntervalMs = 60_000,
 }: UseStreamPlayerOptions) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
-  const abortRef = useRef(false);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const rtcSessionRef = useRef<string | null>(null);
+  // Per-run token: each startStream() call increments it; async continuations
+  // check identity instead of a shared boolean (fixes SUB↔MAIN toggle race).
+  const runIdRef = useRef(0);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stallMonitorRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startStreamRef = useRef<() => Promise<void>>(async () => {});
+  // Survives restarts so fatal-error backoff actually escalates.
+  const fatalCountRef = useRef(0);
+  const softRecoveriesRef = useRef(0);
+  // Set when WebRTC fails once — subsequent retries go straight to HLS.
+  const rtcDisabledRef = useRef(false);
 
   const [state, setState] = useState<StreamState>("connecting");
   const [retrySec, setRetrySec] = useState(0);
@@ -35,7 +52,11 @@ export function useStreamPlayer({
   const finalUrlRef = useRef<string | null>(null);
 
   const suffix = streamType === "sub" ? "_sub" : "";
-  const hlsPath = cameraId ? `/hls/${cameraId}${suffix}/index.m3u8` : "";
+  const streamPath = cameraId ? `${cameraId}${suffix}` : "";
+  const hlsPath = cameraId ? `/hls/${streamPath}/index.m3u8` : "";
+  const whepPath = cameraId ? `/mtx/${streamPath}/whep` : "";
+
+  const isCurrent = useCallback((runId: number) => runId === runIdRef.current, []);
 
   const clearTimers = useCallback(() => {
     if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
@@ -44,6 +65,25 @@ export function useStreamPlayer({
 
   const cleanupHls = useCallback(() => {
     if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+  }, []);
+
+  const cleanupRtc = useCallback(() => {
+    if (rtcSessionRef.current) {
+      // Best-effort WHEP session teardown (fire-and-forget).
+      fetch(rtcSessionRef.current, { method: "DELETE" }).catch(() => {});
+      rtcSessionRef.current = null;
+    }
+    if (pcRef.current) {
+      pcRef.current.ontrack = null;
+      pcRef.current.oniceconnectionstatechange = null;
+      pcRef.current.close();
+      pcRef.current = null;
+    }
+    const v = videoRef.current;
+    if (v?.srcObject) {
+      (v.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
+      v.srcObject = null;
+    }
   }, []);
 
   const stopStallMonitor = useCallback(() => {
@@ -55,6 +95,7 @@ export function useStreamPlayer({
 
   const startStallMonitor = useCallback(() => {
     stopStallMonitor();
+    softRecoveriesRef.current = 0;
     let lastTime = videoRef.current?.currentTime ?? 0;
     let stallCount = 0;
     stallMonitorRef.current = setInterval(() => {
@@ -64,16 +105,30 @@ export function useStreamPlayer({
       if (!v.paused && Math.abs(ct - lastTime) < 0.05) {
         stallCount++;
         if (stallCount >= STALL_TRIGGER_S / STALL_CHECK_S) {
-          stopStallMonitor();
-          cleanupHls();
-          startStreamRef.current();
+          stallCount = 0;
+          softRecoveriesRef.current += 1;
+          const hls = hlsRef.current;
+          if (hls && softRecoveriesRef.current <= MAX_SOFT_RECOVERIES) {
+            // Soft recovery first: re-sync to the live edge without a full restart.
+            hls.startLoad(-1);
+            try {
+              if (v.seekable.length > 0) {
+                v.currentTime = Math.max(0, v.seekable.end(v.seekable.length - 1) - 0.5);
+              }
+            } catch { /* seekable not ready */ }
+          } else {
+            stopStallMonitor();
+            cleanupHls();
+            cleanupRtc();
+            startStreamRef.current();
+          }
         }
       } else {
         stallCount = 0;
       }
       lastTime = ct;
     }, STALL_CHECK_S * 1000);
-  }, [stopStallMonitor, cleanupHls]);
+  }, [stopStallMonitor, cleanupHls, cleanupRtc]);
 
   const startCountdown = useCallback((seconds: number) => {
     clearTimers();
@@ -82,7 +137,10 @@ export function useStreamPlayer({
     countdownRef.current = setInterval(() => {
       setRetrySec((prev) => {
         if (prev <= 1) {
-          if (countdownRef.current) clearInterval(countdownRef.current);
+          if (countdownRef.current) {
+            clearInterval(countdownRef.current);
+            countdownRef.current = null;
+          }
           return 0;
         }
         return prev - 1;
@@ -93,30 +151,42 @@ export function useStreamPlayer({
   const scheduleRetry = useCallback((delayMs: number) => {
     clearTimers();
     startCountdown(Math.ceil(delayMs / 1000));
+    const runId = runIdRef.current;
     retryTimerRef.current = setTimeout(() => {
-      if (!abortRef.current) startStreamRef.current();
+      if (isCurrent(runId)) startStreamRef.current();
     }, delayMs);
-  }, [clearTimers, startCountdown]);
+  }, [clearTimers, startCountdown, isCurrent]);
 
-  const initHls = useCallback(() => {
+  /** Escalating backoff for fatal errors (persists across restarts). */
+  const scheduleFatalRetry = useCallback(() => {
+    fatalCountRef.current += 1;
+    const delay = Math.min(2000 * Math.pow(2, fatalCountRef.current - 1), 15000);
+    scheduleRetry(delay);
+  }, [scheduleRetry]);
+
+  // ── HLS (LL-HLS) playback ────────────────────────────────────────────────
+
+  const initHls = useCallback((runId: number) => {
     if (!videoRef.current || !Hls.isSupported()) { setState("error"); return; }
     cleanupHls();
+    cleanupRtc();
     stopStallMonitor();
     const hls = new Hls({
-      enableWorker: false,
+      // Demux in a worker — 11 grid tiles otherwise share the main thread.
+      enableWorker: true,
       maxBufferLength: 30,
       maxMaxBufferLength: 60,
       maxBufferHole: 2.0,
-      lowLatencyMode: false,
+      // LL-HLS: MediaMTX serves partial segments; latency target comes from
+      // the playlist hold-back (~3x 500ms parts) instead of full segments.
+      lowLatencyMode: true,
       liveDurationInfinity: false,
-      liveSyncDurationCount: 5,
     });
     hlsRef.current = hls;
 
-    let fatalCount = 0;
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      fatalCount = 0;
-      if (!abortRef.current) {
+      fatalCountRef.current = 0;
+      if (isCurrent(runId)) {
         setState("playing");
         videoRef.current?.play().catch(() => {});
         startStallMonitor();
@@ -124,29 +194,131 @@ export function useStreamPlayer({
     });
     hls.on(Hls.Events.ERROR, (_e, data) => {
       if (data.fatal) {
-        fatalCount++;
         cleanupHls();
         stopStallMonitor();
-        if (!abortRef.current) {
-          const delay = Math.min(2000 * Math.pow(2, fatalCount - 1), 15000);
-          scheduleRetry(delay);
-        }
+        if (isCurrent(runId)) scheduleFatalRetry();
       }
     });
     const src = finalUrlRef.current || hlsPath;
     hls.loadSource(src);
     hls.attachMedia(videoRef.current);
-  }, [hlsPath, cleanupHls, stopStallMonitor, startStallMonitor, scheduleRetry]);
+  }, [hlsPath, cleanupHls, cleanupRtc, stopStallMonitor, startStallMonitor, scheduleFatalRetry, isCurrent]);
 
-  const destroyAll = useCallback(() => {
-    stopStallMonitor();
-    cleanupHls();
-    clearTimers();
-  }, [stopStallMonitor, cleanupHls, clearTimers]);
+  const startHlsPolling = useCallback(async (runId: number) => {
+    setState("loading");
+    await new Promise((r) => setTimeout(r, 600));
+    for (let i = 0; i < pollAttempts; i++) {
+      if (!isCurrent(runId)) return;
+      try {
+        const resp = await fetch(hlsPath, { cache: "no-store" });
+        if (resp.ok) {
+          finalUrlRef.current = resp.url;
+          if (isCurrent(runId)) initHls(runId);
+          return;
+        }
+      } catch { /* poll */ }
+      await new Promise((r) => setTimeout(r, HLS_POLL_INTERVAL_MS));
+    }
+    if (isCurrent(runId)) scheduleRetry(retryIntervalMs);
+  }, [hlsPath, pollAttempts, retryIntervalMs, initHls, scheduleRetry, isCurrent]);
+
+  // ── WebRTC (WHEP) playback ───────────────────────────────────────────────
+
+  const startWebRtc = useCallback(async (runId: number): Promise<boolean> => {
+    const video = videoRef.current;
+    if (!video || typeof RTCPeerConnection === "undefined") return false;
+
+    setState("loading");
+    const pc = new RTCPeerConnection();
+    pcRef.current = pc;
+
+    try {
+      pc.addTransceiver("video", { direction: "recvonly" });
+      pc.addTransceiver("audio", { direction: "recvonly" });
+
+      pc.ontrack = (ev) => {
+        if (!isCurrent(runId) || pcRef.current !== pc) return;
+        const stream = ev.streams[0] || new MediaStream([ev.track]);
+        const v = videoRef.current;
+        if (v) {
+          v.srcObject = stream;
+          v.play().catch(() => {});
+        }
+        fatalCountRef.current = 0;
+        setState("playing");
+        startStallMonitor();
+      };
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      // Gather ICE candidates (LAN: host candidates only, no STUN).
+      await new Promise<void>((resolve) => {
+        if (pc.iceGatheringState === "complete") { resolve(); return; }
+        const t = setTimeout(resolve, RTC_GATHER_TIMEOUT_MS);
+        pc.addEventListener("icegatheringstatechange", () => {
+          if (pc.iceGatheringState === "complete") { clearTimeout(t); resolve(); }
+        });
+      });
+      if (!isCurrent(runId)) return false;
+
+      const resp = await fetch(whepPath, {
+        method: "POST",
+        headers: { "Content-Type": "application/sdp" },
+        body: pc.localDescription?.sdp ?? "",
+      });
+      if (!resp.ok) throw new Error(`whep ${resp.status}`);
+
+      const loc = resp.headers.get("location");
+      if (loc) {
+        try {
+          const u = new URL(loc, window.location.origin);
+          rtcSessionRef.current = `/mtx${u.pathname}`;
+        } catch { /* session teardown optional */ }
+      }
+
+      const answerSdp = await resp.text();
+      await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+
+      // Wait for ICE connectivity before declaring success.
+      await new Promise<void>((resolve, reject) => {
+        if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
+          resolve(); return;
+        }
+        const t = setTimeout(() => reject(new Error("ice timeout")), RTC_ICE_TIMEOUT_MS);
+        pc.addEventListener("iceconnectionstatechange", () => {
+          if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
+            clearTimeout(t); resolve();
+          } else if (pc.iceConnectionState === "failed") {
+            clearTimeout(t); reject(new Error("ice failed"));
+          }
+        });
+      });
+
+      // After establishment, treat disconnects as fatal → full restart.
+      pc.oniceconnectionstatechange = () => {
+        if (!isCurrent(runId) || pcRef.current !== pc) return;
+        if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "closed") {
+          cleanupRtc();
+          stopStallMonitor();
+          scheduleFatalRetry();
+        }
+      };
+      return true;
+    } catch {
+      if (pcRef.current === pc) cleanupRtc();
+      else pc.close();
+      return false;
+    }
+  }, [whepPath, cleanupRtc, stopStallMonitor, scheduleFatalRetry, startStallMonitor, isCurrent]);
+
+  // ── Main start flow ──────────────────────────────────────────────────────
 
   const startStream = useCallback(async () => {
-    if (abortRef.current || !cameraId) return;
+    const runId = ++runIdRef.current;
+    if (!cameraId) return;
     cleanupHls();
+    cleanupRtc();
     stopStallMonitor();
     clearTimers();
     setErrorMsg(null);
@@ -166,42 +338,72 @@ export function useStreamPlayer({
       startFailed = true;
     }
 
-    if (abortRef.current) return;
-    setState("loading");
+    if (!isCurrent(runId)) return;
 
-    await new Promise((r) => setTimeout(r, 600));
-
-    const attempts = startFailed ? Math.min(pollAttempts, 3) : pollAttempts;
-    for (let i = 0; i < attempts; i++) {
-      if (abortRef.current) return;
-      try {
-        const resp = await fetch(hlsPath, { cache: "no-store" });
-        if (resp.ok) {
-          finalUrlRef.current = resp.url;
-          if (!abortRef.current) initHls();
-          return;
-        }
-      } catch { /* poll */ }
-      await new Promise((r) => setTimeout(r, 500));
+    // WebRTC first (sub-second latency); fall back to LL-HLS on any failure.
+    if (!startFailed && protocol === "webrtc" && !rtcDisabledRef.current) {
+      const ok = await startWebRtc(runId);
+      if (!isCurrent(runId)) return;
+      if (ok) return;
+      rtcDisabledRef.current = true;
     }
 
-    if (abortRef.current) return;
     if (startFailed) {
+      // Server-side start failed: short probe budget, then report.
+      for (let i = 0; i < 3; i++) {
+        if (!isCurrent(runId)) return;
+        try {
+          const resp = await fetch(hlsPath, { cache: "no-store" });
+          if (resp.ok) {
+            finalUrlRef.current = resp.url;
+            if (isCurrent(runId)) initHls(runId);
+            return;
+          }
+        } catch { /* probe */ }
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      if (!isCurrent(runId)) return;
       setErrorMsg("Failed to start stream");
       setState("error");
-    } else {
-      scheduleRetry(retryIntervalMs);
+      return;
     }
-  }, [cameraId, streamType, hlsPath, pollAttempts, retryIntervalMs, cleanupHls, stopStallMonitor, clearTimers, initHls, scheduleRetry]);
 
-  startStreamRef.current = startStream;
+    await startHlsPolling(runId);
+  }, [cameraId, streamType, protocol, hlsPath, cleanupHls, cleanupRtc, stopStallMonitor, clearTimers, scheduleRetry, startWebRtc, startHlsPolling, initHls, isCurrent]);
+
+  useEffect(() => {
+    startStreamRef.current = startStream;
+  }, [startStream]);
 
   const attachVideo = useCallback((el: HTMLVideoElement | null) => { videoRef.current = el; }, []);
 
   useEffect(() => {
-    abortRef.current = false;
     startStream();
-    return () => { abortRef.current = true; destroyAll(); };
+
+    // Stop consuming while the tab is hidden (MediaMTX reader count drops;
+    // the idle reaper can then stop the relay). Resume on visibility.
+    const onVisibility = () => {
+      if (document.hidden) {
+        runIdRef.current += 1;  // invalidate in-flight async work
+        stopStallMonitor();
+        cleanupHls();
+        cleanupRtc();
+        clearTimers();
+      } else {
+        rtcDisabledRef.current = false;  // re-probe WebRTC on return
+        startStreamRef.current();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      runIdRef.current += 1;
+      document.removeEventListener("visibilitychange", onVisibility);
+      stopStallMonitor();
+      cleanupHls();
+      cleanupRtc();
+      clearTimers();
+    };
   }, [cameraId, streamType]);
 
   return { state, retrySec, errorMsg, attachVideo, startStream };

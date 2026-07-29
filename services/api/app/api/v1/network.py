@@ -1,6 +1,7 @@
 """Network monitoring API endpoints — metrics, alerts, config, summary."""
 
 import uuid
+import re
 from typing import Annotated
 
 import structlog
@@ -114,12 +115,13 @@ async def get_all_cameras_history(
         "24h": "24 hours",
         "7d": "7 days",
     }
-    interval = interval_map.get(range, "24 hours")
-    interval_sql = f"NOW() - INTERVAL '{interval}'"
+    interval_hours = {"1h": 1, "6h": 6, "12h": 12, "24h": 24, "7d": 168}.get(range, 24)
+    interval_label = interval_map.get(range, "24 hours")
 
     bucket = "minute" if range in ("1h", "6h", "12h") else "hour"
     if range == "7d":
         bucket = "hour"
+    assert bucket in ("minute", "hour"), f"unexpected bucket: {bucket}"
 
     result = await db.execute(
         text(f"""
@@ -128,17 +130,18 @@ async def get_all_cameras_history(
                COALESCE(SUM(outbound_mbps)::numeric(10,2), 0),
                AVG(rtt_ms)::numeric(8,2)
         FROM network_metrics
-        WHERE recorded_at > {interval_sql}
+        WHERE recorded_at > NOW() - make_interval(hours => :hours)
         GROUP BY bucket
         ORDER BY bucket ASC
-    """)
+    """),
+        {"hours": interval_hours},
     )
     rows = result.fetchall()
 
     return {
         "data": {
             "camera_name": "All Cameras",
-            "time_range": {"start": f"Now - {interval}", "end": "now"},
+            "time_range": {"start": f"Now - {interval_label}", "end": "now"},
             "metrics": [
                 {
                     "recorded_at": row[0].isoformat(),
@@ -161,18 +164,12 @@ async def get_overlay_history(
     range: str = Query("24h", description="1h, 6h, 12h, 24h, 7d"),
 ):
     """Per-camera time-bucketed history for multi-line overlay chart."""
-    interval_map = {
-        "1h": "1 hour",
-        "6h": "6 hours",
-        "12h": "12 hours",
-        "24h": "24 hours",
-        "7d": "7 days",
-    }
-    interval = interval_map.get(range, "24 hours")
-    interval_sql = f"NOW() - INTERVAL '{interval}'"
+    interval_hours = {"1h": 1, "6h": 6, "12h": 12, "24h": 24, "7d": 168}.get(range, 24)
+
     bucket = "minute" if range in ("1h", "6h", "12h") else "hour"
     if range == "7d":
         bucket = "hour"
+    assert bucket in ("minute", "hour"), f"unexpected bucket: {bucket}"
 
     result = await db.execute(
         text(f"""
@@ -184,10 +181,11 @@ async def get_overlay_history(
         LEFT JOIN locations l ON l.id = c.location_id
         JOIN network_metrics nm ON nm.camera_id = c.id
         WHERE c.is_active = true
-          AND nm.recorded_at > {interval_sql}
+          AND nm.recorded_at > NOW() - make_interval(hours => :hours)
         GROUP BY c.id, c.name, l.name, l.color, bucket
         ORDER BY bucket ASC, c.display_order ASC
-    """)
+    """),
+        {"hours": interval_hours},
     )
     rows = result.fetchall()
 
@@ -266,14 +264,8 @@ async def get_camera_history(
     per_page: int = Query(100, ge=1, le=500),
 ):
     """Historical metrics for single camera with time range."""
-    interval_map = {
-        "1h": "1 hour",
-        "6h": "6 hours",
-        "12h": "12 hours",
-        "24h": "24 hours",
-        "7d": "7 days",
-    }
-    interval = interval_map.get(range, "24 hours")
+    interval_hours = {"1h": 1, "6h": 6, "12h": 12, "24h": 24, "7d": 168}.get(range, 24)
+    interval_label = {"1h": "1 hour", "6h": "6 hours", "12h": "12 hours", "24h": "24 hours", "7d": "7 days"}.get(range, "24 hours")
 
     cam_result = await db.execute(
         text("SELECT name, location FROM cameras WHERE id = :cid"), {"cid": camera_id}
@@ -283,28 +275,27 @@ async def get_camera_history(
         return {"data": None}
 
     offset = (page - 1) * per_page
-    interval_sql = f"NOW() - INTERVAL '{interval}'"
     result = await db.execute(
-        text(f"""
+        text("""
         SELECT id, recorded_at, inbound_mbps, outbound_mbps, rtt_ms,
                packet_loss_pct, status
         FROM network_metrics
         WHERE camera_id = :camera_id
-          AND recorded_at > {interval_sql}
+          AND recorded_at > NOW() - make_interval(hours => :hours)
         ORDER BY recorded_at DESC
         LIMIT :limit OFFSET :offset
     """),
-        {"camera_id": camera_id, "limit": per_page, "offset": offset},
+        {"camera_id": camera_id, "hours": interval_hours, "limit": per_page, "offset": offset},
     )
     rows = result.fetchall()
 
     count_result = await db.execute(
-        text(f"""
+        text("""
         SELECT COUNT(1) FROM network_metrics
         WHERE camera_id = :camera_id
-          AND recorded_at > {interval_sql}
+          AND recorded_at > NOW() - make_interval(hours => :hours)
     """),
-        {"camera_id": camera_id},
+        {"camera_id": camera_id, "hours": interval_hours},
     )
     total_count = count_result.scalar() or 0
 
@@ -313,7 +304,7 @@ async def get_camera_history(
             "camera_id": str(camera_id),
             "camera_name": cam_row[0],
             "location": cam_row[1],
-            "time_range": {"start": f"Now - {interval}", "end": "now"},
+            "time_range": {"start": f"Now - {interval_label}", "end": "now"},
             "metrics": [
                 {
                     "recorded_at": row[1].isoformat() if row[1] else None,
@@ -519,6 +510,12 @@ async def get_all_alerts(
     if camera_id:
         conditions.append("na.camera_id = :camera_id")
         params["camera_id"] = camera_id
+
+    # Every condition is a hardcoded literal — no user input is concatenated
+    # into the SQL text.  The assertion prevents a future regression.
+    _SAFE = {"na.camera_id = :camera_id"}
+    assert set(conditions).issubset(_SAFE), f"unsafe alert condition: {conditions}"
+
     where_clause = " AND ".join(conditions) if conditions else "1=1"
 
     result = await db.execute(
@@ -665,6 +662,12 @@ async def update_camera_config(
     updates = {k: v for k, v in body.items() if k in allowed_fields}
     if not updates:
         return {"data": {"status": "no_changes"}}
+
+    # Column names come from the allowed_fields whitelist (not user input),
+    # but validate the key pattern as a defence-in-depth measure.
+    for k in updates:
+        if not re.match(r'^[a-z_][a-z0-9_]*$', k):
+            return {"data": {"status": "error", "message": f"invalid field: {k}"}}
 
     set_clause = ", ".join(f"{k} = :{k}" for k in updates)
     updates["camera_id"] = camera_id

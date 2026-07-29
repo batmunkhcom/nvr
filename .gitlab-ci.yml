@@ -1,0 +1,25 @@
+wiki-sync:
+  stage: deploy
+  image: python:3.12-slim
+  variables:
+    GIT_STRATEGY: clone
+    GIT_DEPTH: 1
+  rules:
+     - changes:
+        paths:
+           - docs/**
+           - README.md
+           - CHANGELOG.md
+           - scripts/wiki-*
+           - scripts/changelog-to-wiki.py
+        compare_to: main
+  before_script:
+     - pip install pyyaml > /dev/null 2>&1 || true
+     - apt-get update && apt-get install -y git > /dev/null 2>&1
+  script:
+     # Generate Latest-Releases.md from CHANGELOG.md
+     - python scripts/changelog-to-wiki.py
+     
+     # Push wiki to both GitHub and GitLab
+     - chmod +x scripts/wiki-push.sh
+     - bash scripts/wiki-push.sh

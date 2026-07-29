@@ -30,6 +30,7 @@ export interface Camera {
   location: string | null;
   location_id: string | null;
   location_name: string | null;
+  location_color: string | null;
   storage_backend_id: string | null;
   storage_backend_name: string | null;
   notes: string | null;

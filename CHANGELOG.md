@@ -4,6 +4,41 @@ All notable changes to the NVR system. Versions follow the format `v{major}.{min
 
 ---
 
+## v0.02.00 (2026-07-27) — Full-System Audit: Stream/Recording/Detection Reliability + MediaMTX First
+
+**Stream reliability (dashboard):**
+- **CRITICAL: `_monitor()` swallowed CancelledError** — every intentional stop (live/stop, idle reaper) auto-restarted the stream 1-2s later. Idle reaper was fully defeated; unwatched streams transcoded 24/7. Fixed: re-raise after cleanup. Verified: zero reconnects after stop.
+- **Per-relay-key `asyncio.Lock`** in connect/disconnect — duplicate FFmpeg publisher race (orphan zombie + poisoned breaker) eliminated.
+- **Breaker double-trip fix** — a 1s camera blip no longer causes a 30-120s outage; trips once after reconnect exhaustion; resets only after a 60s stable run (never on spawn).
+- useStreamPlayer rewrite: per-run token (SUB↔MAIN race), escalating fatal backoff (was pinned at 2s), 45s cold-start poll budget (was 15.6s → needless 60s penalties), stall soft-recovery before full restart, visibilitychange stop/resume for hidden tabs.
+
+**Real-time playback:**
+- **WebRTC (WHEP) playback** — `useStreamPlayer` connects via `/mtx/{path}/whep` (MediaMTX :8889, ICE UDP 8189) with automatic LL-HLS fallback. Dashboard latency: 12-15s → **<1s (WebRTC) / ~2-4s (LL-HLS)**.
+- **LL-HLS client enabled** (`lowLatencyMode: true`) — server variant was configured but unused.
+- MediaMTX WebRTC NAT config (`MTX_WEBRTCADDITIONALHOSTS` = host LAN IP), `8189/udp` published, `/mtx` proxies in Vite + nginx (buffering off).
+
+**MediaMTX first — sub streams via `sourceOnDemand` pull:**
+- Stream-manager creates pull paths via the MediaMTX API; MediaMTX fetches cameras itself while readers exist (closes 10s after last reader). **stream-manager CPU: ~100% → 0.00%.** FFmpeg libx264 relay kept for main streams (Dahua FU-A). `MEDIAMTX_PULL_MODE=sub|all|` env flag.
+
+**Recording reliability:**
+- **CRITICAL: ONVIF motion published only `active:True`** — motion-mode recorders never stopped. Now publishes the real event value; subscription auto-renews (480s).
+- **CRITICAL: catalog `_purge_missing` deleted DB rows of S3-migrated recordings** — `s3://` paths now guarded.
+- **CRITICAL: tier migration never deleted the source file** — catalog re-registered it → infinite duplicate loop. Source deleted after DB commit.
+- Recording breaker: reset-on-spawn removed (flat 60s gap per blip) → 5s→600s escalating, reset only after a 300s stable session.
+- **Progress watchdog** — hung FFmpeg (dead RTSP over live TCP) is killed when the active segment stops growing for `max(2×segment, 180s)`.
+- Motion pipeline: heartbeat in BOTH states (30s), True=keepalive, 90s staleness sweep, mode-flip dual-writer guard, `MOTION_COOLDOWN_S` 60→10 (was > stop delay → guaranteed unrecorded window).
+- Motion start latency 8-15s → ~2-5s: 2-frame arming + MOG2 warm-up, codec probe cached 1h, **`RECORD_VIA_RELAY=1`** (warm relay attach ~100ms, ≤1s keyframe wait).
+- Retention: per-root oldest deletion in batches (was global-oldest regardless of root), S3 objects deleted via backend, orphan camera-dir cleanup, today/tomorrow dirs protected from pruning.
+- Catalog: unreadable segments registered `is_corrupt=true` (duration never fabricated), deleted-camera FK spam stopped, `.thumb_failed` retry marker (1/day), UUID-dir walk filter.
+
+**Detection quality:**
+- **CRITICAL: two-stage tracking** — strict IoU+dist match plus relaxed centre-distance fallback (movers have IoU≈0 at 1 FPS → previously fired a NEW event EVERY frame). Per-class 5s global event gap backstop. Verified: 11 walking frames → 0 events (was 11).
+- **Drainer thread** per sampler — freshest-frame-only reads (stale-frame lag eliminated) + 15s staleness reconnect + socket timeout (OpenCV `|` separator fix).
+- Missing YOLO model no longer disables motion-only/ONVIF workers; relay start re-POSTed on capture failure (authed URI — fixes MediaMTX pull 401s); worker signature includes credentials+storage path.
+- Event pipeline: snapshot → event insert → broadcast; counter upserts independent (a counter failure never loses the event); Redis publish retries once.
+
+**Docs:** AGENTS.md — "MediaMTX First" section + 10 Engineering Rules; ARCHITECTURE.md/wiki corrected (GOP 15, 500/2500k, 1.0 FPS, MOG2 200/800, 20min vehicles, 300s tracklets, breaker values, 13 containers, WebRTC ports).
+
 ## v0.01.21 (2026-07-25) — Recording Playback Fix + Codec Normalization
 
 - **CSP fix — remove hls.js from RecordingPlayer** — `hls.js` uses `new Function()` which triggers CSP `script-src` block in Chrome (Chrome strict, Safari lenient). RecordingPlayer now uses native `<video>` progressive MP4 only.

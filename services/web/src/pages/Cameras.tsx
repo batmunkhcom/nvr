@@ -8,6 +8,15 @@ import DiscoveryModal from "../components/camera/DiscoveryModal";
 import EmptyState from "../components/ui/EmptyState";
 import { useConfirm } from "../components/ui/ConfirmDialog";
 
+function hexToRgba(hex: string, alpha: number): string {
+  const c = hex.replace("#", "");
+  const i = parseInt(c.length === 3 ? c.split("").map(x => x + x).join("") : c, 16);
+  const r = (i >> 16) & 255;
+  const g = (i >> 8) & 255;
+  const b = i & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 const statusColors: Record<string, string> = {
   online: "bg-success",
   offline: "bg-danger",
@@ -183,11 +192,18 @@ export default function Cameras() {
                   {cam.model && (
                     <span className="text-xs text-gray-600">{cam.model}</span>
                   )}
-                  {(cam.location_name || cam.location) && (
-                    <span className="text-xs bg-blue-900/40 text-blue-400 px-1.5 py-0.5 rounded border border-blue-800/50">
-                      {cam.location_name || cam.location}
-                    </span>
-                  )}
+                    {(cam.location_name || cam.location) && (
+                      <span
+                        className="text-xs px-1.5 py-0.5 rounded"
+                        style={{
+                          backgroundColor: hexToRgba(cam.location_color || "#3b82f6", 0.2),
+                          color: cam.location_color || "#3b82f6",
+                          border: `1px solid ${hexToRgba(cam.location_color || "#3b82f6", 0.4)}`,
+                        }}
+                      >
+                        {cam.location_name || cam.location}
+                      </span>
+                    )}
                 </div>
                 <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5">
                   <span>{cam.ip_address}</span>

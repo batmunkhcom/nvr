@@ -14,6 +14,7 @@ logger = structlog.get_logger()
 ONVIF_PULLPOINT_PATH = "/Events/PullPoint"
 PULL_TIMEOUT = 20
 RETRY_DELAY = 30
+SUBSCRIPTION_TTL_S = 480  # re-subscribe before the 600s termination time
 
 
 class OnvifEventSubscriber:
@@ -46,9 +47,17 @@ class OnvifEventSubscriber:
             self._task.cancel()
 
     async def _loop(self) -> None:
+        import time
+
         await self._subscribe()
+        subscribed_at = time.time()
         while self._running:
             try:
+                # Pull-point subscriptions expire (InitialTerminationTime=PT600S)
+                # and no Renew is sent — re-subscribe before expiry.
+                if time.time() - subscribed_at > SUBSCRIPTION_TTL_S:
+                    await self._subscribe()
+                    subscribed_at = time.time()
                 events = await self._pull_messages()
                 for evt in events:
                     await self._handle_event(evt)
@@ -56,6 +65,7 @@ class OnvifEventSubscriber:
                 logger.warning("onvif_pull_failed", camera=self.camera_name, exc_info=True)
                 await asyncio.sleep(RETRY_DELAY)
                 await self._subscribe()
+                subscribed_at = time.time()
 
     async def _subscribe(self) -> None:
         body = _soap_envelope(
@@ -105,9 +115,11 @@ class OnvifEventSubscriber:
         is_motion = _is_motion_event(event)
 
         if is_motion:
-            # feed motion-mode recording (stop delay handled by recording engine)
+            # Feed motion-mode recording with the REAL event value — publishing
+            # True for motion-end events too would run the recorder forever.
+            active = str(event.get("value", "true")).lower() == "true"
             await db_module.RedisPublisher.shared().publish(
-                "nvr:motion", {"camera_id": self.camera_id, "active": True}
+                "nvr:motion", {"camera_id": self.camera_id, "active": active}
             )
 
         try:

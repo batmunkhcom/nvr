@@ -69,6 +69,12 @@ export default defineConfig({
           });
         },
       },
+      // MediaMTX WebRTC (WHEP) endpoint — /mtx/{path}/whep
+      "/mtx": {
+        target: process.env.MEDIAMTX_WEBRTC_URL || "http://127.0.0.1:8889",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/mtx/, ""),
+      },
     },
   },
   test: {

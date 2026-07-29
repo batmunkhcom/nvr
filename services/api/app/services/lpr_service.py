@@ -17,15 +17,20 @@ async def get_lpr_readings(
     per_page: int = 50,
 ) -> dict:
     params: dict[str, Any] = {"days": days, "limit": per_page, "offset": (page - 1) * per_page}
-    where_parts = ["TRUE"]
+    conditions: list[str] = ["TRUE"]
     if camera_id:
-        where_parts.append("lp.camera_id = CAST(:camera_id AS uuid)")
+        conditions.append("lp.camera_id = CAST(:camera_id AS uuid)")
         params["camera_id"] = camera_id
     if plate_number:
-        where_parts.append("lp.plate_number ILIKE :plate_number")
+        conditions.append("lp.plate_number ILIKE :plate_number")
         params["plate_number"] = f"%{plate_number}%"
 
-    where_clause = " AND ".join(where_parts)
+    # Every condition is a hardcoded literal — no user input is concatenated
+    # into the SQL text.  The assertion prevents a future regression.
+    _SAFE = {"TRUE", "lp.camera_id = CAST(:camera_id AS uuid)", "lp.plate_number ILIKE :plate_number"}
+    assert set(conditions).issubset(_SAFE), f"unsafe LPR condition: {conditions}"
+
+    where_clause = " AND ".join(conditions)
 
     count_result = await db.execute(
         text(f"SELECT COUNT(*) FROM license_plates lp WHERE {where_clause}"),

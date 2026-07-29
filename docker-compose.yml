@@ -168,6 +168,9 @@ services:
       VENDOR_PATTERNS_PATH: /app/config/vendor_patterns.yml
       DISCOVERY_SUBNETS: ${DISCOVERY_SUBNETS}
       FFMPEG_PATH: ${FFMPEG_PATH}
+      # "sub" = sub streams via MediaMTX sourceOnDemand pull (zero transcode),
+      # "all" = pull for mains too, "" = FFmpeg libx264 relay for everything
+      MEDIAMTX_PULL_MODE: ${MEDIAMTX_PULL_MODE:-sub}
       PYTHONPATH: /app/services/stream-manager:/app/packages/common
     command: ["python", "-m", "app.main"]
     working_dir: /app/services/stream-manager
@@ -201,6 +204,10 @@ services:
       - "8888:8888"
       - "8889:8889"
       - "9997:9997"
+      - "8189:8189/udp"  # WebRTC ICE UDP mux
+    environment:
+      # Host LAN IP advertised in WebRTC ICE candidates (Docker NAT traversal)
+      MTX_WEBRTCADDITIONALHOSTS: ${MEDIAMTX_ICE_HOST_IP:-10.10.0.229}
     volumes:
       - ./config/mediamtx.yml:/mediamtx.yml
       - mediamtx_hls:/tmp/hls
@@ -226,6 +233,8 @@ services:
       NVR_ENCRYPTION_KEY: ${NVR_ENCRYPTION_KEY}
       FFMPEG_PATH: ${FFMPEG_PATH}
       FFPROBE_PATH: ${FFPROBE_PATH:-/usr/bin/ffprobe}
+      # 1 = motion-mode sub recording reads the warm MediaMTX relay path
+      RECORD_VIA_RELAY: ${RECORD_VIA_RELAY:-1}
       PYTHONPATH: /app/services/recording-engine:/app/packages/common
     command: ["python", "-m", "app.main"]
     working_dir: /app/services/recording-engine
@@ -268,6 +277,7 @@ services:
       AI_YOLO_MODEL: ${AI_YOLO_MODEL}
       AI_CONFIDENCE_THRESHOLD: ${AI_CONFIDENCE_THRESHOLD}
       AI_DEVICE: ${AI_DEVICE}
+      AI_TARGET_FPS: ${AI_TARGET_FPS:-1.0}
       STREAM_MANAGER_URL: http://nvr-stream-manager:8001
       MEDIAMTX_RTSP_HOST: nvr-mediamtx
       PYTHONPATH: /app/services/ai-engine:/app/packages/common
@@ -338,6 +348,7 @@ services:
       VITE_API_URL: http://nvr-api:8000
       VITE_WS_URL: ws://nvr-api:8000
       MEDIAMTX_HLS_URL: ${MEDIAMTX_HLS_URL:-http://nvr-mediamtx:8888}
+      MEDIAMTX_WEBRTC_URL: ${MEDIAMTX_WEBRTC_URL:-http://nvr-mediamtx:8889}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

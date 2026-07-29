@@ -33,7 +33,7 @@ async def relay_start(request: web.Request) -> web.Response:
         )
 
     breaker = StreamManager._get_breaker(relay_key)
-    if await breaker.is_open():
+    if await breaker.is_open() and relay_key not in StreamManager._pull_paths:
         remaining = breaker.cooldown_remaining()
         return web.json_response(
             {
@@ -44,8 +44,9 @@ async def relay_start(request: web.Request) -> web.Response:
             status=503,
         )
 
-    running = relay_key in StreamManager._processes and (
-        StreamManager._processes[relay_key].returncode is None
+    running = relay_key in StreamManager._pull_paths or (
+        relay_key in StreamManager._processes
+        and StreamManager._processes[relay_key].returncode is None
     )
 
     mediamtx_target = target or "rtsp://127.0.0.1:8554"
@@ -67,6 +68,23 @@ async def relay_stop(request: web.Request) -> web.Response:
 @routes.get("/relay/status")
 async def relay_status(request: web.Request) -> web.Response:
     relay_key = request.query.get("relay_key", "")
+    if relay_key in StreamManager._pull_paths:
+        # Pull-path configs live in MediaMTX memory — gone after a MediaMTX
+        # restart. Verify against the API so a stale entry can't short-circuit
+        # re-creation in live/start.
+        import httpx
+
+        try:
+            from .manager import MEDIAMTX_API_URL
+
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.get(f"{MEDIAMTX_API_URL}/v3/config/paths/get/{relay_key}")
+            if resp.status_code != 200:
+                StreamManager._pull_paths.discard(relay_key)
+                return web.json_response({"running": False})
+        except Exception:
+            pass
+        return web.json_response({"running": True})
     is_active = relay_key in StreamManager._processes and (
         StreamManager._processes[relay_key].returncode is None
     )

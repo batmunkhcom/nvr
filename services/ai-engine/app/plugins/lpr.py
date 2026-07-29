@@ -38,7 +38,7 @@ class LPRPlugin(AIPlugin):
 
     async def start(self) -> None:
         self._running = True
-        await self._init_ocr()
+        asyncio.create_task(self._init_ocr_bg())
         await self._load_configs()
         self._config_reload_task = asyncio.create_task(self._config_reload_loop())
         logger.info("lpr_plugin_started", ocr_ready=self._ocr_ready)
@@ -66,6 +66,13 @@ class LPRPlugin(AIPlugin):
             logger.warning("lpr_easyocr_not_installed", hint="pip install easyocr")
         except Exception:
             logger.warning("lpr_ocr_init_failed", exc_info=True)
+
+    async def _init_ocr_bg(self) -> None:
+        """Initialize EasyOCR in background — slow model download must not block the main loop."""
+        try:
+            await self._init_ocr()
+        except Exception:
+            logger.warning("lpr_ocr_bg_init_failed", exc_info=True)
 
     async def _load_configs(self) -> None:
         try:

@@ -108,6 +108,37 @@ class TestCameraToDict:
         assert r["name"] == "Cam"
         assert r["status"] == "offline"
 
+    def test_includes_location_color(self):
+        loc = MagicMock()
+        loc.name = "Warehouse"
+        loc.color = "#ef4444"
+
+        cam = MagicMock()
+        cam.id = uuid.uuid4()
+        cam.name = "Cam"
+        cam.ip_address = "10.0.0.1"
+        cam.location_id = uuid.uuid4()
+        cam.location_ref = loc
+        cam.storage_backend = None
+        cam.storage_backend_id = None
+        # suppress any remaining attribute access noise
+        for attr in [
+            "manufacturer", "model", "serial_number", "firmware_version",
+            "username", "status", "stream_main_uri", "stream_sub_uri",
+            "stream_audio_uri", "auth_type", "has_audio", "has_talkback",
+            "has_ptz", "has_onvif", "has_motion_detection", "has_io_ports",
+            "motion_source", "ai_enabled", "ai_objects", "ai_zones",
+            "ai_sensitivity", "ai_min_confidence", "ai_plugins", "lpr_config",
+            "max_resolution", "recording_mode", "recording_stream", "stream_transport",
+            "ptz_presets", "connection_error", "last_seen_at", "tags", "location",
+            "notes", "privacy_mode", "display_order", "created_at", "updated_at",
+        ]:
+            setattr(cam, attr, None)
+
+        r = camera_to_dict(cam)
+        assert r["location_name"] == "Warehouse"
+        assert r["location_color"] == "#ef4444"
+
 
 class TestGetCameraResponse:
     @pytest.mark.anyio

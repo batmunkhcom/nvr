@@ -1,6 +1,6 @@
 # NVR System Architecture
 
-> Reflects actual deployed state as of 2026-07-25 (v0.01.21).
+> Reflects actual deployed state as of 2026-07-27 (post-audit fixes: MediaMTX pull mode, WebRTC WHEP, two-stage tracking).
 
 ---
 
@@ -10,60 +10,51 @@
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          Docker Compose (nvr-net)                        │
 │                                                                          │
-│  ┌──────────┐   RTSP sub     ┌─────────────────┐                        │
-│  │ IP Cams  │───────────────→│  AI Engine       │   Redis pub/sub       │
-│  │ (11×     │                │  YOLOv8n ONNX    │──────────────────┐    │
-│  │  Dahua)  │                │  FrameSampler    │  nvr:motion       │    │
-│  │          │                │  MOG2 gate       │  nvr:events       │    │
-│  └────┬─────┘                └─────────────────┘                   │    │
-│       │                                                             │    │
-│       │ RTSP sub                  ┌──────────────┐                  ▼    │
-│       ├──────────────────────────→│ Stream Mgr   │    ┌────────────────┐ │
-│       │                           │ FFmpeg relay │    │ Redis          │ │
-│       │                           │ libx264      │    │ pub/sub/cache  │ │
-│       │                           │ circuit brkr │    └────────┬───────┘ │
-│       │                           └──────┬───────┘             │         │
-│       │                                  │ RTSP libx264         │         │
-│       │                                  ▼                      │         │
-│       │                           ┌──────────────┐             │         │
-│       │                           │ MediaMTX     │             │         │
-│       │                           │ LL-HLS       │             │         │
-│       │                           │ RTSP→HLS     │             │         │
-│       │                           └──────┬───────┘             │         │
-│       │                                  │ HLS                  │         │
-│       │                                  ▼                      │         │
-│       │                           ┌──────────────┐             │         │
-│       │                           │ Browser      │             │         │
-│       │                           │ hls.js       │             │         │
-│       │                           └──────────────┘             │         │
-│       │                                                         │         │
-│       │ RTSP sub             ┌──────────────────┐               │         │
-│       ├─────────────────────→│ Recording Engine │←─────────────┘         │
-│       │                      │ -c:v copy FFmpeg │  motion trigger        │
-│       │                      │ 300s MP4 segs    │                        │
-│       │                      │ MotionRecorder   │                        │
-│       │                      │ SegmentCatalog   │                        │
-│       │                      │ CircularRetention│                        │
-│       │                      │ DiskAnalytics    │                        │
-│       │                      └────────┬─────────┘                        │
-│       │                               │                                  │
-│       │                               ▼                                  │
-│       │                      ┌──────────────────┐                        │
-│       │                      │ Disk             │                        │
-│       │                      │ /data/recordings │                        │
-│       │                      └────────┬─────────┘                        │
-│       │                               │ HTTP Range                       │
-│       │                               ▼                                  │
-│       │                      ┌──────────────────┐                        │
-│  ┌────┴──────────────────────│ FastAPI (nvr-api)│                        │
-│  │                            │ REST + WS        │                        │
-│  │                            └────────┬─────────┘                        │
-│  │                                     │ SQL                             │
-│  │                                     ▼                                 │
-│  │                            ┌──────────────────┐                        │
-│  │                            │ PostgreSQL 16    │                        │
-│  │                            │ (nvr-db)         │                        │
-│  │                            └──────────────────┘                        │
+│  ┌──────────┐                 ┌─────────────────┐                        │
+│  │ IP Cams  │←── RTSP pull ───│  MediaMTX        │   sourceOnDemand      │
+│  │ (11×     │   (sub streams) │  pulls camera    │   (sub)               │
+│  │  Dahua)  │                 │  itself while    │                       │
+│  │          │←── RTSP push ───│  readers exist   │  FFmpeg libx264       │
+│  │          │  (main streams, │  LL-HLS :8888    │  relay (main only)    │
+│  │          │   libx264)      │  WebRTC :8889    │                       │
+│  └────┬─────┘                 │  RTSP :8554      │                       │
+│       │                       └───┬────┬────┬────┘                       │
+│       │                           │    │    │                            │
+│       │              RTSP sub ────┘    │    │ HLS / WHEP                │
+│       │              (shared path)     │    ▼                           │
+│       │              ┌─────────────────┐│  ┌──────────────┐             │
+│       │              │  AI Engine       ││  │ Browser      │             │
+│       │              │  YOLOv8n ONNX    ││  │ WebRTC first │             │
+│       │              │  FrameSampler    ││  │ LL-HLS fallback            │
+│       │              │  MOG2 gate       ││  └──────────────┘             │
+│       │              └────────┬────────┘│                              │
+│       │                       │ Redis pub/sub (nvr:motion, nvr:events)   │
+│       │ RTSP sub/direct       ▼                     ┌────────────────┐   │
+│       ├────────────────→┌──────────────────┐        │ Redis          │   │
+│       │                 │ Recording Engine │←───────│ pub/sub/cache  │   │
+│       │                 │ -c:v copy FFmpeg │ motion └────────────────┘   │
+│       │                 │ 300s MP4 segs    │ trigger                     │
+│       │                 │ MotionRecorder   │ (via relay path, warm)      │
+│       │                 │ SegmentCatalog   │                             │
+│       │                 │ CircularRetention│                             │
+│       │                 │ DiskAnalytics    │                             │
+│       │                 └────────┬─────────┘                             │
+│       │                          ▼                                       │
+│       │                 ┌──────────────────┐                             │
+│       │                 │ Disk /data        │                            │
+│       │                 └────────┬─────────┘                             │
+│       │                          │ HTTP Range                            │
+│       │                          ▼                                       │
+│  ┌────┴─────────────────→┌──────────────────┐                            │
+│  │                       │ FastAPI (nvr-api)│                            │
+│  │                       │ REST + WS        │                            │
+│  │                       └────────┬─────────┘                            │
+│  │                                │ SQL                                  │
+│  │                                ▼                                      │
+│  │                       ┌──────────────────┐                             │
+│  │                       │ PostgreSQL 16    │                             │
+│  │                       │ (nvr-db)         │                             │
+│  │                       └──────────────────┘                             │
 │  └── cameras table, recordings, events, system_config                    │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -72,14 +63,18 @@
 
 | Container | Image | CPU Limit | Memory Limit | Ports |
 |-----------|-------|-----------|--------------|-------|
-| `nvr-db` | timescale/timescaledb:2.16-pg16 | 2 | 2G | 5432 |
+| `nvr-db` | timescale/timescaledb:latest-pg16 | 2 | 2G | 5432 |
 | `nvr-redis` | redis:7-alpine | — | — | 6379 |
-| `nvr-api` | python:3.13-slim | 1 | 1G | 8000 |
+| `nvr-api` | python:3.13-slim | 2 | 1G | 8000 |
 | `nvr-web` | node:22-slim (Vite dev) | — | — | 3000 |
 | `nvr-stream-manager` | python:3.13-slim (+FFmpeg 5.1) | 4 | 4G | 8001 |
-| `nvr-mediamtx` | bluenviron/mediamtx:1.19.2 | — | — | 8554, 8888, 9997 |
+| `nvr-mediamtx` | bluenviron/mediamtx:latest (v1.19.2) | — | — | 8554, 8888, 8889, 9997, 8189/udp |
 | `nvr-recording-engine` | python:3.13-slim (+FFmpeg 5.1) | 2 | 2G | — |
 | `nvr-ai-engine` | python:3.13-slim (+ONNX) | 2 | 4G | — |
+| `nvr-nginx` | nginx (reverse proxy) | — | — | 80, 443 |
+| `nvr-mosquitto` | eclipse-mosquitto:2 | — | — | 1883 |
+| `nvr-chrony` | cturra/ntp | — | — | 123/udp |
+| `nvr-mqtt-bridge` | python (Redis→MQTT) | — | — | — |
 
 ## Database Schema
 
@@ -169,25 +164,37 @@ camera_network_config
 
 ## FFmpeg Pipelines
 
-### Stream Relay (Stream Manager → MediaMTX)
+### Sub Streams: MediaMTX sourceOnDemand Pull (no FFmpeg)
 
 ```
-ffmpeg -rtsp_transport tcp -timeout 10000000 \
-  -i rtsp://admin:pass@camera:554/Streaming/Channels/102 \
-  -c:v libx264 -preset ultrafast -tune zerolatency -g 5 \
-  -b:v 1000k -maxrate 1000k -bufsize 2000k \
-  -c:a aac -b:a 64k -ac 1 -pkt_size 1200 \
+stream-manager → POST /v3/config/paths/add/{cid}_sub
+  {source: rtsp://admin:pass@camera:554/Streaming/Channels/102,
+   sourceOnDemand: true, sourceOnDemandStartTimeout: 20s,
+   sourceOnDemandCloseAfter: 10s, rtspTransport: tcp}
+```
+
+MediaMTX fetches the camera itself while readers (HLS/WHEP/RTSP/AI-sampler)
+exist and closes 10s after the last reader. **Zero transcode CPU.**
+
+### Main Streams: FFmpeg Relay-Push (Stream Manager → MediaMTX)
+
+```
+ffmpeg -rtsp_transport tcp -timeout 5000000 \
+  -i rtsp://admin:pass@camera:554/Streaming/Channels/101 \
+  -c:v libx264 -preset ultrafast -tune zerolatency -g 15 \
+  -b:v 2500k -maxrate 2500k -bufsize 5000k \
+  -c:a aac -b:a 64k -ac 1 -pkt_size 1200 -threads 1 \
   -f rtsp -rtsp_transport tcp \
-  rtsp://nvr-mediamtx:8554/{camera_id}_sub
+  rtsp://nvr-mediamtx:8554/{camera_id}
 ```
 
 **Notes:**
-- Always `libx264` transcode (H.264 FU-A packet ordering from Dahua cameras causes MediaMTX HLS errors with `-c:v copy`)
-- Sub-stream bitrate: 1000k (was 2000k, reduced for CPU savings)
-- Main-stream bitrate: 4000k
-- GOP 5 (ultra-short for LL-HLS)
-- Circuit breaker: 15s→120s cooldown; `returncode=0` (clean exit) bypasses breaker
-- Idle reaper: stops relay after `STREAM_IDLE_TIMEOUT_S` (600s) with zero MediaMTX readers
+- `libx264` transcode for relay-pushes (H.264 FU-A packet ordering from Dahua cameras causes MediaMTX HLS errors with `-c:v copy` pushes)
+- Sub-stream relay (if pull mode disabled): `-b:v 500k -bufsize 1000k`
+- Main-stream bitrate: 2500k (`stream.main_bitrate_kbps` in system_config)
+- GOP 15 (1s at 15fps sub — suits 2s LL-HLS segments)
+- Circuit breaker: 15s→120s cooldown, reset only after a 60s stable run (never on spawn); trips once after reconnect exhaustion
+- Idle reaper (FFmpeg relays only): stops relay after `STREAM_IDLE_TIMEOUT_S` (600s) with zero MediaMTX readers; pull paths are managed by MediaMTX itself
 
 ### Recording Engine (Direct to Disk)
 
@@ -205,33 +212,36 @@ ffmpeg -rtsp_transport tcp -timeout 15000000 \
 
 **Notes:**
 - `-c:v copy` — no video transcode (very low CPU)
-- **Codec normalization** — auto-detected via ffprobe before FFmpeg spawns:
-  - HEVC → `-c:v libx264 -preset ultrafast -crf 20 -pix_fmt yuv420p`
+- **Codec normalization** — auto-detected via ffprobe before FFmpeg spawns (cached per URL for 1h):
+  - HEVC → `-c:v libx264 -preset ultrafast -crf 20 -pix_fmt yuv420p -g 30`
   - H.264 → `-bsf:v h264_metadata=video_full_range_flag=0` (normalizes `yuvj420p color_range=pc` → `yuv420p tv`)
+  - Audio copied when already AAC, transcoded to AAC 64k otherwise
 - 300s segments with `+faststart` (enables seeking before download complete)
-- Motion-only mode: FFmpeg starts/stops based on Redis `nvr:motion` state
-- Circuit breaker: 60s→600s cooldown
+- Motion-only mode: FFmpeg starts/stops based on Redis `nvr:motion` state; motion sub-recording reads the warm MediaMTX relay path (`RECORD_VIA_RELAY=1`)
+- Circuit breaker: 5s→600s escalating, reset only after a 300s stable session
+- **Progress watchdog**: active segment's size must grow within `max(2×segment_seconds, 180s)` or the hung FFmpeg is killed and restarted
 
 ---
 
 ## AI Pipeline
 
 ```
-RTSP Sub-stream (0.5 FPS, 640px width)
+MediaMTX relay sub-stream (AI_TARGET_FPS, default 1.0 FPS, 640px width)
          │
          ▼
 ┌───────────────────┐
-│  FrameSampler     │  OpenCV cap.read()
-│  per camera       │  cv2.CAP_PROP_BUFFERSIZE=1 (minimal latency)
+│  Drainer thread   │  continuously drains RTSP, keeps freshest frame only
+│  (per camera)     │  15s frame staleness → reconnect (half-dead detection)
 └────────┬──────────┘
          │
          ▼
 ┌───────────────────┐
-│  MOG2 Motion Gate │  history=500, detectShadows=False
-│  (OpenCV)         │  countNonZero > 500 pixels → motion
-│                   │  Threshold: low=40, med=25, high=16
+│  MOG2 Motion Gate │  history=200, detectShadows=False
+│  (OpenCV)         │  countNonZero > 800 pixels → motion
+│                   │  Threshold: low=50, med=30, high=20
+│                   │  3-frame warm-up suppress after (re)connect
 └────────┬──────────┘
-         │ motion detected
+         │ motion detected (2 consecutive frames → active)
          ▼
 ┌───────────────────┐
 │  YOLOv8n ONNX     │  Shared singleton session
@@ -254,22 +264,23 @@ RTSP Sub-stream (0.5 FPS, 640px width)
          │
          ▼
 ┌───────────────────┐
-│  Position Dedup   │  Static object: 1 event/5min (STATIC_COOLDOWN_S)
-│                   │  Moved (>0.10 normalized): immediate event
-│  Min event gap: 5s│  per class (MIN_EVENT_GAP_S)
+│  Two-stage Track  │  Stage 1: IoU ≥ 0.3 AND centre dist ≤ 0.15
+│                   │  Stage 2: relaxed centre dist ≤ 0.30 (movers at 1 FPS)
+│  Per-class gap 5s │  New: immediate event (class-gap throttled)
+│                   │  Moving: 1/15s · Static: person 5min, vehicle 20min
 └────────┬──────────┘
          │
-    ┌────┴────┐
-    ▼         ▼
-  Events     JPEG
-  Table      Snapshot
+     ┌───┴────┐
+     ▼         ▼
+   Events     JPEG
+   Table      Snapshot
 ```
 
 **Config per camera:** `ai_enabled`, `ai_objects` (COCO classes), `ai_zones` (polygons), `ai_sensitivity` (MOG2 threshold), `ai_min_confidence` (0.05–0.95).
 
-**Worker lifecycle:** `POLL_INTERVAL=15s` — reconcile loop queries cameras for config changes. Any change (zones/objects/stream URI) recreates the worker within 15s.
+**Worker lifecycle:** `POLL_INTERVAL=15s` — reconcile loop queries cameras for config changes. Any change (zones/objects/stream URI/credentials/storage) recreates the worker within 15s. A missing YOLO model never disables workers — detection no-ops until the model loads.
 
-**Motion-only mode:** Cameras with `recording_mode='motion'` and `ai_enabled=False` get a motion-only sampler (MOG2 only, no YOLO) that publishes to Redis `nvr:motion`.
+**Motion-only mode:** Cameras with `recording_mode='motion'` and `ai_enabled=False` get a motion-only sampler (MOG2 only, no YOLO) that publishes to Redis `nvr:motion` (both states, 30s heartbeat).
 
 ---
 
@@ -281,21 +292,20 @@ Every FFmpeg process is guarded by a circuit breaker:
 | Context | Base Cooldown | Max Cooldown | Formula |
 |---------|---------------|--------------|---------|
 | Stream relay | 15s | 120s | `min(15 × 2^trips, 120)` |
-| Recording recorder | 60s | 600s | `min(60 × 2^trips, 600)` |
+| Recording recorder | 5s | 600s | `min(5 × 2^trips, 600)` |
 | AI frame sampler | 5s | 120s | `min(5 × 2^trips, 120)` |
 
-- `returncode=0` (clean exit) → breaker NOT tripped, immediate reconnect up to 5 attempts
-- `returncode≠0` → breaker tripped, up to 3 attempts with transport fallback
-- Reset on successful connection
+- Reset only after a proven stable run (60s stream / 300s recording), never on spawn
+- Reconnect attempts run first; the breaker trips once on exhaustion (no double-trip)
 
 ### Idle Reaper
-Stream-manager queries MediaMTX API (`/v3/paths/list`) for active readers. Relays with zero readers for `STREAM_IDLE_TIMEOUT_S` (600s) are stopped. Saves CPU when nobody is watching.
+Stream-manager queries MediaMTX API (`/v3/paths/list`) for active readers. FFmpeg relays with zero readers for `STREAM_IDLE_TIMEOUT_S` (600s) are stopped. Pull-mode paths manage themselves via `sourceOnDemandCloseAfter`.
 
 ### Circular Retention
-Every 5 minutes: check disk usage. If ≥85% full or <2GB free → delete oldest segments first (files <10min protected). Also age-based (7 days). Max 500 deletes/run. DB rows synced.
+Every 5 minutes: check disk usage per root. If ≥85% full or <2GB free → delete oldest segments of THAT root in batches of 50 (files <10min protected). Also age-based (7 days). Max 500 deletes/run. DB rows synced; S3 objects deleted via the storage backend; orphan camera dirs removed after the age grace.
 
 ### Heartbeat / Recovery
-- AI engine motion state: published on change + every 30s to `nvr:motion`
+- AI engine motion state: published on change + every 30s to `nvr:motion` in BOTH states; recording engine staleness sweep stops recorders after 90s without keepalive
 - Stream-manager: main loop heartbeat at 120s intervals
 - All core services: `restart: unless-stopped` in docker compose
 - Docker healthchecks: `nvr-db` (pg_isready), `nvr-redis` (ping)
@@ -325,8 +335,25 @@ Key hooks:
 └── useAuth               # JWT login/refresh/logout
 ```
 
-### HLS Proxy
-Vite dev server proxies `/hls` → MediaMTX HLS origin (`http://10.10.0.229:8888`) with `changeOrigin: true` and Location header rewrite for redirects.
+### Live Playback Protocol
+
+```
+Browser → useStreamPlayer
+  ├── 1. POST /api/v1/cameras/{id}/live/start?stream=sub
+  ├── 2. WebRTC (WHEP): POST /mtx/{path}/whep → MediaMTX :8889 (<1s latency)
+  │      └── any failure → automatic fallback:
+  └── 3. LL-HLS: /hls/{path}/index.m3u8 via hls.js (lowLatencyMode: true, ~2-4s)
+```
+
+Hidden tabs stop consuming (visibilitychange destroys the player; MediaMTX
+reader count drops → idle teardown works). Stall recovery: soft live-edge
+resync first, full restart only after 2 failed soft attempts.
+
+### HLS/WHEP Proxy
+Vite dev server proxies `/hls` → MediaMTX HLS origin (:8888) and `/mtx` →
+MediaMTX WebRTC origin (:8889), `changeOrigin: true` with Location header
+rewrite. nginx mirrors both with `proxy_buffering off` (LL-HLS blocking
+requests must not be buffered).
 
 ### Recording Playback Architecture
 
@@ -370,12 +397,12 @@ For production, add `script-src 'self' 'unsafe-eval'` to CSP header — hls.js r
 ## Key Technical Decisions
 
 1. **FFmpeg 5.1.9** (not 7.x) — stream-manager container uses Debian bookworm apt package. `-stimeout` not supported; use `-timeout`.
-2. **`libx264` transcode always** — Dahua camera H.264 FU-A packet ordering causes MediaMTX HLS errors with `-c:v copy`. Must transcode.
-3. **`-c:v copy` for recording** — recording engine uses direct copy (zero video CPU) since it writes to disk not through MediaMTX.
-4. **Codec auto-detection + normalization** — ffprobe detects HEVC/H.264 before FFmpeg spawns. HEVC→H.264 transcode, H.264 `video_full_range_flag=0` bsf. Ensures Chrome-compatible output (yuv420p tv range).
-5. **Sub-stream for AI** — 640px width, 0.5 FPS. Reduces inference load dramatically vs main stream.
+2. **MediaMTX pull for sub streams** — `sourceOnDemand` paths let MediaMTX fetch cameras itself (zero transcode CPU, reader-driven lifecycle). FFmpeg `libx264` relay-push is kept for main streams because Dahua FU-A packet ordering breaks MediaMTX HLS with `-c:v copy` pushes.
+3. **`-c:v copy` for recording** — recording engine uses direct copy (zero video CPU) since it writes to disk not through MediaMTX. Continuous recording stays direct (independent of relay uptime); motion sub-recording reads the warm relay path for ~100ms attach (`RECORD_VIA_RELAY=1`).
+4. **Codec auto-detection + normalization** — ffprobe detects HEVC/H.264 before FFmpeg spawns (cached 1h). HEVC→H.264 transcode, H.264 `video_full_range_flag=0` bsf. Ensures Chrome-compatible output (yuv420p tv range).
+5. **Sub-stream for AI** — 640px width, 1.0 FPS (`AI_TARGET_FPS`). Reduces inference load dramatically vs main stream. Tracking constants are tuned to this rate.
 6. **Motion-only recording** — all 11 cameras use `recording_mode='motion'`. Recording starts only when AI/motion sensor detects activity.
 7. **No TimescaleDB hypertables** — plain PostgreSQL tables with DESC time indexes provide adequate performance for current scale.
-8. **No MinIO/S3** — all recordings stored on local disk volume (`/data/recordings`).
-9. **No NGINX** — Vite dev server proxies directly to API and MediaMTX. NGINX planned for production.
-10. **No hls.js in RecordingPlayer** — uses native `<video>` progressive MP4 only. Avoids CSP `unsafe-eval` conflict in Chrome. hls.js reserved for LiveView streams only.
+8. **No MinIO/S3** — all recordings stored on local disk volume (`/data/recordings`). S3 backends are supported via the storage abstraction (catalog/retention guard `s3://` paths).
+9. **NGINX as reverse proxy** — serves the web app and proxies `/api`, `/hls`, `/mtx` (WHEP) with buffering off. Vite dev server mirrors the same proxy routes in development.
+10. **No hls.js in RecordingPlayer** — uses native `<video>` progressive MP4 only. Avoids CSP `unsafe-eval` conflict in Chrome. hls.js reserved for LiveView streams only (WebRTC-preferred, LL-HLS fallback).

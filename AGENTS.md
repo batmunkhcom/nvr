@@ -30,13 +30,24 @@ As an autonomous developer agent working on the mBm NVR System, you must not sim
 - **Container hostnames** (not IPs or `host.docker.internal`) for inter-service communication:
   - `nvr-db` (PostgreSQL), `nvr-redis`, `nvr-minio`
   - `nvr-stream-manager:8001`, `nvr-mediamtx:8554/8888/9997`
-  - `nvr-api:8000`, `nvr-web:3000`
-- Port mappings required for host access: `8000`, `3000`, `8888`, `8554`, `9997`, `8001`
+   - `nvr-api:8000`, `nvr-web:3000`
+- Port mappings required for host access: `8000`, `3000`, `8888`, `8554`, `9997`, `8001`, `8889` (WHEP), `8189/udp` (WebRTC ICE)
+
+## Live Streaming — MediaMTX First
+
+**MediaMTX is the center of the live path. Use it everywhere it can be used:**
+
+1. **Sub streams: MediaMTX `sourceOnDemand` pull (default, `MEDIAMTX_PULL_MODE=sub`)** — the stream-manager creates a pull path via the MediaMTX API (`/v3/config/paths/add`) with the camera RTSP URI as `source`. MediaMTX fetches the camera itself while readers exist and closes 10s after the last reader leaves. **Zero FFmpeg transcode CPU** for sub streams.
+2. **Main streams: FFmpeg `libx264` relay-push** (Dahua FU-A packet ordering breaks MediaMTX HLS with `-c:v copy` pushes) with `-preset ultrafast -tune zerolatency -g 15 -b:v 2500k -maxrate 2500k -bufsize 5000k -threads 1`. Sub fallback relay (if pull disabled): `-b:v 500k -bufsize 1000k`.
+3. **Playback: WebRTC (WHEP) first, LL-HLS fallback** — `useStreamPlayer` tries WHEP at `/mtx/{path}/whep` (MediaMTX :8889), falls back to LL-HLS on any failure. LL-HLS requires BOTH server (`hlsVariant: lowLatency`) and client (`lowLatencyMode: true`) enabled.
+4. **Recording: direct camera RTSP `-c:v copy`** (zero video CPU) — do NOT route through MediaMTX for continuous recording. Exception: motion-mode sub recording reads the relay path (`RECORD_VIA_RELAY=1`) because the AI sampler keeps that path warm anyway — ~100ms attach, ≤1s keyframe wait.
+5. **AI sampling: reads the MediaMTX relay path** (`rtsp://nvr-mediamtx:8554/{cid}_sub`) — one camera connection serves AI + all viewers.
+6. WebRTC through Docker NAT requires `MTX_WEBRTCADDITIONALHOSTS` = host LAN IP (`MEDIAMTX_ICE_HOST_IP` in .env) so ICE candidates are reachable from browsers.
 
 ## FFmpeg Transcoding
 
-- Always use `libx264` with `-preset ultrafast -tune zerolatency -g 15 -b:v 2000k -maxrate 2000k -bufsize 4000k`.
-- Never use `-c:v copy` — H.264 FU-A packet ordering issues from cameras cause MediaMTX HLS errors.
+- When transcoding is required (main-stream relay): always `libx264` with `-preset ultrafast -tune zerolatency -g 15`, bitrate per tier (sub 500k / main 2500k, bufsize 2×, overridable via `system_config` keys `stream.sub_bitrate_kbps`, `stream.main_bitrate_kbps`, `stream.threads`).
+- Never push `-c:v copy` to MediaMTX — H.264 FU-A packet ordering issues from cameras cause MediaMTX HLS errors. (Recording to disk uses `-c:v copy` — different path, see Recording Lifecycle.)
 - Output: `rtsp://nvr-mediamtx:8554/{camera_id}` or `{camera_id}_sub`.
 
 ## Frontend Stream Playback — useStreamPlayer Hook
@@ -48,7 +59,8 @@ import { useStreamPlayer, type StreamType } from "../hooks/useStreamPlayer";
 const { state, retrySec, attachVideo, startStream } = useStreamPlayer({
   cameraId,           // UUID string
   streamType,         // "main" | "sub"
-  pollAttempts,       // optional, default 30
+  protocol,           // optional: "webrtc" (default, WHEP) or "hls" — WebRTC falls back to LL-HLS automatically
+  pollAttempts,       // optional, default 60 (≈45s cold-start budget)
   retryIntervalMs,    // optional, default 60000
 });
 ```
@@ -105,11 +117,11 @@ All Python files use 4-space indentation. Use `textwrap.dedent()` when writing v
 
 1. Frontend calls `POST /api/v1/cameras/{id}/live/start?stream=main|sub`
 2. `live_relay.py` checks stream-manager status first, then delegates
-3. Stream-manager starts FFmpeg with libx264 transcode → pushes to MediaMTX
-4. MediaMTX creates HLS at `rtsp://nvr-mediamtx:8554/{cid}`
-5. Frontend polls `/hls/{cid}/index.m3u8` then initializes HLS.js
-6. Circuit breaker prevents rapid restarts (30-60s cooldown)
-7. **Idle reaper**: stream-manager stops relays with zero MediaMTX readers for 10 min (`STREAM_IDLE_TIMEOUT_S`) — saves CPU when nobody watches
+3. **Sub (default)**: stream-manager creates a MediaMTX `sourceOnDemand` pull path — MediaMTX fetches the camera itself while readers exist. **Main**: FFmpeg libx264 relay-push to `rtsp://nvr-mediamtx:8554/{cid}`
+4. `useStreamPlayer` tries WebRTC WHEP (`/mtx/{path}/whep`) first, falls back to LL-HLS (`/hls/{path}/index.m3u8`)
+5. Circuit breaker prevents rapid restarts (15s→120s, reset only after a 60s stable run — never on spawn)
+6. **Idle reaper** (FFmpeg relays only): stops relays with zero MediaMTX readers for 10 min (`STREAM_IDLE_TIMEOUT_S`). Pull paths are NOT reaped — MediaMTX `sourceOnDemandCloseAfter` (10s) manages them
+7. Pull-path configs live in MediaMTX memory — after a MediaMTX restart they are re-created on the next `live/start` (relay/status verifies against the MediaMTX API)
 8. MediaMTX has NO hot reload — SIGHUP terminates it; restart via compose
 
 ## Recording Lifecycle (recording-engine)
@@ -117,29 +129,48 @@ All Python files use 4-space indentation. Use `textwrap.dedent()` when writing v
 1. Per-camera FFmpeg supervisor: sub-stream RTSP → `-c:v copy` → 300s MP4 segments at `{storage_path}/{cid}/YYYY/MM/DD/`
 2. Storage path resolved at startup: reads active local `storage_backends.mount_point` from DB (admin panel config), falls back to `STORAGE_LOCAL_PATH` env var
 3. Docker bind mount: host `${STORAGE_HOST_PATH}` → container `${STORAGE_LOCAL_PATH}` (`/data` → `/data/recordings`)
-4. `SegmentCatalog` (60s): registers closed segments in `recordings` table (ffprobe duration)
-5. **Circular retention** (5 min loop): when disk ≥ `storage.max_usage_percent` (85%) or free < `storage.min_free_gb` (2GB) → oldest segments deleted first — disk can never fill up. Age limit: `retention.default_days` (7). Files < 10 min old protected.
+4. `SegmentCatalog` (60s): registers closed segments in `recordings` table (ffprobe duration; unreadable segments registered `is_corrupt=true`, duration never fabricated). `s3://` rows are never purged by the local filesystem walk. Thumbnails retry at most once/day (`.thumb_failed` marker)
+5. **Circular retention** (5 min loop): when disk ≥ `storage.max_usage_percent` (85%) or free < `storage.min_free_gb` (2GB) → oldest segments **of that root** deleted first in batches — disk can never fill up. Age limit: `retention.default_days` (7). Files < 10 min old protected. S3 objects deleted via the storage backend, orphan camera dirs cleaned after the age grace
 6. `DiskAnalytics` (hourly): GB/day per camera + days-fit projection → `system_config` key `storage.analysis` → shown on Storage page
 7. Env: uses `POSTGRES_*` vars + `NVR_ENCRYPTION_KEY` (AES-256-GCM via `nvr_common.security`)
 8. `recording_mode`: continuous/motion record; `never`/`disabled` skip
+9. **Circuit breaker**: 5s→600s escalating; resets only after a 300s stable session (a camera reboot costs seconds, not a flat 60s)
+10. **Progress watchdog**: if the active segment's size doesn't grow for `max(2×segment_seconds, 180s)`, the hung FFmpeg is killed and restarted — process alive ≠ recording
+11. Recorder config signature: stream URI/credentials/storage/segment length changes rebuild the recorder within 30s (no stale RTSP URLs)
+12. Codec probing (video+audio) is cached per stream URL for 1h — motion recorders don't pay an ffprobe round-trip per event
 
 ## AI Detection Lifecycle (ai-engine)
 
-1. `FrameSampler` per camera: RTSP sub-stream at 2fps → MOG2 motion gate → shared YOLOv8n ONNX session
+1. `FrameSampler` per camera: a **drainer thread** reads the MediaMTX relay sub-stream continuously and keeps only the freshest frame (no stale-frame lag; half-dead sessions detected via 15s staleness). Samples at `AI_TARGET_FPS` (default 1.0) → MOG2 motion gate → shared YOLOv8n ONNX session
 2. Detections filtered by `ai_objects`, `ai_min_confidence` (clamped 0.05–0.95), and `ai_zones` polygons (bottom-center of bbox must be inside a zone; empty zones = whole frame)
-3. **IoU multi-object tracking**: Tracklets matched across frames via IoU > 0.3. New objects fire immediately. Moving: 1 event/15s. Stationary: persons 5 min, vehicles 30 min. Parked objects (5+ stationary frames) exempt from timeout (120s) — no re-detection when MOG2 wakes up.
-4. Events → `events` table (plain SQL) + JPEG snapshot at `{STORAGE_LOCAL_PATH}/snapshots/` + Redis pub
-5. Model: `yolov8n.onnx` in `ai_models` volume at `/app/models` (exported on host via ultralytics, not in image)
+3. **Two-stage tracking**: stage 1 strict (IoU ≥ 0.3 AND centre distance ≤ 0.15), stage 2 relaxed centre-distance fallback (≤ 0.30) — at 1 FPS a moving object has zero frame-overlap, so stage 1 alone would fire a new event every frame. New objects fire immediately, throttled by a 5s per-class global gap (anti-spam backstop). Moving: 1 event/15s. Stationary: persons 5 min, vehicles 20 min. Parked objects (5+ stationary frames) exempt from the 300s timeout; a parked tracklet that moves expires only after 10s UNSEEN (no double-fire)
+4. Events → `events` table (plain SQL) + JPEG snapshot at `{STORAGE_LOCAL_PATH}/snapshots/` + Redis pub. Snapshot is written BEFORE the DB insert; counter upserts are independent of the event insert (a counter failure never loses the event/broadcast)
+5. Model: `yolov8n.onnx` in `ai_models` volume at `/app/models` (exported on host via ultralytics, not in image). A missing model never disables motion-only/ONVIF workers — detection no-ops until it loads
 6. Media auth: `<img>/<video>` use `?token=` query param (get_current_user accepts it)
-7. **Motion publishing**: every sampler publishes motion state to Redis `nvr:motion` (on change + 30s heartbeat). Workers are also created for `recording_mode='motion'` cameras with AI disabled (motion-only mode, no YOLO)
-8. Worker config signature: any camera config change (zones/objects/stream) recreates the worker within 15s
+7. **Motion publishing**: every sampler publishes motion state to Redis `nvr:motion` — on change + 30s heartbeat in BOTH states (active and inactive, so consumers can detect a dead publisher). Workers are also created for `recording_mode='motion'` cameras with AI disabled (motion-only mode, no YOLO). Relay start is re-POSTed whenever capture fails (the relay is the sampler's lifeline)
+8. Worker config signature (incl. credentials + storage path): any camera config change recreates the worker within 15s
 
 ## Motion-Only Recording (recording_mode='motion')
 
-1. AI engine publishes `{camera_id, active}` to Redis `nvr:motion`
-2. `MotionRecorderController` (recording-engine): motion active → start `CameraRecorder`; motion inactive → stop after `recording.motion_stop_delay_s` (30s); new motion cancels the pending stop
-3. Motion recorders live in a separate registry from continuous recorders (no reconcile conflicts)
-4. Segments are marked `recording_type='motion'` by the catalog based on camera mode
+1. AI engine publishes `{camera_id, active}` to Redis `nvr:motion` (ONVIF subscribers publish the REAL event value — `Value="false"` ends motion)
+2. `MotionRecorderController` (recording-engine): motion active → start `CameraRecorder`; motion inactive → stop after `recording.motion_stop_delay_s` (30s); new motion cancels the pending stop. Every True is a keepalive (refreshes last-active timestamp)
+3. **Staleness sweep** (30s): recorders with no keepalive for 90s (publisher dead / lost False) or whose camera left motion-mode are stopped — motion recorders can never run forever
+4. Motion recorders live in a separate registry from continuous recorders (no reconcile conflicts)
+5. Motion recorders read the MediaMTX relay path (`RECORD_VIA_RELAY=1`, server-side motion only) — ~100ms attach, ≤1s keyframe wait, one shared camera connection
+6. Segments are marked `recording_type='motion'` by the catalog based on camera mode
+
+## Engineering Rules (learned from production incidents — follow strictly)
+
+1. **CancelledError rule**: after `except asyncio.CancelledError`, NEVER fall through into reconnect/continue logic — re-raise (or check a `_stopping` flag). A swallowed cancel turned every intentional stream stop into an automatic restart and defeated the idle reaper completely.
+2. **Circuit breaker rule**: `reset()` only after a proven stable run (300s recording / 60s stream), never on spawn — a spawned FFmpeg proves nothing. Don't trip before your own retry attempts; trip once on exhaustion.
+3. **Concurrency rule**: every check-then-act on a shared registry (processes, recorders, paths) must hold a per-key `asyncio.Lock` across the whole check→spawn→register sequence.
+4. **S3 path rule**: any code walking the local filesystem (catalog, retention, cleanup) must skip `s3://` paths; deletion of remote objects goes through the storage backend abstraction, never `os.unlink`.
+5. **Motion state rule**: heartbeat BOTH states (active + inactive) so consumers can detect a dead publisher; consumers must have a staleness watchdog (90s) because Redis pub/sub is fire-and-forget. Publisher-side retries a failed publish once.
+6. **Event pipeline rule**: snapshot → DB event insert → broadcast. Counters/notifications are independent transactions — their failure must never lose the event or its broadcast.
+7. **FFmpeg watchdog rule**: process alive ≠ work happening. Supervisors must stat output growth (recording) or frame freshness (sampling) and kill hung processes.
+8. **Tracking-FPS coupling rule**: IoU thresholds are only valid for a given sample rate — at 1 FPS movers have zero frame overlap, so a distance-based fallback match + a per-class global event gap are mandatory. Re-validate tracking constants when `AI_TARGET_FPS` changes.
+9. **MediaMTX usage rule**: live path = MediaMTX (sourceOnDemand pull, LL-HLS, WebRTC WHEP). Continuous recording = direct camera `-c:v copy` (lowest CPU, independent). AI sampling + motion recording = the shared relay path. Server config (LL-HLS variant) is useless without the matching client flags (`lowLatencyMode: true`).
+10. **OpenCV options rule**: `OPENCV_FFMPEG_CAPTURE_OPTIONS` entries are separated by `|` (not `;`): `"rtsp_transport;tcp|timeout;15000000"`.
 
 ## Key Files
 

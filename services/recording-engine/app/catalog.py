@@ -13,11 +13,13 @@ Idempotent — safe to run repeatedly and after crashes.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import re
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import structlog
 from sqlalchemy import text
@@ -28,7 +30,18 @@ from . import config
 logger = structlog.get_logger()
 
 STABLE_SECONDS = 15  # file untouched this long => segment is closed
+THUMB_FAIL_RETRY_S = 24 * 3600  # retry failed thumbnails at most once a day
 FILENAME_RE = re.compile(r"(\d{8})_(\d{6})\.mp4$")
+
+
+def _thumb_failed_marker(segment_path: str) -> str:
+    return os.path.splitext(segment_path)[0] + ".thumb_failed"
+
+
+def _mark_thumb_failed(segment_path: str) -> None:
+    """Mark thumbnail generation as failed so corrupt segments don't retry-storm."""
+    with contextlib.suppress(OSError):
+        Path(_thumb_failed_marker(segment_path)).touch()
 
 
 async def _probe_duration(path: str) -> float | None:
@@ -159,10 +172,11 @@ class SegmentCatalog:
                         if (
                             thumb_budget > 0
                             and self._needs_thumbnail(path)
-                         ):
+                        ):
                             if await _make_thumbnail(path):
                                 thumb_budget -= 1
                             else:
+                                _mark_thumb_failed(path)
                                 logger.warning("thumbnail_generation_failed", path=path)
                         continue
                     try:
@@ -197,6 +211,12 @@ class SegmentCatalog:
         thumb = os.path.splitext(segment_path)[0] + ".jpg"
         if os.path.exists(thumb):
             return False
+        marker = _thumb_failed_marker(segment_path)
+        try:
+            if os.path.exists(marker) and time.time() - os.path.getmtime(marker) < THUMB_FAIL_RETRY_S:
+                return False
+        except OSError:
+            pass
         try:
             return time.time() - os.path.getmtime(segment_path) >= STABLE_SECONDS
         except OSError:
@@ -211,13 +231,16 @@ class SegmentCatalog:
             cam_path = os.path.join(base, camera_dir)
             if camera_dir == "snapshots" or not os.path.isdir(cam_path):
                 continue
+            # Only camera (UUID) dirs — never touch junk like lost+found.
+            try:
+                uuid.UUID(camera_dir)
+            except ValueError:
+                continue
             # keep date dirs available for long-running ffmpeg processes
             for offset in (0, 1):
                 day = datetime.now(UTC) + timedelta(days=offset)
-                try:
+                with contextlib.suppress(OSError):
                     os.makedirs(os.path.join(cam_path, day.strftime("%Y/%m/%d")), exist_ok=True)
-                except OSError:
-                    pass
             for root, _dirs, files in os.walk(cam_path):
                 for name in files:
                     if name.endswith(".mp4"):
@@ -239,31 +262,40 @@ class SegmentCatalog:
         if datetime.now(UTC).timestamp() - stat.st_mtime < STABLE_SECONDS:
             return False  # still being written
 
-        duration = await _probe_duration(path)
-        if duration is None or duration <= 0:
-            mtime_age = max(1.0, datetime.now(UTC).timestamp() - stat.st_mtime)
-            duration = min(mtime_age, 600.0)
-        end_time = start_time + timedelta(seconds=duration)
-
         rel = os.path.relpath(path, base)
         camera_id = rel.split(os.sep)[0]
         try:
             uuid.UUID(camera_id)
         except ValueError:
             return False
+        if camera_id not in camera_modes:
+            # Orphan file of a deleted (or not-yet-created) camera — inserting
+            # would violate the recordings.camera_id FK on every scan.
+            return False
+
+        duration = await _probe_duration(path)
+        is_corrupt = False
+        if duration is None or duration <= 0:
+            # Missing moov atom / unreadable segment — register as corrupt
+            # (visible in UI, still retention-deletable), never fabricate
+            # a duration from mtime age.
+            duration = 0.0
+            is_corrupt = True
+        end_time = start_time + timedelta(seconds=duration)
 
         storage_backend_id = self._resolve_backend_id(path, backend_map)
         recording_type = "motion" if camera_modes.get(camera_id) == "motion" else "continuous"
         if await _make_thumbnail(path) is None:
+            _mark_thumb_failed(path)
             logger.warning("thumbnail_generation_failed", path=path)
         await session.execute(
             text(
                 """
                 INSERT INTO recordings
                     (id, camera_id, file_path, file_size_bytes, duration_seconds,
-                     start_time, end_time, recording_type, storage_backend_id)
+                     start_time, end_time, recording_type, storage_backend_id, is_corrupt)
                 VALUES (:id, :camera_id, :file_path, :size, :duration,
-                        :start_time, :end_time, :recording_type, :storage_backend_id)
+                        :start_time, :end_time, :recording_type, :storage_backend_id, :is_corrupt)
                 ON CONFLICT DO NOTHING
                 """
             ),
@@ -277,6 +309,7 @@ class SegmentCatalog:
                 "end_time": end_time,
                 "recording_type": recording_type,
                 "storage_backend_id": storage_backend_id,
+                "is_corrupt": is_corrupt,
             },
         )
         return True
@@ -292,8 +325,15 @@ class SegmentCatalog:
     async def _purge_missing(
         self, session: AsyncSession, known_paths: set[str], disk_files: set[str]
     ) -> int:
-        """Remove DB rows whose files no longer exist (e.g. deleted by retention)."""
-        missing = [p for p in known_paths if p not in disk_files]
+        """Remove DB rows whose files no longer exist (e.g. deleted by retention).
+
+        Non-local paths (s3://...) can never appear in a filesystem walk —
+        purging them would erase recordings that were migrated off-disk.
+        """
+        missing = [
+            p for p in known_paths
+            if p not in disk_files and not p.startswith("s3://")
+        ]
         if not missing:
             return 0
         await session.execute(

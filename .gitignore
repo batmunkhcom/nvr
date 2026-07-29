@@ -67,6 +67,11 @@ alembic/versions/*.pyc
 Thumbs.db
 backups/
 todo.md
+core
+core.*
+
+# TypeScript build artifacts
+*.tsbuildinfo
 
 # Local-only files (sensitive / agent-internal)
 AGENTS.md

@@ -19,7 +19,7 @@ Runs on a 1-hour interval.
 
 from __future__ import annotations
 
-import asyncio
+import os
 import uuid as uuid_lib
 from datetime import UTC, datetime
 
@@ -229,6 +229,17 @@ class TierMigrationWorker:
                 {"to_id": target["backend_id"], "new_path": new_path, "rec_id": rec_id},
             )
             await session.commit()
+
+        # Delete the source file + sidecar AFTER the DB update commits —
+        # otherwise the catalog re-registers the leftover file as a new row
+        # and the next migration run copies it again (infinite duplicate loop).
+        try:
+            os.unlink(file_path)
+            thumb = os.path.splitext(file_path)[0] + ".jpg"
+            if os.path.exists(thumb):
+                os.unlink(thumb)
+        except OSError:
+            logger.warning("tier_migration_source_delete_failed", path=file_path, exc_info=True)
 
         logger.info(
             "tier_migration_complete",

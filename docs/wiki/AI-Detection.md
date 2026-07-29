@@ -9,21 +9,21 @@ YOLOv8n ONNX object detection on camera sub-streams with MOG2 motion gating, zon
 ## Pipeline
 
 ```
-RTSP Sub-stream (0.5 FPS, 640px width)
+MediaMTX relay sub-stream (AI_TARGET_FPS, default 1.0 FPS, 640px width)
             │
             ▼
 ┌───────────────────┐
-│  FrameSampler       │  OpenCV cap.read()
-│  per camera         │  cv2.CAP_PROP_BUFFERSIZE=1 (minimal latency)
+│  Drainer thread     │  freshest frame only (no stale lag)
+│  per camera         │  15s staleness → reconnect
 └────────┬──────────┘
             │
             ▼
 ┌───────────────────┐
-│  MOG2 Motion Gate │  history=500, detectShadows=False
-│   (OpenCV)           │  countNonZero > 500 pixels → motion
-│                     │  Threshold: low=40, med=25, high=16
+│  MOG2 Motion Gate │  history=200, detectShadows=False
+│   (OpenCV)           │  countNonZero > 800 pixels → motion
+│                     │  Threshold: low=50, med=30, high=20
 └────────┬──────────┘
-            │ motion detected
+            │ motion detected (2 consecutive frames)
             ▼
 ┌───────────────────┐
 │  YOLOv8n ONNX       │  Shared singleton session
@@ -46,15 +46,15 @@ RTSP Sub-stream (0.5 FPS, 640px width)
             │
             ▼
 ┌───────────────────┐
-│  Position Dedup     │  Static object: person 5min, vehicle 30min
-│                     │  Parked after 5 stationary frames → survives timeouts
-│  Min event gap: 2s  │  Moved (>0.10 normalized): 15s cooldown
+│  Two-stage Tracking│  Stage 1: IoU ≥ 0.3 + centre dist ≤ 0.15
+│                     │  Stage 2: relaxed centre dist ≤ 0.30 (movers)
+│  Per-class gap: 5s  │  Static: person 5min, vehicle 20min
 └────────┬──────────┘
             │
        ┌────┴────┐
        ▼           ▼
-   Events     JPEG
-   Table    Snapshot
+    Events     JPEG
+    Table    Snapshot
          (with bounding
           boxes + labels)
 ```
@@ -80,7 +80,7 @@ This means event snapshots in the Events page now show annotated bounding boxes 
 | `ai_enabled` | boolean | Enable/disable AI detection per camera |
 | `ai_objects` | JSON array | COCO classes to detect: `["person", "car", "truck", "bus", "motorcycle", "bicycle", ...]` (80 total) |
 | `ai_zones` | JSON array | Polygon zones: `[{"name": "...", "points": [[x,y], ...]}]` — empty zones = whole frame |
-| `ai_sensitivity` | string | MOG2 threshold: `low` (40), `medium` (25), `high` (16) |
+| `ai_sensitivity` | string | MOG2 threshold: `low` (50), `medium` (30), `high` (20) |
 | `ai_min_confidence` | float | Confidence threshold, clamped 0.05–0.95 |
 
 ---
@@ -126,15 +126,19 @@ v0.01.53 adds **parked-object protection** to prevent repeated detection of stat
 ### Architecture
 
 ```
-Detections (per frame, 0.5 FPS)
+Detections (per frame, AI_TARGET_FPS = 1.0)
         │
         ▼
 ┌─────────────────────────────────┐
-│  IoU Matching                    │
-│  → for each existing Tracklet:   │
-│    find best match by IoU>0.3    │
+│  Stage 1: strict match           │
+│  IoU ≥ 0.3 AND centre dist ≤ 0.15│
+├─────────────────────────────────┤
+│  Stage 2 (unmatched only):       │
+│  relaxed centre dist ≤ 0.30      │
+│  (movers have IoU≈0 at 1 FPS)    │
+├─────────────────────────────────┤
 │  → unmatched: new Tracklet       │
-│  → matched: update position      │
+│    (5s per-class gap backstop)   │
 └──────────────┬──────────────────┘
                │
         ┌──────┴──────┐
@@ -148,7 +152,7 @@ Detections (per frame, 0.5 FPS)
    ┌────┴────┐
    ▼         ▼
  Moved     Stationary
- 15s gap   person: 5min / vehicle: 30min
+ 15s gap   person: 5min / vehicle: 20min
            After 5 frames → parked → survives timeout
 ```
 
@@ -169,14 +173,17 @@ Detections (per frame, 0.5 FPS)
 
 | Constant | Value | Description |
 |----------|-------|-------------|
-| `IOU_MATCH_THRESHOLD` | 0.30 | Minimum IoU to match same object |
-| `TRACKLET_TIMEOUT_S` | 120.0 | Unseen objects expire after 2 min (was 5s) |
+| `IOU_MATCH_THRESHOLD` | 0.30 | Minimum IoU to match same object (stage 1) |
+| `FALLBACK_CENTRE_DISTANCE` | 0.30 | Relaxed centre-distance match for movers (stage 2) |
+| `TRACKLET_TIMEOUT_S` | 300.0 | Unseen objects expire after 5 min |
 | `MOVING_COOLDOWN_S` | 15.0 | Moving objects: max 1 event/15s |
 | `PERSON_STATIC_COOLDOWN_S` | 300.0 | Stationary people: max 1 event/5min |
-| `VEHICLE_STATIC_COOLDOWN_S` | 1800.0 | Stationary vehicles: max 1 event/30min |
-| `MIN_EVENT_GAP_S` | 2.0 | Absolute minimum between any events |
+| `VEHICLE_STATIC_COOLDOWN_S` | 1200.0 | Stationary vehicles: max 1 event/20min |
+| `MIN_EVENT_GAP_S` | 2.0 | Absolute minimum between any events (per tracklet) |
+| `CLASS_EVENT_GAP_S` | 5.0 | Global per-class event throttle (anti-spam backstop) |
 | `POSITION_TOLERANCE` | 0.10 | Normalised centre movement threshold |
 | `STATIONARY_HYSTERESIS` | 5 | Consecutive frames before parked state |
+| `MAX_TRACKLETS` | 32 | Hard cap per camera |
 
 ### Parked-Object Protection (v0.01.53)
 

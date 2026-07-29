@@ -10,6 +10,7 @@ import httpx
 import structlog
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.security import decrypt_password_aes, encrypt_password_aes
@@ -32,7 +33,10 @@ async def list_cameras(
     order: str = "asc",
 ) -> dict:
     offset = (page - 1) * per_page
-    query = select(Camera)
+    query = select(Camera).options(
+        selectinload(Camera.location_ref),
+        selectinload(Camera.storage_backend),
+    )
 
     if manufacturer:
         query = query.where(Camera.manufacturer == manufacturer)
@@ -67,7 +71,11 @@ def camera_to_dict(camera: Camera) -> dict:
 
 
 async def get_camera(camera_id: uuid.UUID, db: AsyncSession) -> Camera:
-    result = await db.execute(select(Camera).where(Camera.id == camera_id))
+    result = await db.execute(
+        select(Camera)
+        .where(Camera.id == camera_id)
+        .options(selectinload(Camera.location_ref), selectinload(Camera.storage_backend))
+    )
     camera = result.scalar_one_or_none()
     if not camera:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Camera not found")
@@ -296,8 +304,6 @@ def _derive_sub_stream_uri(main_uri: str | None) -> str | None:
 
 
 def _camera_to_response(camera: Camera) -> dict:
-    import contextlib
-
     result = {
         "id": str(camera.id),
         "name": camera.name,
@@ -338,6 +344,7 @@ def _camera_to_response(camera: Camera) -> dict:
         "location": camera.location,
         "location_id": str(camera.location_id) if camera.location_id else None,
         "location_name": None,
+        "location_color": None,
         "storage_backend_id": str(camera.storage_backend_id) if camera.storage_backend_id else None,
         "storage_backend_name": None,
         "notes": camera.notes,
@@ -347,15 +354,18 @@ def _camera_to_response(camera: Camera) -> dict:
         "updated_at": camera.updated_at.isoformat() if camera.updated_at else None,
     }
 
-    if camera.location_id:
-        with contextlib.suppress(Exception):
-            if camera.location_ref:
-                result["location_name"] = camera.location_ref.name
+    if camera.location_id and camera.location_ref:
+        try:
+            result["location_name"] = camera.location_ref.name
+            result["location_color"] = camera.location_ref.color
+        except Exception as exc:
+            logger.warning("camera_location_ref_failed", camera_id=str(camera.id), error=str(exc))
 
-    if camera.storage_backend_id:
-        with contextlib.suppress(Exception):
-            if camera.storage_backend:
-                result["storage_backend_name"] = camera.storage_backend.name
+    if camera.storage_backend_id and camera.storage_backend:
+        try:
+            result["storage_backend_name"] = camera.storage_backend.name
+        except Exception as exc:
+            logger.warning("camera_storage_backend_failed", camera_id=str(camera.id), error=str(exc))
 
     return result
 

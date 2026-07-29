@@ -277,6 +277,8 @@ async def live_stop(
     from ...services.live_relay import stop_relay
 
     result = await stop_relay(camera_id)
+    # Also stop the sub-stream relay — otherwise it lingers until the idle reaper.
+    await stop_relay(f"{camera_id}_sub")
     return {"data": result}
 
 

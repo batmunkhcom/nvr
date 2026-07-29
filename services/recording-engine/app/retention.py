@@ -29,6 +29,7 @@ logger = structlog.get_logger()
 
 PROTECT_SECONDS = 600  # never delete segments newer than 10 minutes
 MAX_DELETES_PER_RUN = 500
+DELETE_BATCH = 50  # rows deleted per watermark re-check in circular cleanup
 
 
 def _delete_sidecar(segment_path: str) -> None:
@@ -54,7 +55,7 @@ class RetentionManager:
             max_usage_pct = await config.get_config_int(session, "storage.max_usage_percent")
             min_free_gb = await config.get_config_int(session, "storage.min_free_gb")
 
-        summary = {"age_deleted": 0, "circular_deleted": 0, "freed_bytes": 0}
+        summary = {"age_deleted": 0, "circular_deleted": 0, "orphan_deleted": 0, "freed_bytes": 0}
 
         deleted, freed = await self._enforce_age_limit(retention_days)
         summary["age_deleted"] += deleted
@@ -64,7 +65,12 @@ class RetentionManager:
         summary["circular_deleted"] += deleted
         summary["freed_bytes"] += freed
 
-        if deleted or summary["age_deleted"]:
+        summary["orphan_deleted"] = await self._cleanup_orphan_dirs(retention_days)
+
+        # Prune empty date dirs once per run (not per deleted file).
+        self._prune_empty_dirs()
+
+        if deleted or summary["age_deleted"] or summary["orphan_deleted"]:
             logger.info("retention_pass_complete", **summary)
         return summary
 
@@ -100,15 +106,20 @@ class RetentionManager:
         for root in roots:
             if not os.path.isdir(root):
                 continue
-            for _ in range(MAX_DELETES_PER_RUN):
+            # Delete in batches between watermark checks — a per-file
+            # disk_usage + fresh session is heavy N+1 churn during disk-full
+            # emergencies.
+            for _ in range(MAX_DELETES_PER_RUN // DELETE_BATCH):
                 usage = await asyncio.to_thread(shutil.disk_usage, root)
                 usage_pct = usage.used / usage.total * 100 if usage.total else 0
                 free_gb = usage.free / (1024**3)
                 if usage_pct < max_usage_pct and free_gb >= min_free_gb:
                     break
 
-                row = await self._oldest_recording()
-                if row is None:
+                # Oldest recordings ON THIS ROOT only — freeing space on root A
+                # must not delete footage that lives on root B.
+                rows = await self._oldest_recordings(root, DELETE_BATCH)
+                if not rows:
                     logger.critical(
                         "retention_nothing_to_delete",
                         root=root,
@@ -116,7 +127,7 @@ class RetentionManager:
                         free_gb=round(free_gb, 2),
                     )
                     break
-                d, f = await self._delete_rows([row])
+                d, f = await self._delete_rows(rows)
                 deleted += d
                 freed += f
                 if d == 0:
@@ -126,18 +137,66 @@ class RetentionManager:
             logger.warning("retention_circular_cleanup", deleted=deleted, freed_bytes=freed)
         return deleted, freed
 
-    async def _oldest_recording(self) -> tuple | None:
-        """Oldest deletable recording row (id, file_path), or None."""
+    async def _oldest_recordings(self, root: str, limit: int) -> list[tuple]:
+        """Oldest deletable recording rows (id, file_path) under a storage root."""
         protect_after = datetime.now(UTC) - timedelta(seconds=PROTECT_SECONDS)
         async with self._session_factory() as session:
             result = await session.execute(
                 text(
                     "SELECT id, file_path FROM recordings "
-                    "WHERE start_time < :protect ORDER BY start_time LIMIT 1"
+                    "WHERE start_time < :protect AND file_path LIKE :prefix "
+                    "ORDER BY start_time LIMIT :limit"
                 ),
-                {"protect": protect_after},
+                {"protect": protect_after, "prefix": f"{root.rstrip('/')}/%", "limit": limit},
             )
-            return result.fetchone()
+            return result.fetchall()
+
+    # ------------------------------------------------------------------
+    # Orphan cleanup (files of deleted cameras)
+    # ------------------------------------------------------------------
+
+    async def _cleanup_orphan_dirs(self, retention_days: int) -> int:
+        """Remove camera dirs whose UUID no longer exists in the cameras table.
+
+        delete_camera leaves files behind and retention only touches DB-backed
+        files, so orphan dirs would leak forever. Grace period: every file in
+        the dir must be older than the retention age before removal.
+        """
+        removed = 0
+        grace_s = max(retention_days, 1) * 86400
+        async with self._session_factory() as session:
+            result = await session.execute(text("SELECT id FROM cameras"))
+            live_ids = {str(row[0]) for row in result.fetchall()}
+
+        now = time.time()
+        for base in config.get_storage_roots():
+            if not os.path.isdir(base):
+                continue
+            for camera_dir in os.listdir(base):
+                cam_path = os.path.join(base, camera_dir)
+                if camera_dir == "snapshots" or not os.path.isdir(cam_path):
+                    continue
+                try:
+                    import uuid as uuid_mod
+                    uuid_mod.UUID(camera_dir)
+                except ValueError:
+                    continue
+                if camera_dir in live_ids:
+                    continue
+                # Only delete when every file inside is past the grace period.
+                try:
+                    mtimes = [
+                        os.path.getmtime(os.path.join(root, name))
+                        for root, _dirs, files in os.walk(cam_path)
+                        for name in files
+                    ]
+                except OSError:
+                    continue
+                if mtimes and all(now - m > grace_s for m in mtimes):
+                    shutil.rmtree(cam_path, ignore_errors=True)
+                    removed += 1
+                    logger.warning("retention_orphan_dir_removed", path=cam_path)
+        return removed
 
     # ------------------------------------------------------------------
     # Delete helpers (file + DB row, kept in sync)
@@ -147,6 +206,16 @@ class RetentionManager:
         deleted = 0
         freed = 0
         for row_id, file_path in rows:
+            if file_path.startswith("s3://"):
+                # Object lives in object storage — deleting the DB row without
+                # deleting the object leaks it forever.
+                size = await self._delete_s3_object(file_path)
+                if size is None:
+                    continue
+                if await self._delete_row_only(row_id):
+                    deleted += 1
+                    freed += size
+                continue
             if not self._is_deletable(file_path):
                 continue
             size = 0
@@ -162,8 +231,34 @@ class RetentionManager:
             if await self._delete_row_only(row_id):
                 deleted += 1
                 freed += size
-        self._prune_empty_dirs()
         return deleted, freed
+
+    async def _delete_s3_object(self, file_path: str) -> int | None:
+        """Delete an s3://bucket/key recording object. Returns freed bytes (0 if unknown), None on failure."""
+        from nvr_common.storage import S3Storage
+
+        bucket, _, key = file_path[5:].partition("/")
+        if not bucket or not key:
+            return 0
+        try:
+            async with self._session_factory() as session:
+                result = await session.execute(
+                    text(
+                        "SELECT id, name, config FROM storage_backends "
+                        "WHERE backend_type = 's3' AND is_active"
+                    )
+                )
+                backends = result.fetchall()
+            for backend_id, name, cfg in backends:
+                if (cfg or {}).get("bucket") == bucket:
+                    s3 = S3Storage(str(backend_id), name, cfg)
+                    await s3.delete(key)
+                    return 0
+            logger.warning("retention_s3_backend_not_found", bucket=bucket)
+            return 0
+        except Exception:
+            logger.warning("retention_s3_delete_failed", path=file_path, exc_info=True)
+            return None
 
     async def _delete_row_only(self, row_id) -> bool:
         try:
@@ -187,7 +282,17 @@ class RetentionManager:
 
     @staticmethod
     def _prune_empty_dirs() -> None:
-        """Remove empty Y/M/D directories left behind after deletes."""
+        """Remove empty Y/M/D directories left behind after deletes.
+
+        Today/tomorrow date dirs are kept even when empty — a live FFmpeg
+        segment muxer needs them at the roll boundary.
+        """
+        from datetime import timedelta as td
+
+        keep = {
+            (datetime.now(UTC) + td(days=o)).strftime("%Y/%m/%d")
+            for o in (0, 1)
+        }
         for base in config.get_storage_roots():
             if not os.path.isdir(base):
                 continue
@@ -198,6 +303,9 @@ class RetentionManager:
                 for root, dirs, _files in os.walk(cam_path, topdown=False):
                     for d in dirs:
                         full = os.path.join(root, d)
+                        rel_full = os.path.relpath(full, cam_path).replace(os.sep, "/")
+                        if rel_full in keep:
+                            continue
                         try:
                             if not os.listdir(full):
                                 os.rmdir(full)

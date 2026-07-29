@@ -29,6 +29,12 @@ const LABELS: Record<string, [string, string | undefined, "text" | "number" | "t
   "ui.refresh_interval_s": ["Refresh Interval (s)", "How often the camera list reloads. Lower = more up-to-date, higher = less server load. Recommended: 30.", "number"],
   "ui.theme": ["Theme", "UI color theme. Currently only 'dark' is supported.", "text"],
   "ui.language": ["Language", "Interface language: 'mn' (Монгол) or 'en' (English).", "select", ["mn", "en"]],
+  "ui.timezone": ["Timezone", "Date/time display and counter aggregation timezone. Default: Asia/Ulaanbaatar (UTC+8).", "select", [
+    "Asia/Ulaanbaatar", "Asia/Tokyo", "Asia/Seoul", "Asia/Shanghai", "Asia/Singapore",
+    "Asia/Bangkok", "Asia/Dubai", "Europe/Moscow", "Europe/London", "Europe/Berlin",
+    "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
+    "Pacific/Auckland", "Australia/Sydney", "UTC",
+  ]],
   "camera.test_timeout_s": ["Test Timeout (s)", "How long to wait for a camera RTSP auth check before marking it failed. Increase to 10+ for slow networks.", "number"],
   "camera.health_check_interval_s": ["Health Check Interval (s)", "How often the background loop pings every camera and updates its status. 60–120s recommended; minimum 30.", "number"],
   "mediamtx.rtsp_url": ["MediaMTX RTSP URL", "Internal relay target for FFmpeg transcoded streams. Only change if MediaMTX runs on a different host.", "text"],

@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from .config_service import get_timezone, local_date
+
+
+async def _get_start_date(db: AsyncSession, days: int) -> date:
+    tz = await get_timezone(db)
+    return local_date(tz) - timedelta(days=days - 1)
 
 
 async def get_counter_summary(
@@ -14,23 +21,30 @@ async def get_counter_summary(
     camera_id: str | None = None,
     days: int = 7,
 ) -> dict[str, int]:
-    start_date = date.today() - timedelta(days=days - 1)
-    params: dict[str, Any] = {"start_date": start_date}
-    where = ""
-    if camera_id:
-        where = "AND camera_id = CAST(:camera_id AS uuid)"
-        params["camera_id"] = camera_id
+    start_date = await _get_start_date(db, days)
 
-    result = await db.execute(
-        text(f"""
-            SELECT object_category, SUM(count)::int AS total
-            FROM object_counters
-            WHERE counter_date >= :start_date
-            {where}
-            GROUP BY object_category
-        """),
-        params,
-    )
+    if camera_id:
+        result = await db.execute(
+            text("""
+                SELECT object_category, SUM(count)::int AS total
+                FROM object_counters
+                WHERE counter_date >= :start_date
+                  AND camera_id = CAST(:camera_id AS uuid)
+                GROUP BY object_category
+            """),
+            {"start_date": start_date, "camera_id": camera_id},
+        )
+    else:
+        result = await db.execute(
+            text("""
+                SELECT object_category, SUM(count)::int AS total
+                FROM object_counters
+                WHERE counter_date >= :start_date
+                GROUP BY object_category
+            """),
+            {"start_date": start_date},
+        )
+
     summary: dict[str, int] = {}
     for row in result.fetchall():
         summary[row[0]] = row[1]
@@ -71,7 +85,7 @@ async def get_counter_per_camera(
     db: AsyncSession,
     days: int = 7,
 ) -> list[dict]:
-    start_date = date.today() - timedelta(days=days - 1)
+    start_date = await _get_start_date(db, days)
     result = await db.execute(
         text("""
             SELECT

@@ -13,8 +13,8 @@ import asyncio
 import contextlib
 import json
 import os
-
 import structlog
+from zoneinfo import ZoneInfo
 
 from . import db
 from .detector import AIDetector
@@ -39,6 +39,8 @@ def _signature(cam: dict) -> tuple:
     return (
         cam["stream_sub_uri"],
         cam["stream_main_uri"],
+        cam["username"],
+        cam["encrypted_password"],
         json.dumps(cam["ai_objects"], sort_keys=True),
         cam["ai_sensitivity"],
         cam["ai_min_confidence"],
@@ -47,6 +49,7 @@ def _signature(cam: dict) -> tuple:
         cam["onvif_events_service_url"],
         cam["ai_enabled"],
         cam.get("recording_mode"),
+        cam.get("storage_mount_point"),
         json.dumps(cam.get("ai_plugins"), sort_keys=True),
     )
 
@@ -75,7 +78,7 @@ async def _reconcile() -> None:
             await _workers.pop(cam["id"]).stop()
             _signatures.pop(cam["id"], None)
             logger.info("ai_worker_reloading", camera=cam["name"])
-        worker = _build_worker(cam)
+        worker = await _build_worker(cam)
         if worker is None:
             continue
         _workers[cam["id"]] = worker
@@ -84,7 +87,7 @@ async def _reconcile() -> None:
         logger.info("ai_worker_added", camera=cam["name"], camera_id=cam["id"])
 
 
-def _build_worker(cam: dict):
+async def _build_worker(cam: dict):
     password = db.decrypt_password(cam["encrypted_password"])
 
     if cam["motion_source"] == "camera":
@@ -118,24 +121,51 @@ def _build_worker(cam: dict):
     use_relay = bool(cam.get("username"))
     final_uri = relay_uri if use_relay else stream_uri
 
-    if use_relay:
-        # Ensure the stream-manager relay is running so MediaMTX has the path
+    def _ensure_relay() -> None:
+        """(Re)start the stream-manager relay — the sampler's lifeline.
+
+        Called at worker build AND whenever capture fails: the idle reaper can
+        stop the relay during a long sampler reconnect gap, and a single
+        one-shot attempt would leave the camera dark forever. The URI must
+        carry credentials — MediaMTX pull and FFmpeg relay both authenticate
+        against the camera with them.
+        """
+        from .frame_sampler import build_rtsp_url
+
+        authed_uri = build_rtsp_url(stream_uri, cam["username"], password)
         try:
             import httpx
             httpx.post(
                 f"{_STREAM_MANAGER_URL}/relay/start",
-                json={"relay_key": relay_key, "rtsp_uri": stream_uri, "transport": "tcp"},
+                json={"relay_key": relay_key, "rtsp_uri": authed_uri, "transport": "tcp"},
                 timeout=5,
             )
             logger.debug("ai_relay_started", camera=cam["name"], relay_key=relay_key)
         except Exception:
             logger.warning("ai_relay_start_failed", camera=cam["name"])
 
+    on_capture_failed = None
+    if use_relay:
+        _ensure_relay()
+        relay_retry_ts = 0.0
+
+        async def on_capture_failed() -> None:
+            nonlocal relay_retry_ts
+            now = asyncio.get_running_loop().time()
+            if now - relay_retry_ts < 15:
+                return
+            relay_retry_ts = now
+            await asyncio.to_thread(_ensure_relay)
+
     # motion-only worker: publishes motion state for motion-mode recording
     # (no YOLO) when AI detection is disabled for this camera
     motion_only = not cam["ai_enabled"] and cam.get("recording_mode") == "motion"
 
     plugins = get_plugins_for_camera(cam.get("ai_plugins"))
+
+    target_fps = await db.read_config_float("ai.target_fps", 3.0)
+    tz_str = await db.read_timezone()
+    tz = ZoneInfo(tz_str)
 
     return FrameSampler(
         camera_id=cam["id"],
@@ -151,37 +181,38 @@ def _build_worker(cam: dict):
         event_callback=_broadcast_event,
         plugins=plugins,
         storage_path=cam.get("storage_mount_point"),
+        on_capture_failed=on_capture_failed,
+        target_fps=target_fps,
+        tz=tz,
     )
 
 
 async def _broadcast_event(camera_id: str, objects: list, snapshot_path: str | None) -> None:
     """Publish detection events to Redis for the API websocket bridge."""
-    try:
-        import redis.asyncio as aioredis
-
-        redis_host = os.environ.get("REDIS_HOST", "localhost")
-        redis_port = int(os.environ.get("REDIS_PORT", "6379"))
-        r = aioredis.from_url(f"redis://{redis_host}:{redis_port}/0")
-        try:
-            await r.publish(
-                "nvr:events",
-                json.dumps(
-                    {
-                        "type": "ai_detection",
-                        "camera_id": camera_id,
-                        "objects": objects,
-                        "snapshot_path": snapshot_path,
-                    }
-                ),
-            )
-        finally:
-            await r.close()
-    except Exception:
-        pass
+    await db.RedisPublisher.shared().publish(
+        "nvr:events",
+        {
+            "type": "ai_detection",
+            "camera_id": camera_id,
+            "objects": objects,
+            "snapshot_path": snapshot_path,
+        },
+    )
 
 
 async def main() -> None:
+    import signal
+    from concurrent.futures import ThreadPoolExecutor
+
     logger.info("ai_engine_starting", version="1.0.0")
+
+    loop = asyncio.get_running_loop()
+    # Bound the blocking-work executor: the default sizes off HOST cpu count
+    # (min(32, cpu+4)) while the container is capped at 2 — oversubscription
+    # queues inference behind cap.read() calls on many-camera hosts.
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=6, thread_name_prefix="ai-io"))
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, SHUTDOWN.set)
 
     await start_all()
 
@@ -196,10 +227,13 @@ async def main() -> None:
 
     while not SHUTDOWN.is_set():
         if not detector.ready:
+            # Keep retrying in the background; detection no-ops until ready,
+            # but motion-only and ONVIF workers must run regardless.
             model_ok = await detector.initialize()
-        if model_ok:
-            with contextlib.suppress(Exception):
-                await _reconcile()
+        # Always reconcile — a missing YOLO model must not disable
+        # motion-mode recording or ONVIF subscriptions.
+        with contextlib.suppress(Exception):
+            await _reconcile()
         await asyncio.sleep(POLL_INTERVAL)
 
     for worker in list(_workers.values()):

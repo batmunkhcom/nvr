@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import CameraGrid from "../components/camera/CameraGrid";
 import apiClient from "../api/client";
+import type { Camera } from "../types/camera";
 
 vi.mock("../api/client", () => ({
   default: { get: vi.fn(), patch: vi.fn(), post: vi.fn() },
@@ -37,7 +38,7 @@ const onlineCamera = {
   has_audio: false,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: null,
-};
+} as unknown as Camera;
 
 function mockApi(uiConfig: Record<string, unknown> = {}, cameras = [onlineCamera]) {
   vi.mocked(apiClient.get).mockImplementation((url: string) => {
@@ -120,6 +121,22 @@ describe("CameraGrid", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/No cameras configured/)).toBeInTheDocument();
+    });
+  });
+
+  it("renders location badge with the camera's location_color", async () => {
+    mockApi({}, [
+      { ...onlineCamera, location_name: "Warehouse", location_color: "#ef4444" },
+    ]);
+    renderGrid();
+
+    await waitFor(() => {
+      expect(screen.getByText("Warehouse")).toBeInTheDocument();
+    });
+    const badge = screen.getByText("Warehouse");
+    expect(badge).toHaveStyle({
+      backgroundColor: "rgba(239, 68, 68, 0.15)",
+      color: "#ef4444",
     });
   });
 });

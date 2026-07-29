@@ -5,10 +5,14 @@ hls: yes
 hlsAddress: :8888
 hlsVariant: lowLatency
 hlsSegmentDuration: 2s
-hlsSegmentCount: 15
+hlsSegmentCount: 7
 hlsPartDuration: 500ms
 webrtc: yes
 webrtcAddress: :8889
+# WebRTC through Docker NAT: the host LAN IP must be advertised in ICE
+# candidates (container IPs are unreachable from browsers). Set via env
+# override MTX_WEBRTCADDITIONALHOSTS in docker-compose (MEDIAMTX_ICE_HOST_IP).
+webrtcLocalUDPAddress: :8189
 
 # Open internal access (LAN-only deployment): publish/read/playback/api without auth.
 # Tighten with real users when exposing beyond the trusted network.

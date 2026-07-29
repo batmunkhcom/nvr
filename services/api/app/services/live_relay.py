@@ -92,8 +92,16 @@ async def stop_relay(relay_key: str | uuid.UUID) -> dict[str, Any]:
 
 async def relay_status(relay_key: str | uuid.UUID) -> dict[str, Any]:
     cid = str(relay_key)
-    if cid in STREAM_DICT and STREAM_DICT[cid].get("running"):
-        return {"running": True, "hls_url": f"/hls/{cid}/index.m3u8"}
+    # Verify against stream-manager first — STREAM_DICT is only a local cache
+    # and can go stale-positive (e.g. relay killed by idle reaper).
+    try:
+        status_resp = await _call_stream_manager("GET", "/relay/status", {"relay_key": cid})
+        if status_resp.get("running"):
+            STREAM_DICT[cid] = {"running": True, "delegated": True}
+            return {"running": True, "hls_url": f"/hls/{cid}/index.m3u8"}
+        STREAM_DICT.pop(cid, None)
+    except Exception:
+        pass
 
     if await _check_mediamtx_path(cid):
         return {"running": True, "hls_url": f"/hls/{cid}/index.m3u8"}

@@ -99,6 +99,7 @@ class CameraResponse(BaseModel):
     location: str | None = None
     location_id: str | None = None
     location_name: str | None = None
+    location_color: str | None = None
     storage_backend_id: str | None = None
     storage_backend_name: str | None = None
     notes: str | None = None

@@ -29,6 +29,24 @@ CATALOG_INTERVAL = 60  # segment scanner
 RETENTION_INTERVAL = 300  # circular cleanup check
 ANALYTICS_INTERVAL = 3600  # disk usage analysis
 
+_redis_client = None
+
+
+async def get_redis():
+    """Shared lazy Redis client (avoids per-call connection churn)."""
+    global _redis_client
+    import redis.asyncio as aioredis
+
+    if _redis_client is None:
+        host = os.environ.get("REDIS_HOST", "localhost")
+        port = int(os.environ.get("REDIS_PORT", "6379"))
+        _redis_client = aioredis.from_url(
+            f"redis://{host}:{port}/0",
+            decode_responses=True,
+            socket_connect_timeout=3,
+        )
+    return _redis_client
+
 # --- system_config defaults (overridable from DB) ---
 DEFAULTS = {
     "retention.default_days": 7,

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef, useEffect, type DragEvent } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect, type DragEvent, type CSSProperties } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCameras, useCameraMutations } from "../../hooks/useCameras";
@@ -29,17 +29,35 @@ const statusBorder: Record<string, string> = {
 };
 
 const LOCATION_COLORS = [
-  "bg-blue-900/50 text-blue-400",
-  "bg-green-900/50 text-green-400",
-  "bg-yellow-900/50 text-yellow-400",
-  "bg-purple-900/50 text-purple-400",
-  "bg-pink-900/50 text-pink-400",
-  "bg-teal-900/50 text-teal-400",
-  "bg-orange-900/50 text-orange-400",
-  "bg-cyan-900/50 text-cyan-400",
-  "bg-red-900/50 text-red-400",
-  "bg-indigo-900/50 text-indigo-400",
+   "bg-blue-900/50 text-blue-400",
+   "bg-green-900/50 text-green-400",
+   "bg-yellow-900/50 text-yellow-400",
+   "bg-purple-900/50 text-purple-400",
+   "bg-pink-900/50 text-pink-400",
+   "bg-teal-900/50 text-teal-400",
+   "bg-orange-900/50 text-orange-400",
+   "bg-cyan-900/50 text-cyan-400",
+   "bg-red-900/50 text-red-400",
+   "bg-indigo-900/50 text-indigo-400",
 ];
+
+function hexToRgba(hex: string, alpha: number): string {
+  const c = hex.replace("#", "");
+  const i = parseInt(c.length === 3 ? c.split("").map(x => x + x).join("") : c, 16);
+  const r = (i >> 16) & 255;
+  const g = (i >> 8) & 255;
+  const b = i & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function locationBadgeStyle(color: string | null): React.CSSProperties {
+  const c = color || "#3b82f6";
+  return {
+    backgroundColor: hexToRgba(c, 0.15),
+    color: c,
+    border: `1px solid ${hexToRgba(c, 0.3)}`,
+  };
+}
 
 function locationColor(name: string): string {
   let hash = 0;
@@ -187,11 +205,14 @@ function CameraTile({
         />
         <span className="text-xs text-gray-200 truncate">{camera.name}</span>
         <span className="text-[10px] text-gray-500 flex-shrink-0">(cam{index + 1})</span>
-        {camera.location_name && (
-          <span className={`text-[10px] px-1.5 py-0.5 rounded truncate max-w-[80px] ${locationColor(camera.location_name)}`}>
-            {camera.location_name}
-          </span>
-        )}
+          {camera.location_name && (
+            <span
+              className="text-[10px] px-1.5 py-0.5 rounded truncate max-w-[80px]"
+              style={locationBadgeStyle(camera.location_color)}
+            >
+              {camera.location_name}
+            </span>
+          )}
       </div>
 
       <div className="absolute top-2 right-2 z-20 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
