@@ -241,4 +241,9 @@ class MotionDetector:
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, kernel)
         fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_CLOSE, kernel)
-        return cv2.countNonZero(fg_mask) > 800
+        fg_pixels = cv2.countNonZero(fg_mask)
+        total = gray_frame.shape[0] * gray_frame.shape[1]
+        # Whole-frame illumination change (light flicker) → not motion
+        if fg_pixels / total > 0.40:
+            return False
+        return fg_pixels > 800
