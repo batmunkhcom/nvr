@@ -62,7 +62,7 @@ MIN_EVENT_GAP_S = 2.0                # absolute minimum gap between any two even
 CLASS_EVENT_GAP_S = 5.0              # global per-class event throttle (anti-spam backstop)
 IOU_SPATIAL_THRESHOLD = 0.10        # IoU > this → same object (throttle). Below → different object (fire)
 POSITION_TOLERANCE = 0.10            # normalized centre movement threshold
-STATIONARY_HYSTERESIS = 5            # consecutive stationary frames → parked
+STATIONARY_HYSTERESIS = 2            # consecutive stationary frames → parked (reduced for sporadic detection)
 PARKED_MOVED_EXPIRY_S = 10.0         # parked object moved → tracklet expires after this
 MAX_CENTRE_DISTANCE = 0.15           # IoU + centre distance diff → treat as same object
 MAX_TRACKLETS = 32                   # hard cap per camera (bounds the match loop)
@@ -393,7 +393,9 @@ class FrameSampler:
                 continue  # moved away and not seen since → drop
             if t.is_parked or age < TRACKLET_TIMEOUT_S:
                 alive.append(t)
-        self._tracklets = alive[-MAX_TRACKLETS:]
+        # Parked-first: keep parked tracklets, evict oldest non-parked by LRU
+        alive.sort(key=lambda t: (0 if t.is_parked else 1, -t.last_seen_ts))
+        self._tracklets = alive[:MAX_TRACKLETS]
 
         fresh: list[dict] = []
         unmatched = list(range(len(detections)))
