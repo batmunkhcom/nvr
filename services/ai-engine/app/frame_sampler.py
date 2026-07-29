@@ -60,7 +60,6 @@ PERSON_STATIC_COOLDOWN_S = 300.0    # stationary person/animal: 5 min
 VEHICLE_STATIC_COOLDOWN_S = 300.0   # stationary vehicle: 5 min
 MIN_EVENT_GAP_S = 2.0                # absolute minimum gap between any two events
 CLASS_EVENT_GAP_S = 5.0              # global per-class event throttle (anti-spam backstop)
-IOU_SPATIAL_THRESHOLD = 0.10        # IoU > this → same object (throttle). Below → different object (fire)
 POSITION_TOLERANCE = 0.10            # normalized centre movement threshold
 STATIONARY_HYSTERESIS = 2            # consecutive stationary frames → parked (reduced for sporadic detection)
 PARKED_MOVED_EXPIRY_S = 10.0         # parked object moved → tracklet expires after this
@@ -245,7 +244,6 @@ class FrameSampler:
         self._motion_last_stop_ts = 0.0
         self._frames_since_connect = 0
         self._last_counter_ts: dict[str, float] = {}
-        self._recent_class_events: dict[str, list[tuple[float, tuple[int,int,int,int]]]] = {}
 
     async def start(self) -> None:
         self._running = True
@@ -526,7 +524,7 @@ class FrameSampler:
                     continue
                 if not pt.is_parked:
                     continue
-                if compute_iou(candidate_bbox, pt.bbox) > IOU_SPATIAL_THRESHOLD:
+                if compute_iou(candidate_bbox, pt.bbox) > IOU_MATCH_THRESHOLD:
                     parked_parent = pt
                     break
 
@@ -537,24 +535,25 @@ class FrameSampler:
                 t.id = parked_parent.id   # keep identity across class flips
                 self._tracklets.remove(parked_parent)
             else:
-                # Spatial anti-spam (per-class): when matching fails repeatedly,
-                # a flickering detection of the *same* object would otherwise
-                # flood events.  Suppress only when the candidate box overlaps
-                # (IoU > IOU_SPATIAL_THRESHOLD) a recently-fired event of the
-                # same class — genuinely distinct objects pass through.
+                # Tracklet-based anti-spam: suppress the event only when the
+                # candidate overlaps (IoU > IOU_MATCH_THRESHOLD) an *active*
+                # tracklet of the SAME class that already fired recently.
+                # Genuinely different objects (e.g. two cars in adjacent lanes)
+                # have low IoU and pass through unscathed.
                 cls = det["class"]
-                recent = self._recent_class_events.get(cls, [])
-                recent = [(ts_, bb_) for ts_, bb_ in recent if now_ts - ts_ < CLASS_EVENT_GAP_S]
-                self._recent_class_events[cls] = recent
-
-                nearby = False
-                for _ts, _bb in recent:
-                    if compute_iou(candidate_bbox, _bb) > IOU_SPATIAL_THRESHOLD:
-                        nearby = True
+                overlapped = False
+                for ot in self._tracklets:
+                    if ot is t:
+                        continue
+                    if ot.cls != cls:
+                        continue
+                    if now_ts - ot.last_seen_ts > CLASS_EVENT_GAP_S:
+                        continue
+                    if compute_iou(candidate_bbox, ot.bbox) > IOU_MATCH_THRESHOLD:
+                        overlapped = True
                         break
 
-                if not nearby:
-                    self._recent_class_events[cls].append((now_ts, candidate_bbox))
+                if not overlapped:
                     det["track_id"] = tid
                     fresh.append(det)
 
