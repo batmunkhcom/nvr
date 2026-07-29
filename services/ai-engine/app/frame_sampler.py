@@ -60,6 +60,7 @@ PERSON_STATIC_COOLDOWN_S = 300.0    # stationary person/animal: 5 min
 VEHICLE_STATIC_COOLDOWN_S = 300.0   # stationary vehicle: 5 min
 MIN_EVENT_GAP_S = 2.0                # absolute minimum gap between any two events
 CLASS_EVENT_GAP_S = 5.0              # global per-class event throttle (anti-spam backstop)
+IOU_SPATIAL_THRESHOLD = 0.10        # IoU > this → same object (throttle). Below → different object (fire)
 POSITION_TOLERANCE = 0.10            # normalized centre movement threshold
 STATIONARY_HYSTERESIS = 5            # consecutive stationary frames → parked
 PARKED_MOVED_EXPIRY_S = 10.0         # parked object moved → tracklet expires after this
@@ -244,7 +245,7 @@ class FrameSampler:
         self._motion_last_stop_ts = 0.0
         self._frames_since_connect = 0
         self._last_counter_ts: dict[str, float] = {}
-        self._last_class_event_ts: dict[str, float] = {}
+        self._recent_class_events: dict[str, list[tuple[float, tuple[int,int,int,int]]]] = {}
 
     async def start(self) -> None:
         self._running = True
@@ -494,7 +495,7 @@ class FrameSampler:
                 _apply_match(t, detections[best_idx])
                 unmatched.remove(best_idx)
 
-        # ── Remaining detections → new tracklets (fire immediately, class-gap throttled) ──
+        # ── Remaining detections → new tracklets (fire immediately, spatial anti-spam) ──
         for i in unmatched:
             det = detections[i]
             box = det.get("box") or [0, 0, 0, 0]
@@ -510,10 +511,27 @@ class FrameSampler:
                 last_cy=cy,
             )
             self._tracklets.append(t)
-            # Anti-spam backstop: even when matching fails repeatedly, events
-            # of one class are capped at 1 per CLASS_EVENT_GAP_S.
-            if now_ts - self._last_class_event_ts.get(det["class"], 0.0) >= CLASS_EVENT_GAP_S:
-                self._last_class_event_ts[det["class"]] = now_ts
+
+            # Spatial anti-spam: when matching fails repeatedly, a flickering
+            # detection of the *same* object would otherwise flood events.
+            # Instead of a global per-class throttle that also blocks genuinely
+            # distinct objects, we only suppress the new event when the
+            # candidate box overlaps (IoU > IOU_SPATIAL_THRESHOLD) with a
+            # recently-fired tracklet of the same class.
+            cls = det["class"]
+            recent = self._recent_class_events.get(cls, [])
+            recent = [(ts_, bb_) for ts_, bb_ in recent if now_ts - ts_ < CLASS_EVENT_GAP_S]
+            self._recent_class_events[cls] = recent
+
+            nearby = False
+            candidate_bbox = (int(box[0]), int(box[1]), int(box[2]), int(box[3]))
+            for _ts, _bb in recent:
+                if compute_iou(candidate_bbox, _bb) > IOU_SPATIAL_THRESHOLD:
+                    nearby = True
+                    break
+
+            if not nearby:
+                self._recent_class_events[cls].append((now_ts, candidate_bbox))
                 det["track_id"] = tid
                 fresh.append(det)
 
