@@ -221,6 +221,17 @@ async def _tier_migration_loop() -> None:
         await _interruptible_sleep(MIGRATE_INTERVAL)
 
 
+async def _storage_health_loop() -> None:
+    """Publish per-backend mount accessibility to Redis every 60s."""
+    while not SHUTDOWN.is_set():
+        try:
+            async with SessionFactory() as session:
+                await config.publish_storage_health(session)
+        except Exception:
+            logger.warning("storage_health_failed", exc_info=True)
+        await _interruptible_sleep(60)
+
+
 async def _analytics_loop() -> None:
     analytics = DiskAnalytics(SessionFactory)
     while not SHUTDOWN.is_set():
@@ -256,6 +267,7 @@ async def main() -> None:
         asyncio.create_task(_catalog_loop()),
         asyncio.create_task(_retention_loop()),
         asyncio.create_task(_analytics_loop()),
+        asyncio.create_task(_storage_health_loop()),
         asyncio.create_task(_s3_sync_loop()),
         asyncio.create_task(_tier_migration_loop()),
         asyncio.create_task(motion_listener_loop(_motion_controller, SHUTDOWN)),

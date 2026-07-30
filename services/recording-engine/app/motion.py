@@ -215,6 +215,13 @@ class MotionRecorderController:
                 else:
                     cam["stream_uri"] = cam["stream_main_uri"] or cam["stream_sub_uri"]
                 cam["output_base"] = cam.get("storage_mount_point") or config.STORAGE_LOCAL_PATH
+                if not cam.get("storage_mount_point"):
+                    logger.warning(
+                        "motion_camera_no_storage_backend",
+                        camera_id=camera_id,
+                        camera_name=cam.get("name"),
+                        fallback=config.STORAGE_LOCAL_PATH,
+                    )
                 # Record via the MediaMTX relay when the AI sampler keeps it
                 # warm anyway: the relay is already connected with a 1s GOP,
                 # so the recorder attaches in ~100ms and the muxer waits <=1s

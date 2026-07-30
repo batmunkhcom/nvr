@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 
 import structlog
@@ -127,8 +128,19 @@ async def load_all_backend_mounts(session: AsyncSession) -> dict[str, str]:
         return {}
 
 
+# Cache of the last successfully built camera → storage mount map.
+# Used as fallback when the DB query fails — prevents silent routing
+# of NFS-assigned cameras back to default-local.
+_camera_storage_map_cache: dict[str, str] = {}
+
+
 async def build_camera_storage_map(session: AsyncSession) -> dict[str, str]:
-    """Returns {camera_id: output_base} for cameras with assigned backends."""
+    """Returns {camera_id: output_base} for cameras with assigned backends.
+
+    On DB failure, returns the last-known-good map if available, otherwise
+    an empty map (which lets _reconcile fall back per-camera to STORAGE_LOCAL_PATH).
+    A Redis key is published so the UI can surface the degradation.
+    """
     try:
         result = await session.execute(
             text(
@@ -137,7 +149,69 @@ async def build_camera_storage_map(session: AsyncSession) -> dict[str, str]:
                 "WHERE sb.is_active AND sb.backend_type IN ('local', 'nfs', 'smb')"
             )
         )
-        return {str(row[0]): row[1] for row in result.fetchall()}
+        fresh = {str(row[0]): row[1] for row in result.fetchall()}
+        _camera_storage_map_cache.clear()
+        _camera_storage_map_cache.update(fresh)
+        return fresh
     except Exception:
-        logger.warning("camera_storage_map_failed", exc_info=True)
+        logger.critical("camera_storage_map_failed", exc_info=True)
+        try:
+            redis = await get_redis()
+            await redis.set("nvr:storage:db_error", "1", ex=120)
+        except Exception:
+            pass
+        if _camera_storage_map_cache:
+            logger.warning(
+                "camera_storage_map_using_cache",
+                cache_size=len(_camera_storage_map_cache),
+            )
+            return dict(_camera_storage_map_cache)
         return {}
+
+
+async def publish_storage_health(
+    session: AsyncSession | None = None,
+) -> None:
+    """Check every active filesystem backend mount_point is accessible and
+    publish a JSON summary to Redis ``nvr:storage:health`` for the frontend."""
+    import contextlib
+
+    try:
+        redis = await get_redis()
+    except Exception:
+        return
+
+    backends: list[dict] = []
+    if session is not None:
+        with contextlib.suppress(Exception):
+            result = await session.execute(
+                text(
+                    "SELECT id, name, mount_point, backend_type FROM storage_backends "
+                    "WHERE is_active AND backend_type IN ('local', 'nfs', 'smb')"
+                )
+            )
+            backends = [dict(row._mapping) for row in result.fetchall()]
+
+    items = []
+    for be in backends:
+        mp = be.get("mount_point")
+        ok = False
+        if mp:
+            try:
+                ok = os.path.isdir(mp)
+            except OSError:
+                ok = False
+        items.append(
+            {
+                "id": str(be["id"]),
+                "name": be.get("name", ""),
+                "mount_point": mp,
+                "accessible": ok,
+            }
+        )
+
+    payload = json.dumps({"backends": items, "db_error": False})
+    try:
+        await redis.set("nvr:storage:health", payload, ex=120)
+    except Exception:
+        pass

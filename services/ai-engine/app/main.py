@@ -216,13 +216,19 @@ async def main() -> None:
 
     await start_all()
 
+    # Per-camera detection model override via system_config, fallback to env
+    detection_model = await db.read_config_str("ai.detection_model", "")
+    if detection_model:
+        os.environ["AI_YOLO_MODEL"] = detection_model
+        logger.info("ai_detection_model_configured", model=detection_model)
+
     detector = AIDetector.shared()
     model_ok = await detector.initialize()
     if not model_ok:
         logger.error(
             "ai_model_unavailable",
             path=detector.model_path,
-            hint="mount yolov8n.onnx into the ai_models volume",
+            hint="mount ONNX models into the ai_models volume",
         )
 
     while not SHUTDOWN.is_set():
