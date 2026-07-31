@@ -7,7 +7,7 @@ export interface EventsPage {
   metadata: { page: number; per_page: number; total: number };
 }
 
-export function useEvents(filters?: Record<string, string>) {
+export function useEvents(filters?: Record<string, string | string[]>) {
   return useQuery({
     queryKey: ["events", filters],
     queryFn: async () => {

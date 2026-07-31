@@ -13,12 +13,14 @@ import asyncio
 import contextlib
 import json
 import os
-import structlog
 from zoneinfo import ZoneInfo
+
+import structlog
 
 from . import db
 from .detector import AIDetector
 from .frame_sampler import FrameSampler
+from .onvif_callback_server import OnvifCallbackServer
 from .plugins import get_plugins_for_camera, start_all, stop_all
 
 logger = structlog.get_logger()
@@ -49,6 +51,7 @@ def _signature(cam: dict) -> tuple:
         cam["onvif_events_service_url"],
         cam["ai_enabled"],
         cam.get("recording_mode"),
+        cam.get("recording_stream"),
         cam.get("storage_mount_point"),
         json.dumps(cam.get("ai_plugins"), sort_keys=True),
     )
@@ -87,6 +90,27 @@ async def _reconcile() -> None:
         logger.info("ai_worker_added", camera=cam["name"], camera_id=cam["id"])
 
 
+def _resolve_ai_stream(cam: dict) -> tuple[bool, str | None, str]:
+    """Pick the stream URI and MediaMTX relay key for AI sampling.
+
+    Uses the camera's `recording_stream` setting to keep recording and AI on
+    the same stream by default. Falls back to the other stream if the chosen
+    one is not configured.
+
+    Returns:
+        (use_main, stream_uri, relay_key)
+    """
+    cid = str(cam["id"])
+    use_main = (cam.get("recording_stream") or "").lower() == "main"
+    if use_main:
+        stream_uri = cam["stream_main_uri"] or cam["stream_sub_uri"]
+        relay_key = cid
+    else:
+        stream_uri = cam["stream_sub_uri"] or cam["stream_main_uri"]
+        relay_key = f"{cid}_sub"
+    return use_main, stream_uri, relay_key
+
+
 async def _build_worker(cam: dict):
     password = db.decrypt_password(cam["encrypted_password"])
 
@@ -94,9 +118,9 @@ async def _build_worker(cam: dict):
         if not cam["onvif_events_service_url"]:
             logger.warning("ai_no_onvif_url", camera=cam["name"])
             return None
-        from .onvif_event_subscriber import OnvifEventSubscriber
+        from .onvif_base_subscriber import OnvifBaseSubscriber
 
-        return OnvifEventSubscriber(
+        return OnvifBaseSubscriber(
             camera_id=cam["id"],
             camera_name=cam["name"],
             events_service_url=cam["onvif_events_service_url"],
@@ -105,16 +129,23 @@ async def _build_worker(cam: dict):
             event_callback=_broadcast_event,
         )
 
-    stream_uri = cam["stream_sub_uri"] or cam["stream_main_uri"]
+    use_main, stream_uri, relay_key = _resolve_ai_stream(cam)
     if not stream_uri:
         logger.warning("ai_no_stream_uri", camera=cam["name"])
         return None
+    logger.info(
+        "ai_stream_selected",
+        camera=cam["name"],
+        recording_stream=cam.get("recording_stream"),
+        use_main=use_main,
+        stream_uri=stream_uri,
+        relay_key=relay_key,
+    )
 
     # Prefer MediaMTX relay over direct camera RTSP to avoid session conflicts.
     # The stream-manager already maintains one RTSP session per camera; sharing
     # eliminates the second session that cameras often reject.
     mediamtx_rtsp = os.environ.get("MEDIAMTX_RTSP_HOST", "nvr-mediamtx")
-    relay_key = f"{cam['id']}_sub"
     relay_uri = f"rtsp://{mediamtx_rtsp}:8554/{relay_key}"
     # Use relay if camera auth is set (implies stream-manager handles it),
     # otherwise fall back to direct RTSP.
@@ -200,6 +231,25 @@ async def _broadcast_event(camera_id: str, objects: list, snapshot_path: str | N
     )
 
 
+async def _log_onvif_health() -> None:
+    """Emit a periodic summary of ONVIF callback registrations and last events."""
+    while not SHUTDOWN.is_set():
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            raise
+        server = OnvifCallbackServer()
+        if server.handler_count():
+            logger.info(
+                "onvif_callback_health",
+                handlers=server.handler_count(),
+                last_events={
+                    cid: server.last_event_time(cid)
+                    for cid in list(server._handlers.keys())[:10]
+                },
+            )
+
+
 async def main() -> None:
     import signal
     from concurrent.futures import ThreadPoolExecutor
@@ -216,6 +266,13 @@ async def main() -> None:
 
     await start_all()
 
+    # Start the shared ONVIF callback server once.  Camera subscribers
+    # register their per-camera paths with this server instead of each
+    # trying to bind port 8091 independently.
+    onvif_server = OnvifCallbackServer()
+    await onvif_server.start()
+    health_task = asyncio.create_task(_log_onvif_health())
+
     # Per-camera detection model override via system_config, fallback to env
     detection_model = await db.read_config_str("ai.detection_model", "")
     if detection_model:
@@ -231,22 +288,27 @@ async def main() -> None:
             hint="mount ONNX models into the ai_models volume",
         )
 
-    while not SHUTDOWN.is_set():
-        if not detector.ready:
-            # Keep retrying in the background; detection no-ops until ready,
-            # but motion-only and ONVIF workers must run regardless.
-            model_ok = await detector.initialize()
-        # Always reconcile — a missing YOLO model must not disable
-        # motion-mode recording or ONVIF subscriptions.
-        with contextlib.suppress(Exception):
-            await _reconcile()
-        await asyncio.sleep(POLL_INTERVAL)
-
-    for worker in list(_workers.values()):
-        await worker.stop()
-    await stop_all()
-    await db.engine.dispose()
-    logger.info("ai_engine_stopped")
+    try:
+        while not SHUTDOWN.is_set():
+            if not detector.ready:
+                # Keep retrying in the background; detection no-ops until ready,
+                # but motion-only and ONVIF workers must run regardless.
+                model_ok = await detector.initialize()
+            # Always reconcile — a missing YOLO model must not disable
+            # motion-mode recording or ONVIF subscriptions.
+            with contextlib.suppress(Exception):
+                await _reconcile()
+            await asyncio.sleep(POLL_INTERVAL)
+    finally:
+        health_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await health_task
+        for worker in list(_workers.values()):
+            await worker.stop()
+        await onvif_server.stop()
+        await stop_all()
+        await db.engine.dispose()
+        logger.info("ai_engine_stopped")
 
 
 if __name__ == "__main__":

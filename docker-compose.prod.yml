@@ -14,6 +14,7 @@ services:
       - ./config:/app/config:ro
       - ${STORAGE_HOST_PATH:-/data}:/data/recordings
       - ${SEAWEEDFS_MOUNT_PATH:-/mnt/seaweedfs}:${SEAWEEDFS_MOUNT_PATH:-/mnt/seaweedfs}
+      - ai_snapshots:/tmp/ai_snapshots
     # Runtime volumes removed — code is baked into image
 
   nvr-stream-manager:

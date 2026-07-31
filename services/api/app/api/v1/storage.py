@@ -15,6 +15,7 @@ from ...services.recording_service import (
     create_storage_tier,
     delete_storage_backend,
     delete_storage_tier,
+    get_24h_write_rate,
     get_storage_backend,
     get_storage_tier,
     get_storage_usage,
@@ -86,15 +87,25 @@ async def get_usage(
     storage = await get_storage_usage(db)
     used_pct = round((storage["used_bytes"] / max(storage["total_bytes"], 1)) * 100, 1)
     used_pct = max(0.0, min(100.0, used_pct))
+
+    # Estimate remaining recording time from the actual 24h write rate.
+    bytes_24h = await get_24h_write_rate(db)
+    free_bytes = storage["free_bytes"]
+    if free_bytes > 0 and bytes_24h > 0:
+        seconds_per_day = 24 * 3600
+        bytes_per_second = bytes_24h / seconds_per_day
+        recording_hours_available = int(free_bytes / bytes_per_second / 3600)
+    else:
+        recording_hours_available = None
+
     return {
         "data": {
             "total_bytes": storage["total_bytes"],
             "used_bytes": storage["used_bytes"],
             "free_bytes": storage["free_bytes"],
             "used_pct": used_pct,
-            "recording_hours_available": int(storage["free_bytes"] / (1024 * 1024 * 5))
-            if storage["free_bytes"] > 0
-            else 0,
+            "recording_hours_available": recording_hours_available,
+            "bytes_24h": bytes_24h,
             "backends": storage["backends"],
         }
     }
@@ -173,12 +184,15 @@ async def get_backend_health(
     current_user: Annotated[dict, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    # Refresh filesystem stats so the response reflects real disk usage.
+    await list_storage_backends(db, refresh_stats=True)
     backend = await get_storage_backend(backend_id, db)
     return {
         "data": {
             "backend_id": str(backend_id),
             "status": backend.health_status,
             "latency_ms": 2,
+            "total_bytes": backend.total_bytes,
             "free_bytes": backend.available_bytes,
             "checked_at": backend.last_health_check.isoformat()
             if backend.last_health_check

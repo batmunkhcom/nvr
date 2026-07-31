@@ -18,6 +18,7 @@ import shutil
 from datetime import UTC, datetime, timedelta
 
 import structlog
+from nvr_common.quota import apply_disk_quota, directory_size_bytes
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -32,18 +33,62 @@ class DiskAnalytics:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]):
         self._session_factory = session_factory
 
+    async def _load_mount_quotas(self, roots: set[str]) -> dict[str, int | None]:
+        """Return {mount_point: quota_bytes|None} for active filesystem backends."""
+        quotas: dict[str, int | None] = {}
+        try:
+            async with self._session_factory() as session:
+                result = await session.execute(
+                    text(
+                        "SELECT mount_point, config FROM storage_backends "
+                        "WHERE is_active AND backend_type IN ('local', 'nfs', 'smb')"
+                    )
+                )
+                rows = result.fetchall()
+        except Exception:
+            return quotas
+        for mp, cfg in rows:
+            if not mp:
+                continue
+            cfg = cfg or {}
+            quota = cfg.get("quota_bytes")
+            quotas[mp] = quota if quota and quota > 0 else None
+        out: dict[str, int | None] = {}
+        for root in roots:
+            out[root] = next(
+                (
+                    quotas[mp]
+                    for mp in sorted(quotas, key=len, reverse=True)
+                    if root.startswith(mp.rstrip("/") + "/") or root == mp.rstrip("/")
+                ),
+                None,
+            )
+        return out
+
     async def run(self) -> dict:
         """Compute and persist the storage analysis. Aggregates across all roots."""
         roots = config.get_storage_roots()
+        quotas = await self._load_mount_quotas(roots)
         total_used = 0
         total_free = 0
         total_size = 0
         for root in roots:
             if os.path.isdir(root):
                 usage = await asyncio.to_thread(shutil.disk_usage, root)
-                total_used += usage.used
-                total_free += usage.free
-                total_size += usage.total
+                quota = quotas.get(root)
+                # Quota backends report cluster-wide used/free; walk the tree
+                # for a realistic used number.
+                actual_used = (
+                    await asyncio.to_thread(directory_size_bytes, root)
+                    if quota
+                    else usage.used
+                )
+                qtotal, qused, qfree = apply_disk_quota(
+                    usage.total, actual_used, usage.free, quota
+                )
+                total_used += qused
+                total_free += qfree
+                total_size += qtotal
 
         if total_size == 0:
             usage = await asyncio.to_thread(shutil.disk_usage, config.STORAGE_LOCAL_PATH)

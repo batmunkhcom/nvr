@@ -148,8 +148,13 @@ STORAGE_LOCAL_PATH=/data/recordings
 S3_SECURE=false
 AI_MODEL_PATH=/app/models
 AI_YOLO_MODEL=yolov8n.onnx
-AI_CONFIDENCE_THRESHOLD=0.5
+AI_CONFIDENCE_THRESHOLD=0.3
 AI_DEVICE=cpu
+AI_FRAME_WIDTH=1280
+AI_MAX_TRACKLETS=64
+AI_NMS_THRESHOLD=0.50
+AI_MAX_DETECTIONS=300
+AI_CLASS_AGNOSTIC_NMS=true
 MEDIAMTX_RTSP=rtsp://nvr-mediamtx:8554
 MEDIAMTX_HLS_URL=http://nvr-mediamtx:8888
 FFMPEG_PATH=/usr/bin/ffmpeg
@@ -246,8 +251,13 @@ S3_SECURE=false
 # ── AI Engine ─────────────────────────────────────────────────────
 AI_MODEL_PATH=/app/models
 AI_YOLO_MODEL=yolov8n.onnx
-AI_CONFIDENCE_THRESHOLD=0.5
+AI_CONFIDENCE_THRESHOLD=0.3
 AI_DEVICE=cpu
+AI_FRAME_WIDTH=1280
+AI_MAX_TRACKLETS=64
+AI_NMS_THRESHOLD=0.50
+AI_MAX_DETECTIONS=300
+AI_CLASS_AGNOSTIC_NMS=true
 
 # ── Stream ────────────────────────────────────────────────────────
 MEDIAMTX_RTSP=rtsp://nvr-mediamtx:8554

@@ -40,6 +40,7 @@ async def get_camera_ai_diagnostics(camera_id: uuid.UUID, db: AsyncSession) -> d
             Camera.ai_sensitivity,
             Camera.motion_source,
             Camera.recording_mode,
+            Camera.recording_stream,
             Camera.onvif_events_service_url,
             Camera.location_id,
             Camera.storage_backend_id,
@@ -72,10 +73,22 @@ async def get_camera_ai_diagnostics(camera_id: uuid.UUID, db: AsyncSession) -> d
             "Enable AI or set recording_mode to motion to start a sampler worker."
         )
 
-    stream_uri = cam["stream_sub_uri"] or cam["stream_main_uri"]
-    checks["stream_uri_present"] = bool(stream_uri)
-    if not stream_uri:
-        issues.append("No stream URI configured (stream_main_uri or stream_sub_uri).")
+    use_main = (cam.get("recording_stream") or "").lower() == "main"
+    checks["recording_stream"] = cam.get("recording_stream")
+    checks["ai_uses_main_stream"] = use_main
+    if use_main:
+        stream_uri = cam["stream_main_uri"] or cam["stream_sub_uri"]
+        checks["stream_uri_present"] = bool(stream_uri)
+        if not cam["stream_main_uri"]:
+            issues.append(
+                "recording_stream='main' but stream_main_uri is empty. "
+                "AI engine will fall back to sub stream."
+            )
+    else:
+        stream_uri = cam["stream_sub_uri"] or cam["stream_main_uri"]
+        checks["stream_uri_present"] = bool(stream_uri)
+        if not stream_uri:
+            issues.append("No stream URI configured (stream_main_uri or stream_sub_uri).")
 
     checks["motion_source"] = cam["motion_source"]
     if cam["motion_source"] == "camera":
@@ -158,7 +171,8 @@ async def get_camera_ai_diagnostics(camera_id: uuid.UUID, db: AsyncSession) -> d
 
     # Live stream path that AI engine would use
     if stream_uri and cam["motion_source"] != "camera":
-        checks["ai_engine_stream_uri"] = f"rtsp://nvr-mediamtx:8554/{camera_id}_sub"
+        relay_key = str(camera_id) if use_main else f"{camera_id}_sub"
+        checks["ai_engine_stream_uri"] = f"rtsp://nvr-mediamtx:8554/{relay_key}"
 
     return {
         "camera_id": str(camera_id),

@@ -8,12 +8,20 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from app.services.camera_service import camera_to_dict, get_camera_response
+from app.services.event_service import (
+    _expand_object_filters,
+    _object_class_filter_clause,
+    _object_count_clause,
+    list_events,
+)
 from app.services.recording_service import (
     delete_recording,
+    get_24h_write_rate,
     get_recording,
     get_recording_stats,
     get_storage_usage,
     get_timeline_segments,
+    list_storage_backends,
 )
 from fastapi import HTTPException
 
@@ -219,10 +227,16 @@ class TestTimelineSegments:
 
 class TestStorageUsage:
     @pytest.mark.anyio
-    async def test_aggregates(self, mock_db):
+    async def test_aggregates(self, mock_db, monkeypatch):
+        import shutil
+        from collections import namedtuple
+
+        DiskUsage = namedtuple("DiskUsage", ["total", "used", "free"])
+
         b = MagicMock()
         b.name = "Local"
         b.backend_type = "local"
+        b.mount_point = "/data/recordings"
         b.total_bytes = 1000
         b.available_bytes = 500
         b.priority = 1
@@ -231,10 +245,77 @@ class TestStorageUsage:
         b.last_health_check = None
 
         mock_db.execute.return_value = _result_with_items([b])
+        monkeypatch.setattr(shutil, "disk_usage", lambda _path: DiskUsage(1000, 500, 500))
 
         usage = await get_storage_usage(mock_db)
         assert usage["total_bytes"] == 1000
         assert usage["free_bytes"] == 500
+
+    @pytest.mark.anyio
+    async def test_aggregates_multiple_backends(self, mock_db, monkeypatch):
+        import shutil
+        from collections import namedtuple
+
+        DiskUsage = namedtuple("DiskUsage", ["total", "used", "free"])
+
+        b1 = MagicMock()
+        b1.name = "Local"
+        b1.backend_type = "local"
+        b1.mount_point = "/data/recordings"
+        b1.total_bytes = 1000
+        b1.available_bytes = 500
+        b1.priority = 1
+        b1.is_active = True
+        b1.health_status = "healthy"
+        b1.last_health_check = None
+
+        b2 = MagicMock()
+        b2.name = "NAS"
+        b2.backend_type = "nfs"
+        b2.mount_point = "/mnt/nas"
+        b2.total_bytes = 2000
+        b2.available_bytes = 1000
+        b2.priority = 2
+        b2.is_active = True
+        b2.health_status = "healthy"
+        b2.last_health_check = None
+
+        mock_db.execute.return_value = _result_with_items([b1, b2])
+        monkeypatch.setattr(
+            shutil,
+            "disk_usage",
+            lambda path: DiskUsage(3000, 1500, 1500) if path == "/mnt/nas" else DiskUsage(1000, 500, 500),
+        )
+
+        usage = await get_storage_usage(mock_db)
+        assert usage["total_bytes"] == 4000
+        assert usage["used_bytes"] == 2000
+        assert usage["free_bytes"] == 2000
+
+    @pytest.mark.anyio
+    async def test_refreshes_backend_stats(self, mock_db, monkeypatch):
+        import shutil
+        from collections import namedtuple
+
+        DiskUsage = namedtuple("DiskUsage", ["total", "used", "free"])
+
+        b = MagicMock()
+        b.name = "Local"
+        b.backend_type = "local"
+        b.mount_point = "/data/recordings"
+        b.total_bytes = 1000
+        b.available_bytes = 500
+        b.priority = 1
+        b.is_active = True
+        b.health_status = "healthy"
+        b.last_health_check = None
+
+        mock_db.execute.return_value = _result_with_items([b])
+        monkeypatch.setattr(shutil, "disk_usage", lambda _path: DiskUsage(5000, 2000, 3000))
+
+        await list_storage_backends(mock_db)
+        assert b.total_bytes == 5000
+        assert b.available_bytes == 3000
 
 
 class TestDeleteRecording:
@@ -260,6 +341,14 @@ class TestRecordingStats:
         stats = await get_recording_stats(mock_db)
         assert stats["recordings_24h"] == 0
         assert stats["storage_bytes_24h"] == 0
+
+
+class Test24hWriteRate:
+    @pytest.mark.anyio
+    async def test_sums_file_sizes(self, mock_db):
+        mock_db.execute.return_value = _result_with_scalar(1_500_000_000)
+        rate = await get_24h_write_rate(mock_db)
+        assert rate == 1_500_000_000
 
 
 class TestCameraConnectionTest:
@@ -369,3 +458,48 @@ class TestCameraConnectionTest:
 
         assert result["error_code"] == "no_stream_uri"
         assert cam.status == "offline"
+
+
+class TestEventObjectFilters:
+    def test_expand_classes(self):
+        assert _expand_object_filters(["car", "person"], None) == ["car", "person"]
+
+    def test_expand_categories(self):
+        assert _expand_object_filters(None, ["animal"]) == ["bird", "cat", "dog"]
+
+    def test_expand_classes_and_categories(self):
+        result = _expand_object_filters(["car"], ["animal"])
+        assert result == ["bird", "car", "cat", "dog"]
+
+    def test_class_filter_sql(self):
+        sql = _object_class_filter_clause(["car", "person"])
+        assert "EXISTS" in sql
+        assert ":class_0" in sql
+        assert ":class_1" in sql
+        assert "car" not in sql  # bindparam placeholders, not literal values
+
+    def test_count_clause_with_classes(self):
+        sql = _object_count_clause(["car"])
+        assert "SELECT COUNT(*)" in sql
+        assert "metadata::jsonb->'objects'" in sql
+        assert ":class_0" in sql
+
+    def test_count_clause_without_classes(self):
+        sql = _object_count_clause(None)
+        assert "SELECT COUNT(*)" in sql
+        assert "WHERE" not in sql
+
+    @pytest.mark.anyio
+    async def test_list_events_with_object_filters(self, mock_db):
+        mock_db.execute.side_effect = [
+            _result_with_scalar(0),  # count
+            _result_with_items([]),    # rows
+        ]
+        result = await list_events(
+            mock_db,
+            object_classes=["car", "person"],
+            object_categories=["animal"],
+            min_objects=2,
+        )
+        assert result["data"] == []
+        assert result["metadata"]["total"] == 0

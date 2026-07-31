@@ -45,6 +45,9 @@ export interface StorageUsage {
   total_bytes: number;
   used_bytes: number;
   free_bytes: number;
+  used_pct: number;
+  recording_hours_available: number | null;
+  bytes_24h: number;
   backends: StorageBackend[];
 }
 

@@ -16,6 +16,7 @@ import structlog
 
 logger = structlog.get_logger()
 
+
 CHUNK_SIZE = 1_048_576  # 1 MB
 
 
@@ -112,11 +113,20 @@ class LocalStorage(StorageBackend):
 
     async def total_bytes(self) -> int:
         stat = os.statvfs(self.root)
-        return stat.f_frsize * stat.f_blocks
+        total = stat.f_frsize * stat.f_blocks
+        quota = self.config.get("quota_bytes")
+        if quota and quota > 0:
+            return min(total, quota)
+        return total
 
     async def available_bytes(self) -> int:
         stat = os.statvfs(self.root)
-        return stat.f_frsize * stat.f_bavail
+        total = stat.f_frsize * stat.f_blocks
+        free = stat.f_frsize * stat.f_bavail
+        quota = self.config.get("quota_bytes")
+        if quota and quota > 0:
+            return min(free, max(0, quota - (total - free)))
+        return free
 
     async def read_stream(self, path: str, chunk_size: int = CHUNK_SIZE) -> AsyncIterator[bytes]:
         filepath = self._resolve(path)

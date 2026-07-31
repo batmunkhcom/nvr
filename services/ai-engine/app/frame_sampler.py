@@ -41,7 +41,6 @@ logger = structlog.get_logger()
 # per-camera override via FrameSampler constructor. Inference cost scales linearly.
 RECONNECT_BASE_S = 5
 RECONNECT_MAX_S = 120
-FRAME_WIDTH = 640
 DEFAULT_OBJECTS = ["person", "car", "truck", "bus", "motorcycle", "bicycle", "dog", "cat", "bird"]
 MOTION_CHANNEL = "nvr:motion"
 MOTION_OFF_S = 30.0
@@ -51,20 +50,26 @@ MOTION_ARM_FRAMES = 1      # consecutive motion frames before going active
 MOTION_WARMUP_FRAMES = 1   # frames suppressed after (re)connect while MOG2 learns
 STALE_FRAME_S = 15.0       # no fresh frame this long => capture is half-dead => reconnect
 
+# Detection frame width. High-resolution sub-streams are downscaled to this
+# width before inference. 1280 keeps far more detail than the old 640 default,
+# which severely hurt small / distant object recall. Can be lowered on CPU-bound
+# hosts via AI_FRAME_WIDTH.
+FRAME_WIDTH = int(os.environ.get("AI_FRAME_WIDTH", "1280") or "1280")
+
 # ── IoU tracking constants ──
 IOU_MATCH_THRESHOLD = 0.30          # IoU > this → same tracked object
-FALLBACK_CENTRE_DISTANCE = 0.40     # relaxed centre-distance match when IoU fails (moving objects at 1 FPS)
+FALLBACK_CENTRE_DISTANCE = 0.25     # relaxed centre-distance match when IoU fails (moving objects at 1 FPS)
 TRACKLET_TIMEOUT_S = 300.0          # unseen this long → remove tracklet (5 min)
 MOVING_COOLDOWN_S = 15.0            # moving object: at most 1 event per N seconds
 PERSON_STATIC_COOLDOWN_S = 300.0    # stationary person/animal: 5 min
 VEHICLE_STATIC_COOLDOWN_S = 300.0   # stationary vehicle: 5 min
 MIN_EVENT_GAP_S = 2.0                # absolute minimum gap between any two events
 CLASS_EVENT_GAP_S = 5.0              # global per-class event throttle (anti-spam backstop)
-POSITION_TOLERANCE = 0.10            # normalized centre movement threshold
-STATIONARY_HYSTERESIS = 2            # consecutive stationary frames → parked (reduced for sporadic detection)
-PARKED_MOVED_EXPIRY_S = 10.0         # parked object moved → tracklet expires after this
+POSITION_TOLERANCE = 0.05            # normalized centre movement threshold (speed-bump traffic is slow; 0.02 marked slow cars as stationary)
+STATIONARY_HYSTERESIS = 999999       # parked-tracklet logic disabled per user request — passing cars must keep firing
+PARKED_MOVED_EXPIRY_S = 10.0         # kept for compatibility; no tracklets become parked
 MAX_CENTRE_DISTANCE = 0.15           # IoU + centre distance diff → treat as same object
-MAX_TRACKLETS = 32                   # hard cap per camera (bounds the match loop)
+MAX_TRACKLETS = int(os.environ.get("AI_MAX_TRACKLETS", "64") or "64")  # hard cap per camera (bounds the match loop)
 
 # ── Object category mapping (used by both counter and event metadata) ──
 MIN_COUNTER_GAP_S = 2.0              # max 1 counter upsert per category every N seconds
@@ -83,6 +88,15 @@ def _classify_object(cls: str) -> str | None:
     return None
 
 VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle", "bicycle"}
+
+
+def _same_detection_category(cls_a: str, cls_b: str) -> bool:
+    """Return True if two YOLO class labels belong in the same category
+    for purposes of cross-class parked-tracklet inheritance (e.g. a
+    parked 'bus' hand-over to a 'car' detection at the same position).
+    Cross-category inheritance ('person' → 'car') is NOT allowed — a
+    false-positive parked person must not block vehicle detections."""
+    return cls_a == cls_b or (cls_a in VEHICLE_CLASSES and cls_b in VEHICLE_CLASSES)
 
 
 @dataclass
@@ -223,7 +237,11 @@ class FrameSampler:
         self.camera_name = camera_name
         self.stream_url = build_rtsp_url(stream_uri, username, password)
         self.ai_objects = set(ai_objects or DEFAULT_OBJECTS)
-        self.ai_min_confidence = min(max(ai_min_confidence or 0.5, 0.05), 0.95)
+        # Default confidence: per-camera DB value first, then AI_CONFIDENCE_THRESHOLD
+        # env var, then a lower 0.3 fallback so small / distant objects are kept.
+        # Lower bound 0.05 prevents runaway false positives if the value is missing.
+        default_conf = float(os.environ.get("AI_CONFIDENCE_THRESHOLD", "0.25") or "0.25")
+        self.ai_min_confidence = min(max(ai_min_confidence or default_conf, 0.05), 0.95)
         self.ai_zones = [z for z in (ai_zones or []) if len(z.get("points", [])) >= 3]
         self.motion_only = motion_only
         self.plugins = plugins or []
@@ -244,6 +262,12 @@ class FrameSampler:
         self._motion_last_stop_ts = 0.0
         self._frames_since_connect = 0
         self._last_counter_ts: dict[str, float] = {}
+        # Image-based dedup: compare consecutive snapshots to detect
+        # parked/stationary objects that haven't moved.  A near-identical
+        # frame means the same scene → suppress the event.
+        self._last_thumb: np.ndarray | None = None
+        self._last_event_thumb_ts: float = 0.0
+        self._dup_suppress_count: int = 0
 
     async def start(self) -> None:
         self._running = True
@@ -284,6 +308,8 @@ class FrameSampler:
 
             backoff = RECONNECT_BASE_S
             self._frames_since_connect = 0
+            self._last_thumb = None  # reset snapshot dedup on reconnect
+            self._dup_suppress_count = 0
             logger.info("frame_sampler_connected", camera=self.camera_name)
             try:
                 await self._consume(reader, cv2)
@@ -325,6 +351,21 @@ class FrameSampler:
             has_motion = self._motion.detect(gray)
             await self._track_motion(has_motion)
 
+            # Periodic motion-gate stats (every ~60 frames ≈ 20s at 3 FPS)
+            # so we can see MOG2 pass/reject rates and foreground pixel counts
+            # for this specific camera view.  Logs regardless of has_motion.
+            fc = self._frames_since_connect
+            if fc % 60 == 0:
+                logger.info(
+                    "motion_gate_stats",
+                    camera=self.camera_name,
+                    fg_pixels=self._motion.last_fg_pixels,
+                    fg_ratio=round(self._motion.last_fg_ratio, 4),
+                    has_motion=has_motion,
+                    frame_size=f"{frame.shape[1]}x{frame.shape[0]}",
+                    frame_num=fc,
+                )
+
             if not has_motion:
                 await asyncio.sleep(frame_interval)
                 continue
@@ -341,7 +382,16 @@ class FrameSampler:
                 for d in detections
                 if d["class"] in self.ai_objects and d["confidence"] >= self.ai_min_confidence
             ]
+            before_zones = len(detections)
             detections = self._filter_zones(detections, frame.shape[1], frame.shape[0])
+            if before_zones:
+                logger.debug(
+                    "detections_per_frame",
+                    camera_id=self.camera_id,
+                    before_zones=before_zones,
+                    after_zones=len(detections),
+                    classes=[d.get("class", d.get("class_name")) for d in detections],
+                )
 
             # call plugins with all visible detections (pre-cooldown)
             if detections and self.plugins and not await _check_paused():
@@ -414,8 +464,9 @@ class FrameSampler:
             moved = abs(cx - t.last_cx) + abs(cy - t.last_cy) > POSITION_TOLERANCE
             if not moved:
                 t.stationary_count += 1
-                if t.stationary_count >= STATIONARY_HYSTERESIS:
-                    t.is_parked = True
+                # Parked logic disabled per user request; no tracklet becomes parked.
+                # if t.stationary_count >= STATIONARY_HYSTERESIS:
+                #     t.is_parked = True
                 t.moved_from_parked_at = 0.0
             else:
                 if t.is_parked:
@@ -439,6 +490,10 @@ class FrameSampler:
                     fresh.append(det)
 
         # ── Stage 1: strict IoU + centre distance ──
+        # Parked tracklets participate BUT do NOT consume detections
+        # unless the object moved (became unparked).  A parked false-positive
+        # (e.g. background tree misclassified as "car") must not steal
+        # detections of real vehicles passing through the same area.
         for t in self._tracklets:
             best_idx = -1
             best_score = -1.0
@@ -461,9 +516,14 @@ class FrameSampler:
                     best_score = score
                     best_idx = i
             if best_idx >= 0:
+                was_parked = t.is_parked
                 matched_tracklets.add(t.id)
                 _apply_match(t, detections[best_idx])
-                unmatched.remove(best_idx)
+                # Parked objects that did NOT move must not consume the
+                # detection — a real vehicle passing through the same area
+                # must be able to fire its own event.
+                if not (was_parked and t.is_parked):
+                    unmatched.remove(best_idx)
 
         # ── Stage 2: relaxed centre-distance fallback for unmatched tracklets ──
         # At 1 FPS a walking person moves ~50-70px while their box is ~25-40px
@@ -513,49 +573,32 @@ class FrameSampler:
             self._tracklets.append(t)
             candidate_bbox = (int(box[0]), int(box[1]), int(box[2]), int(box[3]))
 
-            # Cross-class parked inheritance: when YOLO class-flips a
-            # stationary object ("bus" → "car"), the hard class-match rule
-            # creates a new tracklet that would fire a spurious event.  If
-            # a *parked* tracklet of any class already sits at this position,
-            # inherit its parked state and suppress the event.
-            parked_parent = None
-            for pt in self._tracklets:
-                if pt is t:
+            # Parked-tracklet inheritance is disabled: the user requested that
+            # passing/slow vehicles on the speed bump keep firing events. A
+            # new detection always becomes a fresh tracklet and is throttled
+            # only by the normal moving/stationary cooldowns.
+
+            # Tracklet-based anti-spam: suppress the event only when the
+            # candidate overlaps (IoU > IOU_MATCH_THRESHOLD) an *active*
+            # tracklet of the SAME class that already fired recently.
+            # Genuinely different objects (e.g. two cars in adjacent lanes)
+            # have low IoU and pass through unscathed.
+            cls = det["class"]
+            overlapped = False
+            for ot in self._tracklets:
+                if ot is t:
                     continue
-                if not pt.is_parked:
+                if ot.cls != cls:
                     continue
-                if compute_iou(candidate_bbox, pt.bbox) > IOU_MATCH_THRESHOLD:
-                    parked_parent = pt
+                if now_ts - ot.last_seen_ts > CLASS_EVENT_GAP_S:
+                    continue
+                if compute_iou(candidate_bbox, ot.bbox) > IOU_MATCH_THRESHOLD:
+                    overlapped = True
                     break
 
-            if parked_parent:
-                t.is_parked = True
-                t.stationary_count = STATIONARY_HYSTERESIS
-                t.last_event_ts = now_ts  # mark as already-fired
-                t.id = parked_parent.id   # keep identity across class flips
-                self._tracklets.remove(parked_parent)
-            else:
-                # Tracklet-based anti-spam: suppress the event only when the
-                # candidate overlaps (IoU > IOU_MATCH_THRESHOLD) an *active*
-                # tracklet of the SAME class that already fired recently.
-                # Genuinely different objects (e.g. two cars in adjacent lanes)
-                # have low IoU and pass through unscathed.
-                cls = det["class"]
-                overlapped = False
-                for ot in self._tracklets:
-                    if ot is t:
-                        continue
-                    if ot.cls != cls:
-                        continue
-                    if now_ts - ot.last_seen_ts > CLASS_EVENT_GAP_S:
-                        continue
-                    if compute_iou(candidate_bbox, ot.bbox) > IOU_MATCH_THRESHOLD:
-                        overlapped = True
-                        break
-
-                if not overlapped:
-                    det["track_id"] = tid
-                    fresh.append(det)
+            if not overlapped:
+                det["track_id"] = tid
+                fresh.append(det)
 
         return fresh
 
@@ -573,12 +616,22 @@ class FrameSampler:
             for z in self.ai_zones
         ]
         kept = []
+        dropped: list[str] = []
         for det in detections:
             box = det.get("box") or [0, 0, 0, 0]
             px = (box[0] + box[2]) / 2
             py = box[3]  # bottom edge = ground contact point
             if any(cv2.pointPolygonTest(poly, (px, py), False) >= 0 for poly in polygons):
                 kept.append(det)
+            else:
+                dropped.append(f"{det.get('class_name', '?')}({det.get('confidence', 0):.2f} @ {px:.0f},{py:.0f})")
+        if dropped:
+            logger.info(
+                "zone_filter_dropped",
+                camera_id=self.camera_id,
+                dropped=dropped,
+                kept=len(kept),
+            )
         return kept
 
     async def _track_motion(self, has_motion: bool) -> None:
@@ -642,7 +695,7 @@ class FrameSampler:
             if ok:
                 snapshot_path = await self._save_snapshot(buf.tobytes(), now)
         except Exception:
-            logger.warning("snapshot_encode_failed", camera=self.camera_name)
+            logger.warning("snapshot_encode_failed", camera=self.camera_name, exc_info=True)
 
         # Event insert and counter upserts are independent — a counter failure
         # must never take the event (and its broadcast) down with it.

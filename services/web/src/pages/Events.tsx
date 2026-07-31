@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { useEvents, useAcknowledgeEvent } from "../hooks/useEvents";
 import { useCameras } from "../hooks/useCameras";
 import { NvrEvent } from "../types/event";
-import { Check, AlertTriangle, Info, XCircle, Bell, Car, PersonStanding, Dog, Package, ChevronLeft, ChevronRight, X, Maximize2, Trash2 } from "lucide-react";
+import { Check, AlertTriangle, Info, XCircle, Bell, Car, PersonStanding, Dog, Package, ChevronLeft, ChevronRight, X, Maximize2, Trash2, Users } from "lucide-react";
 import EmptyState from "../components/ui/EmptyState";
 import apiClient from "../api/client";
 
@@ -28,6 +28,27 @@ const objectIcons: Record<string, typeof Car> = {
   dog: Dog,
   cat: Dog,
 };
+
+interface ObjectFilterOption {
+  value: string;
+  label: string;
+  kind: "category" | "class";
+  icon?: typeof Car;
+}
+
+const OBJECT_FILTER_OPTIONS: ObjectFilterOption[] = [
+  { value: "person", label: "Person", kind: "category", icon: PersonStanding },
+  { value: "vehicle", label: "Vehicle", kind: "category", icon: Car },
+  { value: "animal", label: "Animal", kind: "category", icon: Dog },
+  { value: "car", label: "Car", kind: "class", icon: Car },
+  { value: "truck", label: "Truck", kind: "class", icon: Car },
+  { value: "bus", label: "Bus", kind: "class", icon: Car },
+  { value: "motorcycle", label: "Motorcycle", kind: "class", icon: Car },
+  { value: "bicycle", label: "Bicycle", kind: "class", icon: Car },
+  { value: "dog", label: "Dog", kind: "class", icon: Dog },
+  { value: "cat", label: "Cat", kind: "class", icon: Dog },
+  { value: "bird", label: "Bird", kind: "class", icon: Dog },
+];
 
 function eventSnapshotUrl(eventId: string, retry = 0): string {
   const token = localStorage.getItem("access_token") || "";
@@ -107,6 +128,8 @@ function eventTitle(event: NvrEvent): string {
 
 export default function Events() {
   const [cameraFilter, setCameraFilter] = useState("");
+  const [selectedObjects, setSelectedObjects] = useState<string[]>([]);
+  const [minObjects, setMinObjects] = useState("");
   const [page, setPage] = useState(1);
   const [zoomedEvent, setZoomedEvent] = useState<NvrEvent | null>(null);
   const [cleanupOpen, setCleanupOpen] = useState(false);
@@ -115,8 +138,17 @@ export default function Events() {
   const [cleanupPreview, setCleanupPreview] = useState<{event_count: number; snapshot_count: number} | null>(null);
   const [cleanupLoading, setCleanupLoading] = useState(false);
   const [cleanupError, setCleanupError] = useState("");
-  const filters: Record<string, string> = { page: String(page) };
+  const filters: Record<string, string | string[]> = { page: String(page) };
   if (cameraFilter) filters.camera_id = cameraFilter;
+  const objectCategories = selectedObjects.filter(
+    (v) => OBJECT_FILTER_OPTIONS.find((o) => o.value === v)?.kind === "category"
+  );
+  const objectClasses = selectedObjects.filter(
+    (v) => OBJECT_FILTER_OPTIONS.find((o) => o.value === v)?.kind === "class"
+  );
+  if (objectCategories.length) filters.object_categories = objectCategories;
+  if (objectClasses.length) filters.objects = objectClasses;
+  if (minObjects) filters.min_objects = minObjects;
 
   const { data: eventsPage, isLoading } = useEvents(filters);
   const { data: cameras } = useCameras();
@@ -202,6 +234,63 @@ export default function Events() {
           >
             <Trash2 size={14} /> Delete Older...
           </button>
+        </div>
+      </div>
+
+      {/* Object filters */}
+      <div className="mb-4 space-y-2">
+        <div className="flex flex-wrap gap-2">
+          {OBJECT_FILTER_OPTIONS.map((opt) => {
+            const active = selectedObjects.includes(opt.value);
+            const Icon = opt.icon || Package;
+            return (
+              <button
+                key={opt.value}
+                onClick={() => {
+                  setSelectedObjects((prev) =>
+                    prev.includes(opt.value)
+                      ? prev.filter((v) => v !== opt.value)
+                      : [...prev, opt.value]
+                  );
+                  setPage(1);
+                }}
+                className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs border transition-colors ${
+                  active
+                    ? "bg-blue-600 border-blue-500 text-white"
+                    : "bg-gray-900 border-gray-700 text-gray-400 hover:border-gray-500"
+                }`}
+              >
+                <Icon size={12} />
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="text-xs text-gray-500">Min objects</label>
+          <input
+            type="number"
+            min="1"
+            value={minObjects}
+            onChange={(e) => {
+              setMinObjects(e.target.value);
+              setPage(1);
+            }}
+            placeholder="e.g. 2"
+            className="w-20 px-2 py-1 bg-gray-900 border border-gray-700 rounded text-xs text-gray-300"
+          />
+          {(selectedObjects.length > 0 || minObjects) && (
+            <button
+              onClick={() => {
+                setSelectedObjects([]);
+                setMinObjects("");
+                setPage(1);
+              }}
+              className="text-xs text-blue-400 hover:text-blue-300"
+            >
+              Clear filters
+            </button>
+          )}
         </div>
       </div>
 

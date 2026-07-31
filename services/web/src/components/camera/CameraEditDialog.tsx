@@ -204,7 +204,7 @@ export default function CameraEditDialog({ open, onClose, camera }: Props) {
                 <option value="main">Main (high quality)</option>
                 <option value="sub">Sub (low bitrate)</option>
               </select>
-              <p className="text-[11px] text-gray-500 mt-1">Override system default. Sub = ~10x less disk.</p>
+              <p className="text-[11px] text-gray-500 mt-1">Also used for AI detection when enabled. Main = better detection of distant/small objects, more CPU.</p>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">

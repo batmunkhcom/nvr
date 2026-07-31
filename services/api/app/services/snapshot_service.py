@@ -16,8 +16,8 @@ from ..services.camera_service import get_camera
 logger = structlog.get_logger()
 
 
-async def capture_snapshot_b64(camera_id: uuid.UUID) -> str:
-    """Capture a JPEG frame from the camera's sub-stream and return as raw b64 string."""
+async def _get_authed_rtsp_uri(camera_id: uuid.UUID) -> tuple[object, str]:
+    """Load camera and return (camera, authenticated RTSP URI)."""
     async with async_session_factory() as db:
         camera = await get_camera(camera_id, db)
 
@@ -54,51 +54,82 @@ async def capture_snapshot_b64(camera_id: uuid.UUID) -> str:
             )
         )
 
+    return camera, authed_uri
+
+
+async def _run_ffmpeg_snapshot(camera: object, authed_uri: str) -> bytes:
+    """Run FFmpeg once and return raw JPEG bytes."""
     ffmpeg_path = "ffmpeg"
+    proc = await asyncio.create_subprocess_exec(
+        ffmpeg_path,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-rtsp_transport",
+        (camera.stream_transport if hasattr(camera, "stream_transport") else "tcp"),
+        "-timeout",
+        "15000000",  # 15s socket timeout — Dahua stalls without it
+        "-i",
+        authed_uri,
+        "-vframes",
+        "1",
+        "-q:v",
+        "5",
+        "-f",
+        "image2",
+        "-",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
     try:
-        proc = await asyncio.create_subprocess_exec(
-            ffmpeg_path,
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-rtsp_transport",
-            (camera.stream_transport if hasattr(camera, "stream_transport") else "tcp"),
-            "-timeout",
-            "15000000",  # 15s socket timeout — Dahua stalls without it
-            "-i",
-            authed_uri,
-            "-vframes",
-            "1",
-            "-q:v",
-            "5",
-            "-f",
-            "image2",
-            "-",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=12.0)
+    except TimeoutError:
+        proc.kill()
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Snapshot capture timed out",
+        ) from None
+
+    if proc.returncode != 0 or not stdout:
+        err = stderr.decode("utf-8", errors="replace")[:200] if stderr else "no output"
+        logger.warning("snapshot_ffmpeg_failed", error=err)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to capture snapshot from camera stream",
         )
 
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=12.0)
-        except TimeoutError:
-            proc.kill()
-            raise HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                detail="Snapshot capture timed out",
-            ) from None
+    return stdout
 
-        if proc.returncode != 0 or not stdout:
-            err = stderr.decode("utf-8", errors="replace")[:200] if stderr else "no output"
-            logger.warning("snapshot_ffmpeg_failed", camera_id=str(camera_id), error=err)
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Failed to capture snapshot from camera stream",
-            )
 
+async def capture_snapshot_b64(camera_id: uuid.UUID) -> str:
+    """Capture a JPEG frame from the camera's sub-stream and return as raw b64 string."""
+    camera, authed_uri = await _get_authed_rtsp_uri(camera_id)
+    try:
+        stdout = await _run_ffmpeg_snapshot(camera, authed_uri)
         import base64
 
         return base64.b64encode(stdout).decode()
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="FFmpeg is not installed",
+        ) from None
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("snapshot_unexpected_error", camera_id=str(camera_id), error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error capturing snapshot",
+        ) from exc
 
+
+async def capture_snapshot_bytes(camera_id: uuid.UUID) -> bytes:
+    """Capture a JPEG frame from the camera's sub-stream and return raw bytes."""
+    camera, authed_uri = await _get_authed_rtsp_uri(camera_id)
+    try:
+        return await _run_ffmpeg_snapshot(camera, authed_uri)
     except FileNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,

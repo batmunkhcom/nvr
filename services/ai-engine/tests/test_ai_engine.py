@@ -42,6 +42,11 @@ def detector(ai_engine):
     return importlib.import_module("ai_engine_app.detector")
 
 
+@pytest.fixture(scope="module")
+def ai_main(ai_engine):
+    return importlib.import_module("ai_engine_app.main")
+
+
 def _make_sampler(sampler, **kwargs):
     params = {
         "camera_id": "00000000-0000-0000-0000-000000000001",
@@ -55,6 +60,62 @@ def _make_sampler(sampler, **kwargs):
     }
     params.update(kwargs)
     return sampler.FrameSampler(**params)
+
+
+# ----------------------------------------------------------------------
+# AI stream selection (recording_stream reuse)
+# ----------------------------------------------------------------------
+
+
+def test_resolve_ai_stream_defaults_to_sub(ai_main):
+    cam = {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "stream_main_uri": "rtsp://10.0.0.1/main",
+        "stream_sub_uri": "rtsp://10.0.0.1/sub",
+        "recording_stream": None,
+    }
+    use_main, stream_uri, relay_key = ai_main._resolve_ai_stream(cam)
+    assert use_main is False
+    assert stream_uri == "rtsp://10.0.0.1/sub"
+    assert relay_key == "00000000-0000-0000-0000-000000000001_sub"
+
+
+def test_resolve_ai_stream_sub_explicit(ai_main):
+    cam = {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "stream_main_uri": "rtsp://10.0.0.1/main",
+        "stream_sub_uri": "rtsp://10.0.0.1/sub",
+        "recording_stream": "sub",
+    }
+    use_main, stream_uri, relay_key = ai_main._resolve_ai_stream(cam)
+    assert use_main is False
+    assert stream_uri == "rtsp://10.0.0.1/sub"
+    assert relay_key.endswith("_sub")
+
+
+def test_resolve_ai_stream_main(ai_main):
+    cam = {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "stream_main_uri": "rtsp://10.0.0.1/main",
+        "stream_sub_uri": "rtsp://10.0.0.1/sub",
+        "recording_stream": "main",
+    }
+    use_main, stream_uri, relay_key = ai_main._resolve_ai_stream(cam)
+    assert use_main is True
+    assert stream_uri == "rtsp://10.0.0.1/main"
+    assert not relay_key.endswith("_sub")
+
+
+def test_resolve_ai_stream_main_fallback(ai_main):
+    cam = {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "stream_main_uri": None,
+        "stream_sub_uri": "rtsp://10.0.0.1/sub",
+        "recording_stream": "main",
+    }
+    use_main, stream_uri, relay_key = ai_main._resolve_ai_stream(cam)
+    assert use_main is True
+    assert stream_uri == "rtsp://10.0.0.1/sub"
 
 
 # ----------------------------------------------------------------------
@@ -78,12 +139,18 @@ def test_rtsp_url_no_creds(sampler):
 
 def test_confidence_clamp_invalid_high(sampler):
     s = _make_sampler(sampler, ai_min_confidence=2.0)
-    assert s.ai_min_confidence == 0.5
+    assert s.ai_min_confidence == 0.95
 
 
 def test_confidence_default_when_none(sampler):
     s = _make_sampler(sampler, ai_min_confidence=None)
-    assert s.ai_min_confidence == 0.5
+    assert s.ai_min_confidence == 0.25
+
+
+def test_confidence_default_respects_env_var(monkeypatch, sampler):
+    monkeypatch.setenv("AI_CONFIDENCE_THRESHOLD", "0.45")
+    s = _make_sampler(sampler, ai_min_confidence=None)
+    assert s.ai_min_confidence == 0.45
 
 
 def test_confidence_valid_kept(sampler):
@@ -92,39 +159,32 @@ def test_confidence_valid_kept(sampler):
 
 
 # ----------------------------------------------------------------------
-# Cooldown filtering
+# Tracking / cooldown filtering
 # ----------------------------------------------------------------------
 
 
-def test_cooldown_first_detection_passes(sampler):
+def test_tracking_first_detection_passes(sampler):
     s = _make_sampler(sampler)
-    dets = [{"class": "car", "confidence": 0.9, "box": [0, 0, 10, 10]}]
-    assert len(s._apply_cooldown(dets, 640, 360)) == 1
+    dets = [
+        {"class": "car", "confidence": 0.9, "box": [0, 0, 50, 50]},
+        {"class": "car", "confidence": 0.9, "box": [300, 100, 350, 150]},
+    ]
+    assert len(s._apply_tracking(dets, 640, 360)) == 2
 
 
-def test_cooldown_static_repeat_filtered(sampler):
+def test_tracking_immediate_repeat_suppressed(sampler):
     """Static object (same position) is filtered within the cooldown window."""
     s = _make_sampler(sampler)
-    dets = [{"class": "car", "confidence": 0.9, "box": [0, 0, 10, 10]}]
-    s._apply_cooldown(dets, 640, 360)
-    s._last_events["car"] = (s._last_events["car"][0] - sampler.MIN_EVENT_GAP_S - 1, *s._last_events["car"][1:])
-    assert s._apply_cooldown(dets, 640, 360) == []
+    dets = [{"class": "car", "confidence": 0.9, "box": [0, 0, 50, 50]}]
+    assert len(s._apply_tracking(dets, 640, 360)) == 1
+    assert s._apply_tracking(dets, 640, 360) == []
 
 
-def test_cooldown_moved_object_is_new_event(sampler):
-    """Object that moved significantly counts as a new event."""
+def test_tracking_per_class(sampler):
     s = _make_sampler(sampler)
-    s._apply_cooldown([{"class": "car", "confidence": 0.9, "box": [0, 0, 10, 10]}], 640, 360)
-    s._last_events["car"] = (s._last_events["car"][0] - sampler.MIN_EVENT_GAP_S - 1, *s._last_events["car"][1:])
-    moved = [{"class": "car", "confidence": 0.9, "box": [300, 100, 310, 110]}]
-    assert len(s._apply_cooldown(moved, 640, 360)) == 1
-
-
-def test_cooldown_per_class(sampler):
-    s = _make_sampler(sampler)
-    s._apply_cooldown([{"class": "car", "confidence": 0.9, "box": [0, 0, 10, 10]}], 640, 360)
-    other = [{"class": "person", "confidence": 0.9, "box": [0, 0, 10, 10]}]
-    assert len(s._apply_cooldown(other, 640, 360)) == 1  # different class not blocked
+    s._apply_tracking([{"class": "car", "confidence": 0.9, "box": [0, 0, 50, 50]}], 640, 360)
+    other = [{"class": "person", "confidence": 0.9, "box": [0, 0, 50, 50]}]
+    assert len(s._apply_tracking(other, 640, 360)) == 1  # different class not blocked
 
 
 # ----------------------------------------------------------------------
@@ -134,7 +194,7 @@ def test_cooldown_per_class(sampler):
 
 def test_letterbox_output_shape(detector):
     frame = np.zeros((480, 640, 3), dtype=np.uint8)
-    blob, scale, pad_x, pad_y = detector._letterbox(frame)
+    blob, scale, _pad_x, pad_y = detector._letterbox(frame)
     assert blob.shape == (1, 3, 640, 640)
     assert scale == pytest.approx(1.0)
     assert pad_y == pytest.approx(80.0)
@@ -146,7 +206,7 @@ def test_letterbox_wide_image(detector):
     assert blob.shape == (1, 3, 640, 640)
     assert scale == pytest.approx(0.5)
     assert pad_x == pytest.approx(0.0)
-    assert pad_y == pytest.approx(160.0)
+    assert pad_y == pytest.approx(230.0)
 
 
 def test_detector_not_ready_without_model(detector):

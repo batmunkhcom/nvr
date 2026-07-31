@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
 import structlog
 from fastapi import HTTPException, status
+from nvr_common.quota import apply_disk_quota, directory_size_bytes
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -138,7 +140,9 @@ async def bulk_delete_recordings(
     return {"deleted": deleted, "freed_bytes": freed}
 
 
-async def list_storage_backends(db: AsyncSession) -> dict:
+async def list_storage_backends(db: AsyncSession, refresh_stats: bool = True) -> dict:
+    if refresh_stats:
+        await _refresh_backend_disk_stats(db)
     result = await db.execute(select(StorageBackend).order_by(StorageBackend.priority))
     backends = result.scalars().all()
     return {"data": [_backend_to_dict(b) for b in backends]}
@@ -152,6 +156,44 @@ async def get_storage_backend(backend_id: uuid.UUID, db: AsyncSession) -> Storag
             status_code=status.HTTP_404_NOT_FOUND, detail="Storage backend not found"
         )
     return backend
+
+
+async def _refresh_backend_disk_stats(db: AsyncSession) -> None:
+    """Refresh filesystem backend stats from real disk usage.
+
+    S3 / cloud backends keep their DB values because we can't stat a bucket
+    with shutil. The function is best-effort: inaccessible mounts are left
+    unchanged (health checks surface them separately).
+    """
+    import shutil
+
+    result = await db.execute(select(StorageBackend))
+    for backend in result.scalars().all():
+        if backend.backend_type not in ("local", "nfs", "smb"):
+            continue
+        mp = backend.mount_point
+        if not mp:
+            continue
+        try:
+            usage = shutil.disk_usage(mp)
+            quota = (backend.config or {}).get("quota_bytes")
+            if quota and quota > 0:
+                actual_used = await asyncio.to_thread(directory_size_bytes, mp)
+            else:
+                actual_used = usage.used
+            total, _used, free = apply_disk_quota(
+                usage.total, actual_used, usage.free, quota
+            )
+            backend.total_bytes = total
+            backend.available_bytes = free
+            backend.updated_at = datetime.now(UTC)
+        except OSError:
+            logger.warning(
+                "storage_backend_disk_stat_failed",
+                backend_id=str(backend.id),
+                mount_point=mp,
+            )
+    await db.flush()
 
 
 async def create_storage_backend(
@@ -410,31 +452,85 @@ async def get_timeline_segments(
 
 
 async def get_storage_usage(db: AsyncSession) -> dict:
-    """Aggregate storage usage — uses real filesystem stats, not stale DB rows."""
+    """Aggregate storage usage across all active filesystem backends.
+
+    Uses real ``shutil.disk_usage`` stats instead of stale DB rows. Falls back
+    to the local env path if no backends are configured or none are accessible.
+    """
     import os
     import shutil
 
-    result = await db.execute(select(StorageBackend).where(StorageBackend.is_active.is_(True)))
-    backends = result.scalars().all()
+    await _refresh_backend_disk_stats(db)
 
     default_path = os.environ.get("STORAGE_LOCAL_PATH", "/data/recordings")
-    mount_point = backends[0].mount_point if backends else default_path
-    try:
-        usage = shutil.disk_usage(mount_point)
-        total = usage.total
-        free = usage.free
-        used = usage.used
-    except OSError:
-        total = sum(b.total_bytes for b in backends)
-        free = sum(b.available_bytes for b in backends)
-        used = total - free
+    total = 0
+    used = 0
+    free = 0
+    active_roots = []
+
+    backends_result = await db.execute(select(StorageBackend).where(StorageBackend.is_active.is_(True)))
+    active_backends = backends_result.scalars().all()
+
+    for backend in active_backends:
+        if backend.backend_type not in ("local", "nfs", "smb"):
+            continue
+        mp = backend.mount_point or default_path
+        # _refresh_backend_disk_stats already applied quota and stored capped
+        # values. Use them directly; only fall back to a fresh stat if the DB
+        # row has never been refreshed.
+        be_total = backend.total_bytes
+        be_free = backend.available_bytes
+        be_used = max(0, be_total - be_free)
+        if be_total == 0:
+            try:
+                usage = shutil.disk_usage(mp)
+                quota = (backend.config or {}).get("quota_bytes")
+                if quota and quota > 0:
+                    actual_used = await asyncio.to_thread(directory_size_bytes, mp)
+                else:
+                    actual_used = usage.used
+                be_total, be_used, be_free = apply_disk_quota(
+                    usage.total, actual_used, usage.free, quota
+                )
+            except OSError:
+                logger.warning(
+                    "storage_usage_disk_stat_failed",
+                    backend_id=str(backend.id),
+                    mount_point=mp,
+                )
+                continue
+        total += be_total
+        used += be_used
+        free += be_free
+        active_roots.append(mp)
+
+    # Fallback: if no filesystem backends exist, use the default path.
+    if total == 0:
+        try:
+            usage = shutil.disk_usage(default_path)
+            total = usage.total
+            used = usage.used
+            free = usage.free
+        except OSError:
+            pass
 
     return {
         "total_bytes": total,
         "used_bytes": used,
         "free_bytes": free,
-        "backends": [_backend_to_dict(b) for b in backends],
+        "backends": [_backend_to_dict(b) for b in active_backends],
     }
+
+
+async def get_24h_write_rate(db: AsyncSession) -> int:
+    """Return bytes written in the last 24h from the recordings table."""
+    since = datetime.now(UTC) - timedelta(hours=24)
+    result = await db.execute(
+        select(func.coalesce(func.sum(Recording.file_size_bytes), 0)).where(
+            Recording.start_time >= since
+        )
+    )
+    return int(result.scalar() or 0)
 
 
 async def get_recording_stats(db: AsyncSession) -> dict:

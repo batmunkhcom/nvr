@@ -30,6 +30,7 @@ export default function CameraEditPage() {
   const [notes, setNotes] = useState("");
   const [aiEnabled, setAiEnabled] = useState(false);
   const [motionSource, setMotionSource] = useState("server");
+  const [onvifEventsUrl, setOnvifEventsUrl] = useState("");
   const [aiSensitivity, setAiSensitivity] = useState("medium");
   const [aiConfidence, setAiConfidence] = useState("0.5");
   const [aiZones, setAiZones] = useState<AiZone[]>([]);
@@ -53,6 +54,7 @@ export default function CameraEditPage() {
       setNotes(camera.notes || "");
       setAiEnabled(camera.ai_enabled || false);
       setMotionSource(camera.motion_source || "server");
+      setOnvifEventsUrl(camera.onvif_events_service_url || "");
       setAiSensitivity(camera.ai_sensitivity || "medium");
       setAiConfidence(String(camera.ai_min_confidence ?? 0.5));
       setAiZones(
@@ -103,6 +105,7 @@ export default function CameraEditPage() {
         notes: notes || undefined,
         ai_enabled: aiEnabled,
         motion_source: motionSource,
+        onvif_events_service_url: onvifEventsUrl || undefined,
         ai_sensitivity: aiSensitivity,
         ai_min_confidence: parseFloat(aiConfidence) || 0.5,
         ai_zones: aiZones,
@@ -231,13 +234,13 @@ export default function CameraEditPage() {
               onChange={(e) => setRecordingStream(e.target.value)}
               className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-gray-100 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
             >
-              <option value="">System Default</option>
-              <option value="main">Main (high quality)</option>
-              <option value="sub">Sub (low bitrate)</option>
-            </select>
-            <p className="text-[11px] text-gray-500 mt-1">Override system default. Sub = ~10x less disk.</p>
+                <option value="">System Default</option>
+                <option value="main">Main (high quality)</option>
+                <option value="sub">Sub (low bitrate)</option>
+              </select>
+              <p className="text-[11px] text-gray-500 mt-1">Also used for AI detection when enabled. Main = better detection of distant/small objects, more CPU.</p>
+            </div>
           </div>
-        </div>
         <div>
           <label className="flex items-center gap-2">
             <input
@@ -278,6 +281,19 @@ export default function CameraEditPage() {
               </select>
               <p className="text-[11px] text-gray-500 mt-1">NVR Engine = server-side YOLO detection. Camera Built-in = ONVIF events.</p>
             </div>
+            {motionSource === "camera" && (
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">ONVIF Events URL</label>
+                <input
+                  type="text"
+                  value={onvifEventsUrl}
+                  onChange={(e) => setOnvifEventsUrl(e.target.value)}
+                  placeholder="http://10.10.0.217:80/onvif/Events"
+                  className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-gray-100 text-sm outline-none font-mono"
+                />
+                <p className="text-[11px] text-gray-500 mt-1">ONVIF event subscription endpoint (Events service URL).</p>
+              </div>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3 mt-2">
             <div>

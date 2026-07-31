@@ -72,7 +72,7 @@
 - [x] **3.6** `ai.confidence_threshold` 2→0.5 зассан (DB) + кодод clamp validation (0.05–0.95)
 - [x] **3.7** AI container ажиллаж байна ✅ — **машин (0.55) ба хүн (0.73) танигдсан** live баталгаажуулалттай, snapshot-ууд хадгалагдаж байна. Position-aware dedup нэмсэн (зогсож буй машин 5 мин тутам 1 event)
 - [x] **3.8** Events UI: snapshot thumbnail (token auth-тай), объект badge (машин/хүн icon), камер шүүлтүүр — бичигдсэн ✅
-- [x] **3.9** Тест: test_ai_engine.py 14 тест (URL build, confidence clamp, cooldown, letterbox) — numpy-тэй орчинд ажиллана
+- [x] **3.9** Тест: `services/ai-engine/tests/` 33 тест (URL build, confidence clamp, tracking, letterbox, NMS, олон-object detection) — numpy/opencv-тэй орчинд ажиллана
 
 ## Phase 4 — Performance & tuning ✅
 

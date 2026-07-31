@@ -29,7 +29,7 @@ from . import config
 
 logger = structlog.get_logger()
 
-STABLE_SECONDS = 15  # file untouched this long => segment is closed
+STABLE_SECONDS = 60  # file untouched this long => segment is closed
 THUMB_FAIL_RETRY_S = 24 * 3600  # retry failed thumbnails at most once a day
 FILENAME_RE = re.compile(r"(\d{8})_(\d{6})\.mp4$")
 
@@ -92,15 +92,22 @@ async def _make_thumbnail(segment_path: str) -> str | None:
             "-y",
             thumb_path,
             stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
         )
-        await asyncio.wait_for(proc.wait(), timeout=10)
+        _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
         if proc.returncode == 0 and os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 0:
             return thumb_path
         if os.path.exists(thumb_path):
             os.unlink(thumb_path)
-    except Exception:
-        pass
+        logger.warning(
+            "thumbnail_ffmpeg_ss2_failed",
+            segment=segment_path,
+            stderr=stderr.decode("utf-8", errors="replace")[:200],
+        )
+    except Exception as exc:
+        logger.warning("thumbnail_ffmpeg_ss2_exception", segment=segment_path, error=str(exc))
+        if os.path.exists(thumb_path):
+            os.unlink(thumb_path)
     try:
         proc = await asyncio.create_subprocess_exec(
             config.FFMPEG_PATH,
@@ -120,15 +127,22 @@ async def _make_thumbnail(segment_path: str) -> str | None:
             "-y",
             thumb_path,
             stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
         )
-        await asyncio.wait_for(proc.wait(), timeout=10)
+        _stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
         if proc.returncode == 0 and os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 0:
             return thumb_path
-    except Exception:
-        pass
-    if os.path.exists(thumb_path):
-        os.unlink(thumb_path)
+        if os.path.exists(thumb_path):
+            os.unlink(thumb_path)
+        logger.warning(
+            "thumbnail_ffmpeg_ss0_failed",
+            segment=segment_path,
+            stderr=stderr.decode("utf-8", errors="replace")[:200],
+        )
+    except Exception as exc:
+        logger.warning("thumbnail_ffmpeg_ss0_exception", segment=segment_path, error=str(exc))
+        if os.path.exists(thumb_path):
+            os.unlink(thumb_path)
     return None
 
 

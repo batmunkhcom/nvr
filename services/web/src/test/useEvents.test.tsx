@@ -33,7 +33,7 @@ describe("useEvents", () => {
     const { result } = renderHook(() => useEvents(), { wrapper });
 
     await waitFor(() => {
-      expect(result.current.data).toEqual(mockEvents);
+      expect(result.current.data?.data).toEqual(mockEvents);
     });
   });
 
@@ -43,7 +43,7 @@ describe("useEvents", () => {
     const { result } = renderHook(() => useEvents(), { wrapper });
 
     await waitFor(() => {
-      expect(result.current.data).toEqual([]);
+      expect(result.current.data?.data).toEqual([]);
     });
   });
 
@@ -54,7 +54,32 @@ describe("useEvents", () => {
 
     await waitFor(() => {
       expect(apiClient.get).toHaveBeenCalledWith("/events", {
-        params: { per_page: 50, event_type: "motion" },
+        params: { per_page: 10, event_type: "motion" },
+      });
+    });
+  });
+
+  it("passes object filter arrays", async () => {
+    vi.mocked(apiClient.get).mockResolvedValueOnce({ data: { data: [] } });
+
+    renderHook(
+      () =>
+        useEvents({
+          objects: ["car", "person"],
+          object_categories: ["animal"],
+          min_objects: "2",
+        }),
+      { wrapper }
+    );
+
+    await waitFor(() => {
+      expect(apiClient.get).toHaveBeenCalledWith("/events", {
+        params: {
+          per_page: 10,
+          objects: ["car", "person"],
+          object_categories: ["animal"],
+          min_objects: "2",
+        },
       });
     });
   });

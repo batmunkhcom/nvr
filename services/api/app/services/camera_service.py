@@ -325,6 +325,7 @@ def _camera_to_response(camera: Camera) -> dict:
         "has_motion_detection": camera.has_motion_detection,
         "has_io_ports": camera.has_io_ports,
         "motion_source": camera.motion_source,
+        "onvif_events_service_url": camera.onvif_events_service_url,
         "ai_enabled": camera.ai_enabled,
         "ai_objects": camera.ai_objects,
         "ai_zones": camera.ai_zones,

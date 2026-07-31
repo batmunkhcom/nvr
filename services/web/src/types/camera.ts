@@ -19,6 +19,7 @@ export interface Camera {
   has_motion_detection: boolean;
   has_io_ports: boolean;
   motion_source: string | null;
+  onvif_events_service_url: string | null;
   max_resolution: string | null;
   recording_mode: string;
   stream_transport: string;
@@ -111,6 +112,7 @@ export interface CameraUpdatePayload {
   ai_sensitivity?: string;
   ai_min_confidence?: number;
   motion_source?: string;
+  onvif_events_service_url?: string;
 }
 
 export interface ProbeResult {

@@ -6,13 +6,62 @@ import uuid
 
 import structlog
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.event import Event
 from ..models.event_rule import EventRule
 
 logger = structlog.get_logger()
+
+# Object category mapping for AI-detected events. Must match the categories used
+# by the AI engine (COCO classes + synthetic categories).
+OBJECT_CATEGORIES: dict[str, list[str]] = {
+    "person": ["person"],
+    "animal": ["cat", "dog", "bird"],
+    "vehicle": ["car", "truck", "bus", "motorcycle", "bicycle"],
+    "livestock": ["horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe"],
+}
+
+# All supported object classes that can appear in the metadata.objects array.
+OBJECT_CLASSES: set[str] = set().union(*OBJECT_CATEGORIES.values())
+
+
+def _expand_object_filters(
+    object_classes: list[str] | None,
+    object_categories: list[str] | None,
+) -> list[str]:
+    """Return concrete COCO class names from class names and/or category names."""
+    classes: set[str] = set()
+    for cls in object_classes or []:
+        classes.add(cls.lower())
+    for category in object_categories or []:
+        classes.update(OBJECT_CATEGORIES.get(category.lower(), []))
+    return sorted(classes)
+
+
+def _object_class_filter_clause(classes: list[str]) -> str:
+    """SQL EXISTS clause: event metadata.objects contains at least one class."""
+    placeholders = ", ".join([f":class_{i}" for i in range(len(classes))])
+    return (
+        "EXISTS ("
+        "SELECT 1 FROM jsonb_array_elements(metadata::jsonb->'objects') AS obj "
+        f"WHERE obj->>'class' IN ({placeholders})"
+        ")"
+    )
+
+
+def _object_count_clause(classes: list[str] | None) -> str:
+    """SQL scalar subquery: count matching objects in metadata."""
+    if classes:
+        placeholders = ", ".join([f":class_{i}" for i in range(len(classes))])
+        where_clause = f"WHERE obj->>'class' IN ({placeholders})"
+    else:
+        where_clause = ""
+    return (
+        "SELECT COUNT(*) FROM jsonb_array_elements(metadata::jsonb->'objects') AS obj "
+        f"{where_clause}"
+    )
 
 
 async def list_events(
@@ -25,6 +74,9 @@ async def list_events(
     acknowledged: bool | None = None,
     from_time: str | None = None,
     to_time: str | None = None,
+    object_classes: list[str] | None = None,
+    object_categories: list[str] | None = None,
+    min_objects: int | None = None,
 ) -> dict:
     offset = (page - 1) * per_page
     query = select(Event)
@@ -41,6 +93,18 @@ async def list_events(
         query = query.where(Event.created_at >= from_time)
     if to_time:
         query = query.where(Event.created_at <= to_time)
+
+    classes = _expand_object_filters(object_classes, object_categories)
+    if classes:
+        clause = _object_class_filter_clause(classes)
+        params = {f"class_{i}": cls for i, cls in enumerate(classes)}
+        query = query.where(text(clause).bindparams(**params))
+
+    if min_objects is not None and min_objects > 0:
+        clause = _object_count_clause(classes if classes else None)
+        params = {f"class_{i}": cls for i, cls in enumerate(classes)} if classes else {}
+        params["min_objects"] = min_objects
+        query = query.where(text(f"({clause}) >= :min_objects").bindparams(**params))
 
     count_query = select(func.count()).select_from(query.subquery())
     total = (await db.execute(count_query)).scalar() or 0

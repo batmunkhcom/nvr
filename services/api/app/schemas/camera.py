@@ -57,6 +57,8 @@ class CameraUpdate(BaseModel):
     ai_min_confidence: float | None = None
     ai_plugins: list[str] | None = None
     lpr_config: dict | None = None
+    motion_source: str | None = None
+    onvif_events_service_url: str | None = None
 
 
 class CameraResponse(BaseModel):
@@ -80,6 +82,7 @@ class CameraResponse(BaseModel):
     has_motion_detection: bool
     has_io_ports: bool
     motion_source: str | None = None
+    onvif_events_service_url: str | None = None
     ai_enabled: bool = False
     ai_objects: list[str] | None = None
     ai_zones: list | None = None

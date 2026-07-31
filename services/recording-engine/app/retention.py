@@ -20,6 +20,7 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import structlog
+from nvr_common.quota import apply_disk_quota, directory_size_bytes
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -103,16 +104,26 @@ class RetentionManager:
         deleted = 0
         freed = 0
         roots = config.get_storage_roots()
+        quotas = await self._load_mount_quotas(roots)
         for root in roots:
             if not os.path.isdir(root):
                 continue
-            # Delete in batches between watermark checks — a per-file
-            # disk_usage + fresh session is heavy N+1 churn during disk-full
-            # emergencies.
+            quota = quotas.get(root)
+            usage = await asyncio.to_thread(shutil.disk_usage, root)
+            # Quota backends (e.g. SeaweedFS/NFS) report cluster-wide used/free
+            # rather than the slice consumed by this mount. Walk the directory
+            # to get a realistic used number.
+            if quota:
+                actual_used = await asyncio.to_thread(directory_size_bytes, root)
+            else:
+                actual_used = usage.used
+            total, used, free = apply_disk_quota(
+                usage.total, actual_used, usage.free, quota
+            )
+            # Delete in batches between watermark checks.
             for _ in range(MAX_DELETES_PER_RUN // DELETE_BATCH):
-                usage = await asyncio.to_thread(shutil.disk_usage, root)
-                usage_pct = usage.used / usage.total * 100 if usage.total else 0
-                free_gb = usage.free / (1024**3)
+                usage_pct = used / total * 100 if total else 0
+                free_gb = free / (1024**3)
                 if usage_pct < max_usage_pct and free_gb >= min_free_gb:
                     break
 
@@ -132,10 +143,45 @@ class RetentionManager:
                 freed += f
                 if d == 0:
                     break
+                used = max(0, used - f)
+                free = total - used
 
         if deleted:
             logger.warning("retention_circular_cleanup", deleted=deleted, freed_bytes=freed)
         return deleted, freed
+
+    async def _load_mount_quotas(self, roots: set[str]) -> dict[str, int | None]:
+        """Return {mount_point: quota_bytes|None} for active filesystem backends."""
+        quotas: dict[str, int | None] = {}
+        try:
+            async with self._session_factory() as session:
+                result = await session.execute(
+                    text(
+                        "SELECT mount_point, config FROM storage_backends "
+                        "WHERE is_active AND backend_type IN ('local', 'nfs', 'smb')"
+                    )
+                )
+                rows = result.fetchall()
+        except Exception:
+            return quotas
+        for mp, cfg in rows:
+            if not mp:
+                continue
+            cfg = cfg or {}
+            quota = cfg.get("quota_bytes")
+            quotas[mp] = quota if quota and quota > 0 else None
+        # Match roots that are under a configured mount_point.
+        out: dict[str, int | None] = {}
+        for root in roots:
+            out[root] = next(
+                (
+                    quotas[mp]
+                    for mp in sorted(quotas, key=len, reverse=True)
+                    if root.startswith(mp.rstrip("/") + "/") or root == mp.rstrip("/")
+                ),
+                None,
+            )
+        return out
 
     async def _oldest_recordings(self, root: str, limit: int) -> list[tuple]:
         """Oldest deletable recording rows (id, file_path) under a storage root."""

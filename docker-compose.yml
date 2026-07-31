@@ -131,6 +131,7 @@ services:
       - ./config:/app/config
       - ${STORAGE_HOST_PATH:-/data}:/data/recordings
       - ${SEAWEEDFS_MOUNT_PATH:-/mnt/seaweedfs}:${SEAWEEDFS_MOUNT_PATH:-/mnt/seaweedfs}
+      - ai_snapshots:/tmp/ai_snapshots
     depends_on:
       nvr-db:
         condition: service_healthy
@@ -263,6 +264,8 @@ services:
       dockerfile: docker/ai-engine/Dockerfile
     container_name: nvr-ai-engine
     restart: unless-stopped
+    ports:
+      - "${ONVIF_CALLBACK_PORT:-8091}:${ONVIF_CALLBACK_PORT:-8091}"
     environment:
       POSTGRES_HOST: nvr-db
       POSTGRES_PORT: ${POSTGRES_PORT}
@@ -278,6 +281,14 @@ services:
       AI_CONFIDENCE_THRESHOLD: ${AI_CONFIDENCE_THRESHOLD}
       AI_DEVICE: ${AI_DEVICE}
       AI_TARGET_FPS: ${AI_TARGET_FPS:-1.0}
+      AI_FRAME_WIDTH: ${AI_FRAME_WIDTH:-1280}
+      AI_MAX_TRACKLETS: ${AI_MAX_TRACKLETS:-64}
+      AI_NMS_THRESHOLD: ${AI_NMS_THRESHOLD:-0.50}
+      AI_MAX_DETECTIONS: ${AI_MAX_DETECTIONS:-300}
+      AI_CLASS_AGNOSTIC_NMS: ${AI_CLASS_AGNOSTIC_NMS:-true}
+      AI_MOTION_FG_MIN: ${AI_MOTION_FG_MIN:-400}
+      ONVIF_CALLBACK_PORT: ${ONVIF_CALLBACK_PORT:-8091}
+      ONVIF_CALLBACK_HOST: ${ONVIF_CALLBACK_HOST}
       STREAM_MANAGER_URL: http://nvr-stream-manager:8001
       MEDIAMTX_RTSP_HOST: nvr-mediamtx
       PYTHONPATH: /app/services/ai-engine:/app/packages/common
@@ -289,6 +300,7 @@ services:
       - ${SEAWEEDFS_MOUNT_PATH:-/mnt/seaweedfs}:${SEAWEEDFS_MOUNT_PATH:-/mnt/seaweedfs}
       - ./services/ai-engine:/app/services/ai-engine
       - ./packages:/app/packages
+      - ai_snapshots:/tmp/ai_snapshots
     depends_on:
       nvr-redis:
         condition: service_healthy
@@ -370,3 +382,4 @@ volumes:
   mosquitto_data:
   ai_models:
   mediamtx_hls:
+  ai_snapshots:

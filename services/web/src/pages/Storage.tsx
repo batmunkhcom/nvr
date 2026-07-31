@@ -25,6 +25,13 @@ function fmtBytes(bytes: number): string {
   return `${val.toFixed(val < 10 ? 1 : 0)} ${units[i]}`;
 }
 
+function fmtHours(hours: number | null): string {
+  if (hours === null || hours === undefined || hours < 0) return "—";
+  if (hours >= 24 * 30) return `${Math.round(hours / 24 / 30)} months`;
+  if (hours >= 24) return `${Math.round(hours / 24)} days`;
+  return `${Math.round(hours)} hours`;
+}
+
 interface BackendForm {
   name: string;
   backend_type: string;
@@ -173,7 +180,7 @@ export default function Storage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
         <div className="bg-gray-900 rounded border border-gray-800 p-4">
           <p className="text-sm text-gray-400">Total</p>
           <p className="text-xl font-bold mt-1">
@@ -198,15 +205,22 @@ export default function Storage() {
             <div className="w-full bg-gray-700 rounded h-2.5 mb-1.5">
               <div
                 className="bg-blue-600 h-2.5 rounded"
-                style={{ width: `${Math.min(usage?.total_bytes ? ((usage.used_bytes / usage.total_bytes) * 100) : 0, 100)}%` }}
+                style={{ width: `${Math.min(usage?.used_pct ?? 0, 100)}%` }}
               />
             </div>
             <p className="text-xs text-gray-500">
-              {usage?.total_bytes
-                ? `${Math.round((usage.used_bytes / usage.total_bytes) * 100)}%`
-                : "—"}
+              {usage ? `${usage.used_pct}%` : "—"}
             </p>
           </div>
+        </div>
+        <div className="bg-gray-900 rounded border border-gray-800 p-4">
+          <p className="text-sm text-gray-400">Estimated remaining</p>
+          <p className="text-xl font-bold mt-1">
+            {usage ? fmtHours(usage.recording_hours_available) : "—"}
+          </p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {usage ? `${fmtBytes(usage.bytes_24h)}/24h write rate` : "—"}
+          </p>
         </div>
       </div>
 

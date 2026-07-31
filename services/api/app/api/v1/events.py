@@ -2,12 +2,12 @@
 
 import os
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date
 from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,7 @@ from ...services.event_service import (
     list_events,
     update_event_rule,
 )
+from ...services.snapshot_service import capture_snapshot_bytes
 
 logger = structlog.get_logger()
 router = APIRouter(prefix="/api/v1/events", tags=["events"])
@@ -39,6 +40,9 @@ async def get_events(
     acknowledged: bool | None = None,
     from_time: str | None = None,
     to_time: str | None = None,
+    objects: list[str] | None = Query(None, description="Filter by object class names (e.g. car,person,dog)"),
+    object_categories: list[str] | None = Query(None, description="Filter by object category (e.g. animal,vehicle,person)"),
+    min_objects: int | None = Query(None, ge=1, description="Minimum number of detected objects"),
 ):
     return await list_events(
         db,
@@ -50,6 +54,9 @@ async def get_events(
         acknowledged=acknowledged,
         from_time=from_time,
         to_time=to_time,
+        object_classes=objects,
+        object_categories=object_categories,
+        min_objects=min_objects,
     )
 
 
@@ -69,12 +76,31 @@ async def get_event_snapshot(
     current_user: Annotated[dict, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Serve the AI detection snapshot JPEG (supports ?token= for <img> tags)."""
+    """Serve the AI detection snapshot JPEG (supports ?token= for <img> tags).
+
+    If the saved snapshot file is missing (e.g. written to a container-only /tmp
+    fallback or deleted), capture a fresh frame from the camera on demand.
+    """
     event = await get_event(event_id, db)
     snapshot_path = event.snapshot_path
-    if not snapshot_path or not os.path.exists(snapshot_path):
-        raise HTTPException(status_code=404, detail="Snapshot not found")
-    return FileResponse(snapshot_path, media_type="image/jpeg")
+    if snapshot_path and os.path.exists(snapshot_path):
+        return FileResponse(snapshot_path, media_type="image/jpeg")
+
+    logger.warning(
+        "event_snapshot_missing",
+        event_id=str(event_id),
+        camera_id=str(event.camera_id),
+        snapshot_path=snapshot_path,
+    )
+    try:
+        jpeg = await capture_snapshot_bytes(event.camera_id)
+        return Response(jpeg, media_type="image/jpeg")
+    except HTTPException as exc:
+        # Preserve the original HTTP status but surface a clearer message.
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=f"Snapshot file missing and on-demand capture failed: {exc.detail}",
+        ) from exc
 
 
 @router.patch("/{event_id}/acknowledge")
@@ -145,8 +171,8 @@ async def cleanup_events_by_date(
     """
     try:
         cutoff = date.fromisoformat(before)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.") from exc
 
     # Get snapshot paths before deleting
     path_query = text(

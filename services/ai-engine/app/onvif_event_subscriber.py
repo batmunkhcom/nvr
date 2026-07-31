@@ -184,8 +184,17 @@ def _parse_onvif_events(xml_text: str) -> list[dict]:
             "wsnt": "http://docs.oasis-open.org/wsn/b-2",
             "tt": "http://www.onvif.org/ver10/schema",
         }
-        for msg in root.findall(".//tns:NotificationMessage", ns):
+
+        # WS-BaseNotification cameras send wsnt:NotificationMessage;
+        # some PullPoint implementations use tns:NotificationMessage.
+        messages: list[ET.Element] = []
+        messages.extend(root.findall(".//wsnt:NotificationMessage", ns))
+        messages.extend(root.findall(".//tns:NotificationMessage", ns))
+
+        for msg in messages:
             topic_elem = msg.find("wsnt:Topic", ns)
+            if topic_elem is None:
+                topic_elem = msg.find(".//wsnt:Topic", ns)
             topic = topic_elem.text if topic_elem is not None else ""
             is_motion = _is_motion_topic(topic.lower())
 
@@ -208,7 +217,7 @@ def _parse_onvif_events(xml_text: str) -> list[dict]:
 
 
 def _is_motion_topic(topic: str) -> bool:
-    keywords = ["motion", "movement", "videoanalytics", "cellmotion", "fielddetector", "ivs", "vmd"]
+    keywords = ["motion", "movement", "videoanalytics", "cellmotion", "fielddetector", "ivs", "vmd", "humanshape"]
     return any(kw in topic.lower() for kw in keywords)
 
 

@@ -31,6 +31,7 @@ def _camera_row(cid=None, name="Cam", **overrides):
         "ai_sensitivity": "medium",
         "motion_source": "server",
         "recording_mode": "continuous",
+        "recording_stream": None,
         "onvif_events_service_url": None,
         "location_id": None,
         "storage_backend_id": None,
