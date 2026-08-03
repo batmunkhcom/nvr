@@ -11,10 +11,10 @@ export function useEvents(filters?: Record<string, string | string[]>) {
   return useQuery({
     queryKey: ["events", filters],
     queryFn: async () => {
-      const res = await apiClient.get("/events", { params: { per_page: 10, ...filters } });
+      const res = await apiClient.get("/events", { params: { per_page: 25, ...filters } });
       return {
         data: (res.data?.data || []) as NvrEvent[],
-        metadata: res.data?.metadata || { page: 1, per_page: 10, total: 0 },
+        metadata: res.data?.metadata || { page: 1, per_page: 25, total: 0 },
       } as EventsPage;
     },
     refetchInterval: 15_000,

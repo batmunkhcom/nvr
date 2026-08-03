@@ -58,7 +58,7 @@ FRAME_WIDTH = int(os.environ.get("AI_FRAME_WIDTH", "1280") or "1280")
 
 # ── IoU tracking constants ──
 IOU_MATCH_THRESHOLD = 0.30          # IoU > this → same tracked object
-FALLBACK_CENTRE_DISTANCE = 0.25     # relaxed centre-distance match when IoU fails (moving objects at 1 FPS)
+FALLBACK_CENTRE_DISTANCE = 0.12     # centre-distance match for fast movers; tight enough to avoid cross-traffic mismatches at 1 FPS
 TRACKLET_TIMEOUT_S = 300.0          # unseen this long → remove tracklet (5 min)
 MOVING_COOLDOWN_S = 15.0            # moving object: at most 1 event per N seconds
 PERSON_STATIC_COOLDOWN_S = 300.0    # stationary person/animal: 5 min
@@ -590,7 +590,7 @@ class FrameSampler:
                     continue
                 if ot.cls != cls:
                     continue
-                if now_ts - ot.last_seen_ts > CLASS_EVENT_GAP_S:
+                if now_ts - ot.last_event_ts > CLASS_EVENT_GAP_S:
                     continue
                 if compute_iou(candidate_bbox, ot.bbox) > IOU_MATCH_THRESHOLD:
                     overlapped = True
@@ -749,15 +749,15 @@ class FrameSampler:
         """Draw bounding boxes and labels on a copy of the detection frame."""
         import random
 
+        rng = random.Random()
         for det in detections:
             box = det.get("box")
             if not box or len(box) != 4:
                 continue
             x1, y1, x2, y2 = map(int, box)
             label = f"{det['class']} {det['confidence']:.2f}"
-            # deterministic color per class
-            random.seed(hash(det["class"]) % (2**31))
-            color = (random.randint(80, 255), random.randint(80, 255), random.randint(80, 255))
+            rng.seed(hash(det["class"]) % (2**31))
+            color = (rng.randint(80, 255), rng.randint(80, 255), rng.randint(80, 255))
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
             cv2.rectangle(frame, (x1, y1 - th - 4), (x1 + tw + 4, y1), color, -1)

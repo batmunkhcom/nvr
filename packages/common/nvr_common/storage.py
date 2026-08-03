@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -190,6 +191,9 @@ class S3Storage(StorageBackend):
         self.secure = config.get("secure", False)
         self._client = None
         self._upload_state: dict[str, dict] = {}
+        self._used_bytes_cache: float = 0.0
+        self._used_bytes_cache_ts: float = 0.0
+        self._cache_ttl: float = 300.0  # 5 min
 
     async def _get_client(self):
         if self._client is None:
@@ -242,6 +246,8 @@ class S3Storage(StorageBackend):
         return 500_000_000_000
 
     async def _used_bytes(self) -> int:
+        if time.monotonic() - self._used_bytes_cache_ts < self._cache_ttl:
+            return int(self._used_bytes_cache)
         try:
             client = await self._get_client()
             total_size = 0
@@ -256,6 +262,8 @@ class S3Storage(StorageBackend):
                 if not resp.get("IsTruncated"):
                     break
                 continuation_token = resp.get("NextContinuationToken")
+            self._used_bytes_cache = total_size
+            self._used_bytes_cache_ts = time.monotonic()
             return total_size
         except Exception:
             return 0

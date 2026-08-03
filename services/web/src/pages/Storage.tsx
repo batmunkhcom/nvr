@@ -266,7 +266,7 @@ export default function Storage() {
                   <tr key={c.camera_id} className="border-t border-gray-800 text-gray-300">
                     <td className="py-1">{c.camera}</td>
                     <td className="py-1 text-right font-medium text-gray-100">{c.stored_gb >= 1 ? `${c.stored_gb.toFixed(2)} GB` : `${Math.round(c.stored_gb * 1024)} MB`}</td>
-                    <td className="py-1 text-right">{c.gb_per_day.toFixed(2)}</td>
+                    <td className="py-1 text-right">{(c.gb_per_day ?? 0).toFixed(2)}</td>
                     <td className="py-1 text-right">{c.segments_24h}</td>
                   </tr>
                 ))}

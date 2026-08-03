@@ -15,6 +15,7 @@ Detection quality improvements over the base implementation:
 from __future__ import annotations
 
 import os
+import threading
 
 import numpy as np
 import structlog
@@ -124,6 +125,7 @@ class AIDetector:
         self.model_name = model_name
         self.model_path = os.path.join(MODEL_PATH, model_name)
         self._session = None
+        self._lock = threading.Lock()
 
     @classmethod
     def shared(cls) -> AIDetector:
@@ -194,7 +196,8 @@ class AIDetector:
 
         blob, scale, pad_x, pad_y = _letterbox(frame, input_size=INPUT_SIZE)
 
-        outputs = self._session.run(None, {"images": blob})[0]
+        with self._lock:
+            outputs = self._session.run(None, {"images": blob})[0]
 
         # YOLOv8 ONNX export: (1, 84, 8400) or (1, 84, num_anchors).
         if outputs.ndim != 3 or outputs.shape[1] != 84:

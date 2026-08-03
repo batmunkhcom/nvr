@@ -19,13 +19,21 @@ def _get_key() -> bytes:
 
 
 def decrypt_password_aes(ciphertext: str) -> str:
-    """Decrypt a camera password encrypted with encrypt_password_aes."""
+    """Decrypt a camera password encrypted with encrypt_password_aes.
+
+    Returns decrypted plaintext on success, or empty string on malformed
+    ciphertext / decryption failure. Callers should treat empty-string
+    passwords the same as missing credentials.
+    """
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-    raw = base64.b64decode(ciphertext)
-    nonce, ct = raw[:12], raw[12:]
-    cipher = AESGCM(_get_key())
-    return cipher.decrypt(nonce, ct, None).decode()
+    try:
+        raw = base64.b64decode(ciphertext)
+        nonce, ct = raw[:12], raw[12:]
+        cipher = AESGCM(_get_key())
+        return cipher.decrypt(nonce, ct, None).decode()
+    except Exception:
+        return ""
 
 
 def encrypt_password_aes(plaintext: str) -> str:

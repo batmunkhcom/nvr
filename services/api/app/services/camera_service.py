@@ -53,9 +53,10 @@ async def list_cameras(
     total = (await db.execute(count_query)).scalar() or 0
 
     sort_col = getattr(Camera, sort, Camera.name)
-    query = query.order_by(Camera.display_order.asc(), sort_col.asc())
     if order == "desc":
         query = query.order_by(Camera.display_order.asc(), sort_col.desc())
+    else:
+        query = query.order_by(Camera.display_order.asc(), sort_col.asc())
 
     result = await db.execute(query.offset(offset).limit(per_page))
     cameras = result.scalars().all()

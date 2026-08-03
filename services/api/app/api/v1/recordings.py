@@ -197,7 +197,9 @@ async def stream_recording(
         raise HTTPException(status_code=404, detail="Recording file not found on disk")
 
     file_size = os.path.getsize(file_path)
+    content_length = file_size
     start, end = _parse_range(range, file_size)
+    is_full_range = not range or (start == 0 and end - start + 1 >= file_size)
 
     ts = recording.start_time.strftime("%Y-%m-%d_%H%M%S") if recording.start_time else str(recording_id)[:8]
     filename = f"recording_{recording.camera_id}_{ts}.mp4" if hasattr(recording, "camera_id") else f"recording_{recording_id}.mp4"
@@ -221,14 +223,15 @@ async def stream_recording(
     if download:
         headers["Content-Disposition"] = f'attachment; filename="{filename}"'
 
-    if range:
+    if range and not is_full_range:
+        content_length = end - start + 1
         return StreamingResponse(
-            file_iterator(file_path, start, end - start + 1),
+            file_iterator(file_path, start, content_length),
             status_code=206,
             media_type="video/mp4",
             headers={
                  **headers,
-                "Content-Length": str(end - start + 1),
+                "Content-Length": str(content_length),
                 "Content-Range": f"bytes {start}-{end}/{file_size}",
             },
          )
@@ -236,7 +239,7 @@ async def stream_recording(
     return StreamingResponse(
         file_iterator(file_path, 0, file_size),
         media_type="video/mp4",
-        headers={**headers, "Content-Length": str(file_size)},
+        headers={**headers, "Content-Length": str(content_length)},
      )
 
 

@@ -246,6 +246,10 @@ class MotionRecorderController:
             self._sweep_task.cancel()
         for timer in self._stop_timers.values():
             timer.cancel()
+        for recorder in list(self.recorders.values()):
+            await recorder.stop()
+        self.recorders.clear()
+        self._last_active_ts.clear()
 
 
 async def motion_listener_loop(

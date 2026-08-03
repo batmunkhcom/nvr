@@ -44,7 +44,11 @@ export function useStreamPlayer({
   const fatalCountRef = useRef(0);
   const softRecoveriesRef = useRef(0);
   // Set when WebRTC fails once — subsequent retries go straight to HLS.
+  // Resets after 60s or on tab visibility change, so transient ICE failures
+  // do not permanently degrade to HLS.
   const rtcDisabledRef = useRef(false);
+  const rtcReenableTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const [state, setState] = useState<StreamState>("connecting");
   const [retrySec, setRetrySec] = useState(0);
@@ -61,6 +65,7 @@ export function useStreamPlayer({
   const clearTimers = useCallback(() => {
     if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
     if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
+    if (rtcReenableTimerRef.current) { clearTimeout(rtcReenableTimerRef.current); rtcReenableTimerRef.current = null; }
   }, []);
 
   const cleanupHls = useCallback(() => {
@@ -164,6 +169,24 @@ export function useStreamPlayer({
     scheduleRetry(delay);
   }, [scheduleRetry]);
 
+  /** Temporarily disable WebRTC and auto-re-enable after 60s. */
+  const disableRtc = useCallback(() => {
+    rtcDisabledRef.current = true;
+    if (rtcReenableTimerRef.current) clearTimeout(rtcReenableTimerRef.current);
+    rtcReenableTimerRef.current = setTimeout(() => {
+      rtcDisabledRef.current = false;
+      rtcReenableTimerRef.current = null;
+    }, 60_000);
+  }, []);
+
+  const reenableRtc = useCallback(() => {
+    rtcDisabledRef.current = false;
+    if (rtcReenableTimerRef.current) {
+      clearTimeout(rtcReenableTimerRef.current);
+      rtcReenableTimerRef.current = null;
+    }
+  }, []);
+
   // ── HLS (LL-HLS) playback ────────────────────────────────────────────────
 
   const initHls = useCallback((runId: number) => {
@@ -206,17 +229,22 @@ export function useStreamPlayer({
 
   const startHlsPolling = useCallback(async (runId: number) => {
     setState("loading");
+    if (abortRef.current) { abortRef.current.abort(); }
+    abortRef.current = new AbortController();
+    const { signal } = abortRef.current;
     await new Promise((r) => setTimeout(r, 600));
     for (let i = 0; i < pollAttempts; i++) {
-      if (!isCurrent(runId)) return;
+      if (!isCurrent(runId) || signal.aborted) return;
       try {
-        const resp = await fetch(hlsPath, { cache: "no-store" });
+        const resp = await fetch(hlsPath, { cache: "no-store", signal });
         if (resp.ok) {
           finalUrlRef.current = resp.url;
           if (isCurrent(runId)) initHls(runId);
           return;
         }
-      } catch { /* poll */ }
+      } catch (e: any) {
+        if (e?.name === "AbortError") return;
+      }
       await new Promise((r) => setTimeout(r, HLS_POLL_INTERVAL_MS));
     }
     if (isCurrent(runId)) scheduleRetry(retryIntervalMs);
@@ -345,7 +373,7 @@ export function useStreamPlayer({
       const ok = await startWebRtc(runId);
       if (!isCurrent(runId)) return;
       if (ok) return;
-      rtcDisabledRef.current = true;
+      disableRtc();
     }
 
     if (startFailed) {
@@ -390,7 +418,7 @@ export function useStreamPlayer({
         cleanupRtc();
         clearTimers();
       } else {
-        rtcDisabledRef.current = false;  // re-probe WebRTC on return
+        reenableRtc();  // re-probe WebRTC on return
         startStreamRef.current();
       }
     };

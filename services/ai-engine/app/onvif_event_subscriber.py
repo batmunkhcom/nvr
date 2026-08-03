@@ -64,8 +64,6 @@ class OnvifEventSubscriber:
             except Exception:
                 logger.warning("onvif_pull_failed", camera=self.camera_name, exc_info=True)
                 await asyncio.sleep(RETRY_DELAY)
-                await self._subscribe()
-                subscribed_at = time.time()
 
     async def _subscribe(self) -> None:
         body = _soap_envelope(
