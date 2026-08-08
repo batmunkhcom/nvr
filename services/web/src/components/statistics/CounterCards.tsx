@@ -8,7 +8,7 @@ const cards = [
   { icon: Tractor, label: "Livestock", key: "livestock" as const, color: "text-purple-400" },
 ];
 
-export default function CounterCards({ data }: { data: CounterSummary }) {
+export default function CounterCards({ data, periodLabel = "today" }: { data: CounterSummary; periodLabel?: string }) {
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
       {cards.map((card) => {
@@ -19,8 +19,8 @@ export default function CounterCards({ data }: { data: CounterSummary }) {
             <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
               <Icon size={14} className={card.color} /> {card.label}
             </div>
-            <div className="text-lg font-bold">{value}</div>
-            <div className="text-[10px] text-gray-500 mt-0.5">today</div>
+            <div className="text-lg font-bold">{value.toLocaleString()}</div>
+            <div className="text-[10px] text-gray-500 mt-0.5">{periodLabel}</div>
           </div>
         );
       })}

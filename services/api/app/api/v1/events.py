@@ -73,6 +73,20 @@ def _parse_iso_datetime(value: str | None, name: str) -> datetime | None:
         ) from exc
 
 
+@router.get("/daily")
+async def get_events_daily(
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    camera_id: uuid.UUID | None = None,
+    days: int = Query(7, ge=1, le=90),
+):
+    """Daily event/detection counts for charting (motion detections)."""
+    from ...services.event_service import get_event_daily
+
+    data = await get_event_daily(db, camera_id=camera_id, days=days)
+    return {"data": data}
+
+
 @router.get("/{event_id}")
 async def get_event_by_id(
     event_id: uuid.UUID,

@@ -16,6 +16,26 @@ export function useRecordings(filters?: Record<string, string>) {
   });
 }
 
+export interface RecordingDaily {
+  date: string;
+  segments: number;
+  size_bytes: number;
+  duration_seconds: number;
+}
+
+export function useRecordingDaily(days = 7, cameraId?: string) {
+  return useQuery({
+    queryKey: ["recordings", "daily", days, cameraId],
+    queryFn: async () => {
+      const params: Record<string, string | number> = { days };
+      if (cameraId) params.camera_id = cameraId;
+      const res = await apiClient.get("/recordings/daily", { params });
+      return (res.data?.data || []) as RecordingDaily[];
+    },
+    refetchInterval: 60_000,
+  });
+}
+
 export function useTimeline(cameraId: string, date: string) {
   return useQuery({
     queryKey: ["timeline", cameraId, date],

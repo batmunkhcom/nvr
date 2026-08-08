@@ -25,6 +25,27 @@ export interface CounterPerCamera {
   livestock?: number;
 }
 
+export interface CounterDaily {
+  date: string;
+  person: number;
+  vehicle: number;
+  animal: number;
+  livestock: number;
+}
+
+export function useCounterDaily(days = 7, cameraId?: string) {
+  return useQuery({
+    queryKey: ["counters", "daily", days, cameraId],
+    queryFn: async () => {
+      const params: Record<string, string | number> = { days };
+      if (cameraId) params.camera_id = cameraId;
+      const res = await apiClient.get("/counters/daily", { params });
+      return (res.data?.data || []) as CounterDaily[];
+    },
+    refetchInterval: 60_000,
+  });
+}
+
 export function useCounterSummary(cameraId?: string, days = 1) {
   return useQuery({
     queryKey: ["counters", "summary", cameraId, days],

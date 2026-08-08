@@ -5,12 +5,12 @@ from __future__ import annotations
 import asyncio
 import shutil
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import structlog
 from fastapi import HTTPException, status
 from nvr_common.quota import apply_disk_quota, directory_size_bytes
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.camera import Camera
@@ -545,6 +545,65 @@ async def get_storage_usage(db: AsyncSession) -> dict:
         "free_bytes": free,
         "backends": [_backend_to_dict(b) for b in active_backends],
     }
+
+
+async def get_recording_daily(
+    db: AsyncSession,
+    camera_id: uuid.UUID | None = None,
+    days: int = 7,
+) -> list[dict]:
+    """Daily recording stats (size, segments, duration) in the local timezone.
+
+    Zero-filled for the full requested range so charts stay continuous.
+    """
+    from datetime import time as dtime
+
+    from ..services.config_service import get_timezone, local_date
+
+    tz = await get_timezone(db)
+    today = local_date(tz)
+    start_local = datetime.combine(today - timedelta(days=days - 1), dtime.min, tzinfo=tz)
+
+    params: dict = {"start": start_local, "tz_name": str(tz)}
+    camera_clause = ""
+    if camera_id:
+        camera_clause = " AND camera_id = CAST(:camera_id AS uuid)"
+        params["camera_id"] = camera_id
+
+    result = await db.execute(
+        text(f"""
+            SELECT (start_time AT TIME ZONE :tz_name)::date AS d,
+                   COUNT(*)::int AS segments,
+                   COALESCE(SUM(file_size_bytes), 0)::bigint AS size_bytes,
+                   COALESCE(SUM(duration_seconds), 0)::float AS duration_seconds
+            FROM recordings
+            WHERE start_time >= :start{camera_clause}
+            GROUP BY d
+            ORDER BY d
+        """),
+        params,
+    )
+    by_date: dict[date, dict] = {}
+    for row in result.fetchall():
+        by_date[row[0]] = {
+            "segments": row[1],
+            "size_bytes": row[2],
+            "duration_seconds": row[3],
+        }
+
+    series = []
+    for i in range(days):
+        d = (today - timedelta(days=days - 1 - i)).isoformat()
+        row = by_date.get(date.fromisoformat(d), {})
+        series.append(
+            {
+                "date": d,
+                "segments": row.get("segments", 0),
+                "size_bytes": row.get("size_bytes", 0),
+                "duration_seconds": row.get("duration_seconds", 0),
+            }
+        )
+    return series
 
 
 async def get_24h_write_rate(db: AsyncSession) -> int:

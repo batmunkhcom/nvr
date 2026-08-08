@@ -7,6 +7,25 @@ export interface EventsPage {
   metadata: { page: number; per_page: number; total: number };
 }
 
+export interface EventDaily {
+  date: string;
+  detections: number;
+  acknowledged: number;
+}
+
+export function useEventDaily(days = 7, cameraId?: string) {
+  return useQuery({
+    queryKey: ["events", "daily", days, cameraId],
+    queryFn: async () => {
+      const params: Record<string, string | number> = { days };
+      if (cameraId) params.camera_id = cameraId;
+      const res = await apiClient.get("/events/daily", { params });
+      return (res.data?.data || []) as EventDaily[];
+    },
+    refetchInterval: 60_000,
+  });
+}
+
 export function useEvents(filters?: Record<string, string | string[]>) {
   return useQuery({
     queryKey: ["events", filters],

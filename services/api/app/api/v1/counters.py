@@ -12,11 +12,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.database import get_db
 from ...middleware.auth import get_current_user
-from ...services.counter_service import get_counter_hourly, get_counter_summary, get_counter_per_camera
+from ...services.counter_service import (
+    get_counter_daily,
+    get_counter_hourly,
+    get_counter_per_camera,
+    get_counter_summary,
+)
 
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/api/v1/counters", tags=["counters"])
+
+
+@router.get("/daily")
+async def counter_daily(
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    camera_id: uuid.UUID | None = Query(None),
+    days: int = Query(7, ge=1, le=90),
+):
+    data = await get_counter_daily(db, str(camera_id) if camera_id else None, days)
+    return {"data": data}
 
 
 @router.get("/summary")

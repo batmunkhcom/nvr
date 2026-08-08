@@ -19,6 +19,7 @@ from ...services.recording_service import (
     bulk_delete_recordings,
     delete_recording,
     get_recording,
+    get_recording_daily,
     get_recording_stats,
     get_timeline_segments,
     list_recordings,
@@ -48,6 +49,18 @@ async def get_recordings(
         from_time=from_time,
         to_time=to_time,
     )
+
+
+@router.get("/daily")
+async def get_recordings_daily(
+    current_user: Annotated[dict, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    camera_id: uuid.UUID | None = None,
+    days: int = Query(7, ge=1, le=90),
+):
+    """Daily recording stats (segments, size, duration) for charting."""
+    data = await get_recording_daily(db, camera_id=camera_id, days=days)
+    return {"data": data}
 
 
 @router.get("/timeline")

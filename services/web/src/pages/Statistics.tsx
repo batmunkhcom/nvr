@@ -1,9 +1,26 @@
 import { useState } from "react";
 import { useCameras } from "../hooks/useCameras";
-import { useCounterSummary, useCounterHourly, useCounterPerCamera } from "../hooks/useCounters";
+import {
+  useCounterSummary,
+  useCounterDaily,
+  useCounterHourly,
+  useCounterPerCamera,
+} from "../hooks/useCounters";
+import { useRecordingDaily } from "../hooks/useRecordings";
+import { useEventDaily } from "../hooks/useEvents";
 import CounterCards from "../components/statistics/CounterCards";
+import ObjectsLineChart from "../components/statistics/ObjectsLineChart";
+import ObjectPieChart from "../components/statistics/ObjectPieChart";
+import RecordingSizeChart from "../components/statistics/RecordingSizeChart";
+import MotionDetectionsChart from "../components/statistics/MotionDetectionsChart";
+import MotionSegmentsChart from "../components/statistics/MotionSegmentsChart";
 import type { CounterHourly, CounterPerCamera } from "../hooks/useCounters";
 import { PersonStanding, Car, PawPrint, Tractor, BarChart3, Camera } from "lucide-react";
+
+const PERIOD_OPTIONS = [1, 3, 7, 14, 30, 60, 90];
+
+const selectClass =
+  "px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-sm text-gray-300 focus:outline-none focus:border-blue-500";
 
 function HourlyTable({ data }: { data: CounterHourly[] }) {
   if (!data.length) return <p className="text-sm text-gray-500">No data for this date.</p>;
@@ -78,14 +95,19 @@ export default function StatisticsPage() {
   const [cameraFilter, setCameraFilter] = useState("");
   const [days, setDays] = useState(7);
   const todayISO = new Date().toISOString().slice(0, 10);
+  const cameraId = cameraFilter || undefined;
 
   const { data: cameras } = useCameras();
-  const { data: summary } = useCounterSummary(cameraFilter || undefined, days);
+  const { data: summary } = useCounterSummary(cameraId, days);
+  const { data: daily } = useCounterDaily(days, cameraId);
+  const { data: recDaily } = useRecordingDaily(days, cameraId);
+  const { data: eventDaily } = useEventDaily(days, cameraId);
   const { data: hourly } = useCounterHourly(cameraFilter || "", todayISO);
   const { data: perCamera } = useCounterPerCamera(days);
 
   const hasHourly = cameraFilter && hourly && hourly.length > 0;
   const isAllCameras = !cameraFilter;
+  const periodLabel = days === 1 ? "today" : `last ${days} days`;
 
   const totalObjects = summary
     ? (summary.person ?? 0) + (summary.vehicle ?? 0) + (summary.animal ?? 0) + (summary.livestock ?? 0)
@@ -93,35 +115,37 @@ export default function StatisticsPage() {
 
   return (
     <div className="page-enter">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold">Object Statistics</h1>
-      </div>
-
-      <div className="flex items-center gap-3 mb-6">
-        <select
-          value={cameraFilter}
-          onChange={(e) => setCameraFilter(e.target.value)}
-          className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-sm text-gray-300"
-        >
-          <option value="">All Cameras</option>
-          {(cameras || []).map((c) => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
-        </select>
-        <select
-          value={days}
-          onChange={(e) => setDays(Number(e.target.value))}
-          className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-sm text-gray-300"
-        >
-          <option value={1}>Today</option>
-          <option value={7}>Last 7 days</option>
-          <option value={30}>Last 30 days</option>
-        </select>
-        {summary && (
-          <span className="text-xs text-gray-500 ml-auto">
-            {totalObjects.toLocaleString()} objects &middot; {days === 1 ? "today" : `last ${days} days`}
-          </span>
-        )}
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <h1 className="text-2xl font-bold">Statistics</h1>
+        <div className="flex items-center gap-2">
+          <select
+            value={cameraFilter}
+            onChange={(e) => setCameraFilter(e.target.value)}
+            className={selectClass}
+          >
+            <option value="">All Cameras</option>
+            {(cameras || []).map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          <select
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            className={selectClass}
+            title="Reporting period"
+          >
+            {PERIOD_OPTIONS.map((d) => (
+              <option key={d} value={d}>
+                {d === 1 ? "Today" : `Last ${d} days`}
+              </option>
+            ))}
+          </select>
+          {summary && (
+            <span className="text-xs text-gray-500">
+              {totalObjects.toLocaleString()} objects · {periodLabel}
+            </span>
+          )}
+        </div>
       </div>
 
       {summary && (
@@ -131,13 +155,21 @@ export default function StatisticsPage() {
             <span className="text-sm font-medium text-gray-300">
               {isAllCameras ? "All Cameras" : (cameras || []).find(c => c.id === cameraFilter)?.name || "Camera"}
             </span>
-            <span className="text-xs text-gray-500">
-              {days === 1 ? "today" : `${days}-day summary`}
-            </span>
+            <span className="text-xs text-gray-500">{periodLabel}</span>
           </div>
-          <CounterCards data={summary} />
+          <CounterCards data={summary} periodLabel={periodLabel} />
         </>
       )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
+        <div className="lg:col-span-2">
+          <ObjectsLineChart data={daily || []} days={days} />
+        </div>
+        <ObjectPieChart data={daily || []} days={days} />
+        <RecordingSizeChart data={recDaily || []} days={days} />
+        <MotionDetectionsChart data={eventDaily || []} days={days} />
+        <MotionSegmentsChart data={recDaily || []} days={days} />
+      </div>
 
       {isAllCameras && perCamera && perCamera.length > 0 && (
         <div className="mt-6">

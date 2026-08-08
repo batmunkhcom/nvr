@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime, time, timedelta
 import uuid
 
 import structlog
@@ -11,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.event import Event
 from ..models.event_rule import EventRule
+
+from .config_service import get_timezone, local_date
 
 logger = structlog.get_logger()
 
@@ -120,6 +123,52 @@ async def list_events(
         "data": [_event_to_dict(e) for e in events],
         "metadata": {"page": page, "per_page": per_page, "total": total},
     }
+
+
+async def get_event_daily(
+    db: AsyncSession,
+    camera_id: uuid.UUID | None = None,
+    days: int = 7,
+) -> list[dict]:
+    """Daily event/detection counts in the local timezone, zero-filled."""
+    tz = await get_timezone(db)
+    today = local_date(tz)
+    start_local = datetime.combine(today - timedelta(days=days - 1), time.min, tzinfo=tz)
+
+    params: dict = {"start": start_local, "tz_name": str(tz)}
+    camera_clause = ""
+    if camera_id:
+        camera_clause = " AND camera_id = CAST(:camera_id AS uuid)"
+        params["camera_id"] = camera_id
+
+    result = await db.execute(
+        text(f"""
+            SELECT (created_at AT TIME ZONE :tz_name)::date AS d,
+                   COUNT(*)::int AS detections,
+                   COUNT(*) FILTER (WHERE is_acknowledged)::int AS acknowledged
+            FROM events
+            WHERE created_at >= :start{camera_clause}
+            GROUP BY d
+            ORDER BY d
+        """),
+        params,
+    )
+    by_date: dict[date, dict] = {}
+    for row in result.fetchall():
+        by_date[row[0]] = {"detections": row[1], "acknowledged": row[2]}
+
+    series = []
+    for i in range(days):
+        d = (today - timedelta(days=days - 1 - i)).isoformat()
+        row = by_date.get(date.fromisoformat(d), {})
+        series.append(
+            {
+                "date": d,
+                "detections": row.get("detections", 0),
+                "acknowledged": row.get("acknowledged", 0),
+            }
+        )
+    return series
 
 
 async def get_event(event_id: uuid.UUID, db: AsyncSession) -> Event:

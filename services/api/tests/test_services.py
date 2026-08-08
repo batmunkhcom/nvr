@@ -36,6 +36,9 @@ class _ExecResult:
     def scalar_one_or_none(self):
         return self._value
 
+    def fetchall(self):
+        return self._items
+
     def scalars(self):
         return self
 
@@ -78,6 +81,12 @@ def _result_with_tuple(tup):
 def _result_with_scalar(val):
     r = _ExecResult()
     r._scalar_value = val
+    return r
+
+
+def _result_with_fetchall(items):
+    r = _ExecResult()
+    r._items = items
     return r
 
 
@@ -503,3 +512,104 @@ class TestEventObjectFilters:
         )
         assert result["data"] == []
         assert result["metadata"]["total"] == 0
+
+
+class TestDailySeries:
+    """Daily time-series aggregation for the statistics charts."""
+
+    from datetime import date
+
+    FIXED_TODAY = date(2026, 8, 9)
+
+    @pytest.fixture
+    def fixed_tz(self, monkeypatch):
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo("Asia/Ulaanbaatar")
+        monkeypatch.setattr("app.services.config_service.get_timezone", _AsyncReturn(tz))
+        monkeypatch.setattr("app.services.config_service.local_date", lambda tz: self.FIXED_TODAY)
+        return tz
+
+    @pytest.mark.anyio
+    async def test_counter_daily_zero_fills(self, mock_db, fixed_tz, monkeypatch):
+        from app.services.counter_service import get_counter_daily
+
+        monkeypatch.setattr("app.services.counter_service.get_timezone", _AsyncReturn(fixed_tz))
+        monkeypatch.setattr(
+            "app.services.counter_service.local_date", lambda tz: self.FIXED_TODAY
+        )
+        mock_db.execute.return_value = _result_with_fetchall(
+            [(self.FIXED_TODAY, "person", 10), (self.FIXED_TODAY, "vehicle", 5)]
+        )
+        series = await get_counter_daily(mock_db, days=3)
+        assert len(series) == 3
+        assert series[-1] == {
+            "date": "2026-08-09",
+            "person": 10,
+            "vehicle": 5,
+            "animal": 0,
+            "livestock": 0,
+        }
+        assert series[0]["person"] == 0  # zero-filled day
+
+    @pytest.mark.anyio
+    async def test_counter_daily_camera_filter(self, mock_db, fixed_tz, monkeypatch):
+        from app.services.counter_service import get_counter_daily
+
+        monkeypatch.setattr("app.services.counter_service.get_timezone", _AsyncReturn(fixed_tz))
+        monkeypatch.setattr(
+            "app.services.counter_service.local_date", lambda tz: self.FIXED_TODAY
+        )
+        mock_db.execute.return_value = _result_with_fetchall([])
+        series = await get_counter_daily(mock_db, camera_id="abc", days=1)
+        assert len(series) == 1
+        assert series[0]["date"] == "2026-08-09"
+
+    @pytest.mark.anyio
+    async def test_recording_daily(self, mock_db, fixed_tz, monkeypatch):
+        from app.services.recording_service import get_recording_daily
+
+        monkeypatch.setattr("app.services.config_service.get_timezone", _AsyncReturn(fixed_tz))
+        monkeypatch.setattr(
+            "app.services.config_service.local_date", lambda tz: self.FIXED_TODAY
+        )
+        mock_db.execute.return_value = _result_with_fetchall(
+            [(self.FIXED_TODAY, 12, 1048576 * 100, 3600.0)]
+        )
+        series = await get_recording_daily(mock_db, days=2)
+        assert len(series) == 2
+        assert series[-1] == {
+            "date": "2026-08-09",
+            "segments": 12,
+            "size_bytes": 104857600,
+            "duration_seconds": 3600.0,
+        }
+        assert series[0]["segments"] == 0
+
+    @pytest.mark.anyio
+    async def test_event_daily(self, mock_db, fixed_tz, monkeypatch):
+        from app.services.event_service import get_event_daily
+
+        monkeypatch.setattr("app.services.event_service.get_timezone", _AsyncReturn(fixed_tz))
+        monkeypatch.setattr("app.services.event_service.local_date", lambda tz: self.FIXED_TODAY)
+        mock_db.execute.return_value = _result_with_fetchall(
+            [(self.FIXED_TODAY, 42, 3)]
+        )
+        series = await get_event_daily(mock_db, days=3)
+        assert len(series) == 3
+        assert series[-1] == {"date": "2026-08-09", "detections": 42, "acknowledged": 3}
+        assert series[0]["detections"] == 0
+
+
+class _AsyncReturn:
+    """Wraps a plain value so awaiting the call result returns the value."""
+
+    def __init__(self, value):
+        self._value = value
+
+    def __call__(self, *args, **kwargs):
+        return self
+
+    def __await__(self):
+        yield
+        return self._value
