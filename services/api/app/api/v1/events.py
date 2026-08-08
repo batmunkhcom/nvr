@@ -33,7 +33,7 @@ async def get_events(
     current_user: Annotated[dict, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     page: int = Query(1, ge=1),
-    per_page: int = Query(25, ge=1, le=100),
+    per_page: int = Query(10, ge=0, le=1000),
     camera_id: uuid.UUID | None = None,
     event_type: str | None = None,
     severity: str | None = None,

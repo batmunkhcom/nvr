@@ -126,11 +126,21 @@ function eventTitle(event: NvrEvent): string {
   return `${parts.join(", ")} detected`;
 }
 
+const PAGE_SIZE_OPTIONS = [
+  { value: 10, label: "10 per page" },
+  { value: 25, label: "25 per page" },
+  { value: 50, label: "50 per page" },
+  { value: 100, label: "100 per page" },
+  { value: 200, label: "200 per page" },
+  { value: 0, label: "All" },
+];
+
 export default function Events() {
   const [cameraFilter, setCameraFilter] = useState("");
   const [selectedObjects, setSelectedObjects] = useState<string[]>([]);
   const [minObjects, setMinObjects] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [zoomedEvent, setZoomedEvent] = useState<NvrEvent | null>(null);
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [cleanupBefore, setCleanupBefore] = useState("");
@@ -138,7 +148,7 @@ export default function Events() {
   const [cleanupPreview, setCleanupPreview] = useState<{event_count: number; snapshot_count: number} | null>(null);
   const [cleanupLoading, setCleanupLoading] = useState(false);
   const [cleanupError, setCleanupError] = useState("");
-  const filters: Record<string, string | string[]> = { page: String(page) };
+  const filters: Record<string, string | string[]> = { page: String(page), per_page: String(pageSize) };
   if (cameraFilter) filters.camera_id = cameraFilter;
   const objectCategories = selectedObjects.filter(
     (v) => OBJECT_FILTER_OPTIONS.find((o) => o.value === v)?.kind === "category"
@@ -156,7 +166,7 @@ export default function Events() {
 
   const events = eventsPage?.data || [];
   const meta = eventsPage?.metadata;
-  const totalPages = meta ? Math.ceil(meta.total / meta.per_page) : 1;
+  const totalPages = pageSize === 0 ? 1 : meta ? Math.ceil(meta.total / meta.per_page) : 1;
 
   const cameraNames = useMemo(() => {
     const map: Record<string, string> = {};
@@ -225,6 +235,16 @@ export default function Events() {
             <option value="">All Cameras</option>
             {(cameras || []).map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          <select
+            value={pageSize}
+            onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+            className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-sm text-gray-300"
+            title="Events per page"
+          >
+            {PAGE_SIZE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
           <span className="text-sm text-gray-400">{meta?.total || 0} events</span>

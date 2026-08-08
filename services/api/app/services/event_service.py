@@ -67,7 +67,7 @@ def _object_count_clause(classes: list[str] | None) -> str:
 async def list_events(
     db: AsyncSession,
     page: int = 1,
-    per_page: int = 25,
+    per_page: int = 10,
     camera_id: uuid.UUID | None = None,
     event_type: str | None = None,
     severity: str | None = None,
@@ -109,8 +109,10 @@ async def list_events(
     count_query = select(func.count()).select_from(query.subquery())
     total = (await db.execute(count_query)).scalar() or 0
 
+    # per_page=0 means "all" — no LIMIT clause.
+    limit = per_page if per_page and per_page > 0 else None
     result = await db.execute(
-        query.order_by(Event.created_at.desc()).offset(offset).limit(per_page)
+        query.order_by(Event.created_at.desc()).offset(offset).limit(limit)
     )
     events = result.scalars().all()
 
