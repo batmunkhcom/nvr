@@ -3,6 +3,10 @@ import axios from "axios";
 const apiClient = axios.create({
   baseURL: "/api/v1",
   timeout: 30_000,
+  // Serialize arrays as repeated keys (?objects=car&objects=person), the
+  // format FastAPI list[str] params expect. Default axios emits ?objects[]=...
+  // which FastAPI silently ignores (unfiltered results).
+  paramsSerializer: { indexes: null },
 });
 
 apiClient.interceptors.request.use((config) => {

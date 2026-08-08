@@ -36,10 +36,13 @@ interface ObjectFilterOption {
   icon?: typeof Car;
 }
 
-const OBJECT_FILTER_OPTIONS: ObjectFilterOption[] = [
+const CATEGORY_OPTIONS: ObjectFilterOption[] = [
   { value: "person", label: "Person", kind: "category", icon: PersonStanding },
   { value: "vehicle", label: "Vehicle", kind: "category", icon: Car },
   { value: "animal", label: "Animal", kind: "category", icon: Dog },
+];
+
+const CLASS_OPTIONS: ObjectFilterOption[] = [
   { value: "car", label: "Car", kind: "class", icon: Car },
   { value: "truck", label: "Truck", kind: "class", icon: Car },
   { value: "bus", label: "Bus", kind: "class", icon: Car },
@@ -49,6 +52,22 @@ const OBJECT_FILTER_OPTIONS: ObjectFilterOption[] = [
   { value: "cat", label: "Cat", kind: "class", icon: Dog },
   { value: "bird", label: "Bird", kind: "class", icon: Dog },
 ];
+
+const SEVERITY_OPTIONS = ["critical", "warning", "info"];
+
+const EVENT_TYPE_OPTIONS = ["object_detected", "motion_detected"];
+
+const ACK_OPTIONS = [
+  { value: "all", label: "All states" },
+  { value: "unacknowledged", label: "Unacknowledged" },
+  { value: "acknowledged", label: "Acknowledged" },
+];
+
+const selectClass =
+  "px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-sm text-gray-300 focus:outline-none focus:border-blue-500";
+
+const inputClass =
+  "px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-sm text-gray-300 focus:outline-none focus:border-blue-500";
 
 function eventSnapshotUrl(eventId: string, retry = 0): string {
   const token = localStorage.getItem("access_token") || "";
@@ -139,6 +158,11 @@ export default function Events() {
   const [cameraFilter, setCameraFilter] = useState("");
   const [selectedObjects, setSelectedObjects] = useState<string[]>([]);
   const [minObjects, setMinObjects] = useState("");
+  const [severityFilter, setSeverityFilter] = useState("");
+  const [eventTypeFilter, setEventTypeFilter] = useState("");
+  const [ackFilter, setAckFilter] = useState("all");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [zoomedEvent, setZoomedEvent] = useState<NvrEvent | null>(null);
@@ -151,14 +175,39 @@ export default function Events() {
   const filters: Record<string, string | string[]> = { page: String(page), per_page: String(pageSize) };
   if (cameraFilter) filters.camera_id = cameraFilter;
   const objectCategories = selectedObjects.filter(
-    (v) => OBJECT_FILTER_OPTIONS.find((o) => o.value === v)?.kind === "category"
+    (v) => CATEGORY_OPTIONS.find((o) => o.value === v)?.kind === "category"
   );
   const objectClasses = selectedObjects.filter(
-    (v) => OBJECT_FILTER_OPTIONS.find((o) => o.value === v)?.kind === "class"
+    (v) => CLASS_OPTIONS.find((o) => o.value === v)?.kind === "class"
   );
   if (objectCategories.length) filters.object_categories = objectCategories;
   if (objectClasses.length) filters.objects = objectClasses;
   if (minObjects) filters.min_objects = minObjects;
+  if (severityFilter) filters.severity = severityFilter;
+  if (eventTypeFilter) filters.event_type = eventTypeFilter;
+  if (ackFilter === "unacknowledged") filters.acknowledged = "false";
+  if (ackFilter === "acknowledged") filters.acknowledged = "true";
+  if (fromDate) filters.from_time = `${fromDate}T00:00:00`;
+  if (toDate) filters.to_time = `${toDate}T23:59:59`;
+
+  const toggleObjectFilter = useCallback((value: string) => {
+    setSelectedObjects((prev) =>
+      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]
+    );
+    setPage(1);
+  }, []);
+
+  const resetFilters = useCallback(() => {
+    setCameraFilter("");
+    setSelectedObjects([]);
+    setMinObjects("");
+    setSeverityFilter("");
+    setEventTypeFilter("");
+    setAckFilter("all");
+    setFromDate("");
+    setToDate("");
+    setPage(1);
+  }, []);
 
   const { data: eventsPage, isLoading } = useEvents(filters);
   const { data: cameras } = useCameras();
@@ -167,6 +216,9 @@ export default function Events() {
   const events = eventsPage?.data || [];
   const meta = eventsPage?.metadata;
   const totalPages = pageSize === 0 ? 1 : meta ? Math.ceil(meta.total / meta.per_page) : 1;
+  const isFiltered =
+    selectedObjects.length > 0 || !!minObjects || !!severityFilter || !!eventTypeFilter ||
+    ackFilter !== "all" || !!fromDate || !!toDate || !!cameraFilter;
 
   const cameraNames = useMemo(() => {
     const map: Record<string, string> = {};
@@ -259,21 +311,46 @@ export default function Events() {
 
       {/* Object filters */}
       <div className="mb-4 space-y-2">
-        <div className="flex flex-wrap gap-2">
-          {OBJECT_FILTER_OPTIONS.map((opt) => {
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-gray-500 uppercase tracking-wide">Type</span>
+          <button
+            onClick={() => { setSelectedObjects([]); setPage(1); }}
+            className={`inline-flex items-center gap-1 px-3 py-1.5 rounded text-xs border transition-colors ${
+              selectedObjects.length === 0
+                ? "bg-blue-600 border-blue-500 text-white"
+                : "bg-gray-900 border-gray-700 text-gray-400 hover:border-gray-500"
+            }`}
+          >
+            <Package size={12} /> All
+          </button>
+          {CATEGORY_OPTIONS.map((opt) => {
             const active = selectedObjects.includes(opt.value);
             const Icon = opt.icon || Package;
             return (
               <button
                 key={opt.value}
-                onClick={() => {
-                  setSelectedObjects((prev) =>
-                    prev.includes(opt.value)
-                      ? prev.filter((v) => v !== opt.value)
-                      : [...prev, opt.value]
-                  );
-                  setPage(1);
-                }}
+                onClick={() => toggleObjectFilter(opt.value)}
+                className={`inline-flex items-center gap-1 px-3 py-1.5 rounded text-xs border transition-colors ${
+                  active
+                    ? "bg-blue-600 border-blue-500 text-white"
+                    : "bg-gray-900 border-gray-700 text-gray-400 hover:border-gray-500"
+                }`}
+              >
+                <Icon size={12} />
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-gray-500 uppercase tracking-wide">Class</span>
+          {CLASS_OPTIONS.map((opt) => {
+            const active = selectedObjects.includes(opt.value);
+            const Icon = opt.icon || Package;
+            return (
+              <button
+                key={opt.value}
+                onClick={() => toggleObjectFilter(opt.value)}
                 className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs border transition-colors ${
                   active
                     ? "bg-blue-600 border-blue-500 text-white"
@@ -286,29 +363,37 @@ export default function Events() {
             );
           })}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-gray-500 uppercase tracking-wide">Filter</span>
+          <select value={severityFilter} onChange={(e) => { setSeverityFilter(e.target.value); setPage(1); }} className={selectClass}>
+            <option value="">All severities</option>
+            {SEVERITY_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <select value={eventTypeFilter} onChange={(e) => { setEventTypeFilter(e.target.value); setPage(1); }} className={selectClass}>
+            <option value="">All event types</option>
+            {EVENT_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t.replace(/_/g, " ")}</option>)}
+          </select>
+          <select value={ackFilter} onChange={(e) => { setAckFilter(e.target.value); setPage(1); }} className={selectClass}>
+            {ACK_OPTIONS.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+          </select>
+          <input type="date" value={fromDate} onChange={(e) => { setFromDate(e.target.value); setPage(1); }} className={inputClass} title="From date" />
+          <span className="text-xs text-gray-600">to</span>
+          <input type="date" value={toDate} onChange={(e) => { setToDate(e.target.value); setPage(1); }} className={inputClass} title="To date" />
           <label className="text-xs text-gray-500">Min objects</label>
           <input
             type="number"
             min="1"
             value={minObjects}
-            onChange={(e) => {
-              setMinObjects(e.target.value);
-              setPage(1);
-            }}
+            onChange={(e) => { setMinObjects(e.target.value); setPage(1); }}
             placeholder="e.g. 2"
             className="w-20 px-2 py-1 bg-gray-900 border border-gray-700 rounded text-xs text-gray-300"
           />
-          {(selectedObjects.length > 0 || minObjects) && (
+          {(selectedObjects.length > 0 || minObjects || severityFilter || eventTypeFilter || ackFilter !== "all" || fromDate || toDate || cameraFilter) && (
             <button
-              onClick={() => {
-                setSelectedObjects([]);
-                setMinObjects("");
-                setPage(1);
-              }}
+              onClick={resetFilters}
               className="text-xs text-blue-400 hover:text-blue-300"
             >
-              Clear filters
+              Clear all
             </button>
           )}
         </div>
@@ -317,8 +402,12 @@ export default function Events() {
       {!events.length ? (
         <EmptyState
           icon={<Bell size={28} />}
-          title="No events detected yet"
-          description="AI-detected objects (cars, people) and motion events will appear here with snapshots."
+          title={isFiltered ? "No matching events" : "No events detected yet"}
+          description={
+            isFiltered
+              ? "No events match the current filters. Try widening the time range or clearing some filters."
+              : "AI-detected objects (cars, people) and motion events will appear here with snapshots."
+          }
         />
       ) : (
         <>
@@ -345,10 +434,17 @@ export default function Events() {
                       <p className="text-sm font-medium">{eventTitle(event)}</p>
                        {objects.map((obj) => {
                           const ObjIcon = objectIcons[obj.class] || Package;
+                          const active = selectedObjects.includes(obj.class);
                           return (
-                           <span
+                           <button
                              key={obj.track_id || obj.class}
-                             className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-blue-900/50 text-blue-300 rounded text-[11px]"
+                             onClick={() => toggleObjectFilter(obj.class)}
+                             title={`Filter by ${obj.class}`}
+                             className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border transition-colors ${
+                               active
+                                 ? "bg-blue-600/70 text-white border-blue-500"
+                                 : "bg-blue-900/50 text-blue-300 border-transparent hover:bg-blue-800/70 hover:border-blue-500"
+                             }`}
                            >
                              <ObjIcon size={11} /> {obj.class}
                              {obj.track_id && (
@@ -356,7 +452,7 @@ export default function Events() {
                                  #{obj.track_id}
                                </span>
                              )}
-                           </span>
+                           </button>
                          );
                        })}
                     </div>

@@ -2,7 +2,7 @@
 
 import os
 import uuid
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated
 
 import structlog
@@ -52,12 +52,25 @@ async def get_events(
         event_type=event_type,
         severity=severity,
         acknowledged=acknowledged,
-        from_time=from_time,
-        to_time=to_time,
+        from_time=_parse_iso_datetime(from_time, "from_time"),
+        to_time=_parse_iso_datetime(to_time, "to_time"),
         object_classes=objects,
         object_categories=object_categories,
         min_objects=min_objects,
     )
+
+
+def _parse_iso_datetime(value: str | None, name: str) -> datetime | None:
+    """Parse an ISO-8601 datetime query param into a datetime for DB comparison."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid {name}. Use ISO format e.g. 2026-08-01T00:00:00",
+        ) from exc
 
 
 @router.get("/{event_id}")
