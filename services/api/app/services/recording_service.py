@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -18,6 +19,26 @@ from ..models.storage_backend import StorageBackend
 from ..models.storage_tier import StorageTier
 
 logger = structlog.get_logger()
+
+DISK_STAT_TIMEOUT_S = 5.0
+
+
+async def _safe_disk_usage(mount_point: str) -> tuple[int, int, int]:
+    """statfs a mount point without blocking the event loop.
+
+    ``shutil.disk_usage`` is a blocking syscall — on a stalled/unreachable
+    network mount (NFS, SMB, FUSE) it can hang for minutes. It must run in a
+    worker thread with a hard timeout so one dead backend can never freeze
+    the whole API. Raises OSError when the mount is inaccessible or too slow.
+    """
+    try:
+        usage = await asyncio.wait_for(
+            asyncio.to_thread(shutil.disk_usage, mount_point),
+            timeout=DISK_STAT_TIMEOUT_S,
+        )
+        return usage.total, usage.used, usage.free
+    except (asyncio.TimeoutError, TimeoutError) as exc:
+        raise OSError(f"disk_usage timed out for {mount_point}") from exc
 
 
 async def list_recordings(
@@ -165,8 +186,6 @@ async def _refresh_backend_disk_stats(db: AsyncSession) -> None:
     with shutil. The function is best-effort: inaccessible mounts are left
     unchanged (health checks surface them separately).
     """
-    import shutil
-
     result = await db.execute(select(StorageBackend))
     for backend in result.scalars().all():
         if backend.backend_type not in ("local", "nfs", "smb"):
@@ -175,14 +194,17 @@ async def _refresh_backend_disk_stats(db: AsyncSession) -> None:
         if not mp:
             continue
         try:
-            usage = shutil.disk_usage(mp)
+            usage_total, usage_used, usage_free = await _safe_disk_usage(mp)
             quota = (backend.config or {}).get("quota_bytes")
             if quota and quota > 0:
-                actual_used = await asyncio.to_thread(directory_size_bytes, mp)
+                actual_used = await asyncio.wait_for(
+                    asyncio.to_thread(directory_size_bytes, mp),
+                    timeout=DISK_STAT_TIMEOUT_S,
+                )
             else:
-                actual_used = usage.used
+                actual_used = usage_used
             total, _used, free = apply_disk_quota(
-                usage.total, actual_used, usage.free, quota
+                usage_total, actual_used, usage_free, quota
             )
             backend.total_bytes = total
             backend.available_bytes = free
@@ -483,14 +505,17 @@ async def get_storage_usage(db: AsyncSession) -> dict:
         be_used = max(0, be_total - be_free)
         if be_total == 0:
             try:
-                usage = shutil.disk_usage(mp)
+                usage_total, usage_used, usage_free = await _safe_disk_usage(mp)
                 quota = (backend.config or {}).get("quota_bytes")
                 if quota and quota > 0:
-                    actual_used = await asyncio.to_thread(directory_size_bytes, mp)
+                    actual_used = await asyncio.wait_for(
+                        asyncio.to_thread(directory_size_bytes, mp),
+                        timeout=DISK_STAT_TIMEOUT_S,
+                    )
                 else:
-                    actual_used = usage.used
+                    actual_used = usage_used
                 be_total, be_used, be_free = apply_disk_quota(
-                    usage.total, actual_used, usage.free, quota
+                    usage_total, actual_used, usage_free, quota
                 )
             except OSError:
                 logger.warning(
@@ -507,10 +532,10 @@ async def get_storage_usage(db: AsyncSession) -> dict:
     # Fallback: if no filesystem backends exist, use the default path.
     if total == 0:
         try:
-            usage = shutil.disk_usage(default_path)
-            total = usage.total
-            used = usage.used
-            free = usage.free
+            usage_total, usage_used, usage_free = await _safe_disk_usage(default_path)
+            total = usage_total
+            used = usage_used
+            free = usage_free
         except OSError:
             pass
 
